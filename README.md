@@ -8,8 +8,10 @@ This has happened before, but is now holding up CI. We eventually intend to
 support other architectures as well (ARMv7 and ARM64 through WindowsOnArm), but
 this will come later as this is needed for LegacyUpdate 1.10.
 
-# How?
+## Versions used
 
-# Versions used
+GCC 14.2.0
+Binutils 2.43.1
+MinGW 12.0.0
 
-# Build Process
+## Build Process
