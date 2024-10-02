@@ -11,8 +11,16 @@ this will come later as this is needed for LegacyUpdate 1.10.
 ## Versions used
 
 GCC 14.2.0
+
 Binutils 2.43.1
+
 MinGW 12.0.0
+
+GMP 6.3.0
+
+MPFR 4.2.1
+
+MPC 1.3.1
 
 ## Build Process
 
