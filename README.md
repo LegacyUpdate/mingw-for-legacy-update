@@ -45,3 +45,9 @@ wget  https://ftp.gnu.org/gnu/mpfr/mpfr-4.2.1.tar.xz
 wget  https://ftp.gnu.org/gnu/gmp/gmp-6.3.0.tar.xz
 wget  https://ftp.gnu.org/gnu/mpc/mpc-1.3.1.tar.gz
 ```
+
+# Stage 3: Install the headers for the x86 version.
+
+```
+sh ../scripts/001-headers-install-x86.sh
+```
