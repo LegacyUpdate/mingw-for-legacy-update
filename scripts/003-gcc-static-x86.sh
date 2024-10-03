@@ -55,7 +55,7 @@ cd    build
 #                            here and causes problems.
 
 # Compile the static version of GCC.
-make all-gcc
+make all-gcc &&
 
 # Install the static version of GCC
 sudo make install-gcc
