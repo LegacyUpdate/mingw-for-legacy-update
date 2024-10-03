@@ -66,3 +66,9 @@ other important components which are required to build the full GCC.
 ```
 sh ../scripts/003-gcc-static-x86.sh
 ```
+
+# Stage 6: Install the MinGW C Runtime and other Win32 libraries for the x86 version.
+
+```
+sh ../scripts/004-mingw-x86.sh
+```
