@@ -14,11 +14,6 @@ cd       $PACKAGE
 tar -xvf ../[tarball]
 cd       [directory]
 
-# Set some compiler flags to make sure that we output i486 binaries.
-# Comment this out if you're not building for i486.
-export CFLAGS="-march=i486 -mtune=i486"
-export CXXFLAGS="-march=i486 -mtune=i486"
-
 # Configure the headers. Explanations of the options will come after configure.
 [Configuration Commands Here]
 

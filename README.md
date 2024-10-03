@@ -51,3 +51,18 @@ wget  https://ftp.gnu.org/gnu/mpc/mpc-1.3.1.tar.gz
 ```
 sh ../scripts/001-headers-install-x86.sh
 ```
+
+# Stage 4: Install Binutils for the x86 version.
+
+```
+sh ../scripts/002-binutils-x86.sh
+```
+
+# Stage 5: Install the static version of GCC for the x86 version.
+
+The static version is needed to build the MinGW C Runtime, winpthreads, and
+other important components which are required to build the full GCC.
+
+```
+sh ../scripts/003-gcc-static-x86.sh
+```
