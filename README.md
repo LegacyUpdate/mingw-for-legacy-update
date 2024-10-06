@@ -27,7 +27,8 @@ MPC 1.3.1
 # Stage 1: Create a directory in /opt to hold our toolchain
 
 ```
-sudo mkdir -pv /opt/mingw64-LegacyUpdate-14.2.0-v1
+sudo mkdir -pv /opt/gcc-14.2-binutils-2.43.1-mingw-v12.0.0-i686
+sudo mkdir -pv /opt/gcc-14.2-binutils-2.43.1-mingw-v12.0.0-x86_64
 ```
 
 # Stage 2: Download the required files

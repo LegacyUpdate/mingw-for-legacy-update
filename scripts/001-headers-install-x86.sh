@@ -20,18 +20,14 @@ cd          mingw-w64-v$VERSION
 mkdir build-x86-headers
 cd    build-x86-headers
 
-# Set some compiler flags to make sure that we output i486 binaries.
-export CFLAGS="-march=i486 -mtune=i486"
-export CXXFLAGS="-march=i486 -mtune=i486"
-
 # Configure the headers. Explanations of the options will come after configure.
-../mingw-w64-headers/configure --prefix=/opt/mingw64-LegacyUpdate-14.2.0-v1/x86 \
-                               --enable-sdk=all                                 \
-                               --host=i486-w64-mingw32
+../mingw-w64-headers/configure --prefix=/opt/gcc-14.2-binutils-2.43.1-mingw-v12.0.0-i686 \
+                               --enable-sdk=all                                          \
+                               --host=i686-w64-mingw32
 
 # --prefix=/opt/*: This switch will install the files into that directory.
 # --enable-sdk=all: Installs all of the headers for MinGW.
-# --host=i486-w64-mingw32: Builds files for the i486 version of MinGW.
+# --host=i686-w64-mingw32: Builds files for the i686 version of MinGW.
 
 # This package doesn't do any compilation, so we can just install it!
 sudo make install
