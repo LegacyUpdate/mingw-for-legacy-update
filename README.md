@@ -136,7 +136,7 @@ file printf-x86.exe
 That should result in the following output:
 
 ```
-a.exe: PE32 executable (console) Intel 80386, for MS Windows, 18 sections
+printf.exe: PE32 executable (console) Intel 80386, for MS Windows, 18 sections
 ```
 
 # Stage 10: Remove some unnecessary files from the toolchain for x86.
@@ -210,4 +210,13 @@ separately. Without this we'll get a bunch of linker errors.
 
 ```
 sh ../scripts/011-mingw-winpthreads-x86_64.sh
+```
+
+# Stage 17: Install the final version of GCC for the x86_64 version.
+
+This version is a more complete version of GCC that now has all of it's
+libraries, includes plugin support, and knows how to use the MinGW C Runtime.
+
+```
+sh ../scripts/012-gcc-x86_64.sh
 ```
