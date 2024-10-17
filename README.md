@@ -6,7 +6,7 @@ LegacyUpdate's source code generates segmentation faults when using the default
 installations of MinGW's cross compiler for x86_64 (and i686) on Ubuntu 22.04.
 This has happened before, but is now holding up CI. We eventually intend to
 support other architectures as well (ARMv7 and ARM64 through WindowsOnArm), but
-this will come later as this is needed for LegacyUpdate 1.10.
+this will come later.
 
 ## Versions used
 
@@ -72,4 +72,15 @@ sh ../scripts/003-gcc-static-x86.sh
 
 ```
 sh ../scripts/004-mingw-x86.sh
+```
+
+# Stage 7: Install the MinGW winpthreads library for the x86 version.
+
+This includes a POSIX threading implementation, which is needed by GCC. Some
+people have had success building this as part of MinGW's C Runtime, but in our
+case, since we're not using any system libraries, we'll need to build it
+separately. Without this we'll get a bunch of linker errors.
+
+```
+sh ../scripts/005-mingw-winpthreads-x86.sh
 ```
