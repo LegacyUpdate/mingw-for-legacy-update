@@ -163,3 +163,12 @@ for another purpose, you can safely ignore this section.
 cd /opt
 sudo tar -cJvf gcc-14.2-binutils-2.43.1-mingw-v12.0.0-i686.tar.xz gcc-14.2-binutils-2.43.1-mingw-v12.0.0-i686/
 ```
+
+# Stage 12: Install the headers for the x86_64 version.
+
+This package includes the headers for the Win32 API provided by MinGW, and is
+needed for all of the packages used in the toolchain.
+
+```
+sh ../scripts/007-headers-install-x86_64.sh
+```
