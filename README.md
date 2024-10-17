@@ -103,3 +103,38 @@ libraries, includes plugin support, and knows how to use the MinGW C Runtime.
 ```
 sh ../scripts/006-gcc-x86.sh
 ```
+
+# Stage 9: Test the compiler for x86.
+
+The next step is to test our compiler. We'll use a C file that prints a line of
+text to the screen. After the file is compiled, you should copy it to a Windows
+computer and run it from a command prompt.
+
+First, compile the program with:
+
+```
+PATH=/opt/gcc-14.2-binutils-2.43.1-mingw-v12.0.0-i686/bin:$PATH \
+i686-w64-mingw32-gcc ../testfiles/printf.c -o printf-x86.exe -v -Wl,--verbose &> debug.log
+```
+
+Next, check to see if a .exe file exists:
+
+```
+ls -l *.exe
+```
+
+If printf-x86.exe exists, the compiler is now working. If it does not exist,
+please review the output of debug.log to determine what happened.
+
+One final check that we can do at this stage is to check the file format of the
+program that was just compiled:
+
+```
+file printf-x86.exe
+```
+
+That should result in the following output:
+
+```
+a.exe: PE32 executable (console) Intel 80386, for MS Windows, 18 sections
+```
