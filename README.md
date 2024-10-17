@@ -172,6 +172,7 @@ needed for all of the packages used in the toolchain.
 ```
 sh ../scripts/007-headers-install-x86_64.sh
 ```
+
 # Stage 13: Install Binutils for the x86_64 version.
 
 Binutils provides the linker for the GNU Toolchain as well as several other
@@ -181,4 +182,13 @@ resources, and more.
 
 ```
 sh ../scripts/008-binutils-x86_64.sh
+```
+
+# Stage 14: Install the static version of GCC for the x86_64 version.
+
+The static version is needed to build the MinGW C Runtime, winpthreads, and
+other important components which are required to build the full GCC.
+
+```
+sh ../scripts/009-gcc-static-x86.sh
 ```
