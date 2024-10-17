@@ -84,3 +84,12 @@ separately. Without this we'll get a bunch of linker errors.
 ```
 sh ../scripts/005-mingw-winpthreads-x86.sh
 ```
+
+# Stage 8: Install the final version of GCC for the x86 version.
+
+This version is a more complete version of GCC that now has all of it's
+libraries, includes plugin support, and knows how to use the MinGW C Runtime.
+
+```
+sh ../scripts/006-gcc-x86.sh
+```
