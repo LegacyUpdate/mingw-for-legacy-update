@@ -192,3 +192,11 @@ other important components which are required to build the full GCC.
 ```
 sh ../scripts/009-gcc-static-x86_64.sh
 ```
+
+# Stage 15: Install the MinGW C Runtime and other Win32 libraries for the x86 version.
+
+This package contains the libraries which implement the Win32 API.
+
+```
+sh ../scripts/010-mingw-x86_64.sh
+```
