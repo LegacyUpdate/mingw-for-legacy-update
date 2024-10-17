@@ -221,7 +221,7 @@ libraries, includes plugin support, and knows how to use the MinGW C Runtime.
 sh ../scripts/012-gcc-x86_64.sh
 ```
 
-# Stage 9: Test the compiler for x86_64.
+# Stage 18: Test the compiler for x86_64.
 
 The next step is to test our compiler. We'll use a C file that prints a line of
 text to the screen. After the file is compiled, you should copy it to a Windows
@@ -254,4 +254,17 @@ That should result in the following output:
 
 ```
 ./printf-x86_64.exe: PE32+ executable (console) x86-64, for MS Windows, 19 sections
+```
+# Stage 19: Remove some unnecessary files from the toolchain for x86_64.
+
+There's quite a few things here which just take up space, but won't be needed
+in the CI system. We'll remove things like manual pages and info documents, as
+well as strip the binaries of debugging information. Without this, the toolchain
+is 1.9GB. After this, it is 1.4GB.
+
+```
+sudo rm -rf /opt/gcc-14.2-binutils-2.43.1-mingw-v12.0.0-x86_64/share/{man,info}
+sudo strip --strip-unneeded /opt/gcc-14.2-binutils-2.43.1-mingw-v12.0.0-x86_64/lib/*
+sudo strip --strip-unneeded /opt/gcc-14.2-binutils-2.43.1-mingw-v12.0.0-x86_64/mingw/lib/*
+sudo strip --strip-unneeded /opt/gcc-14.2-binutils-2.43.1-mingw-v12.0.0-x86_64/bin/*
 ```
