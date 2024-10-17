@@ -49,11 +49,19 @@ wget  https://ftp.gnu.org/gnu/mpc/mpc-1.3.1.tar.gz
 
 # Stage 3: Install the headers for the x86 version.
 
+This package includes the headers for the Win32 API provided by MinGW, and is
+needed for all of the packages used in the toolchain.
+
 ```
 sh ../scripts/001-headers-install-x86.sh
 ```
 
 # Stage 4: Install Binutils for the x86 version.
+
+Binutils provides the linker for the GNU Toolchain as well as several other
+useful utilities for using ELF (and in our case later) PE binaries and libraries.
+In our case it also includes utilities for creating DLLs, manipulating Windows
+resources, and more.
 
 ```
 sh ../scripts/002-binutils-x86.sh
@@ -69,6 +77,8 @@ sh ../scripts/003-gcc-static-x86.sh
 ```
 
 # Stage 6: Install the MinGW C Runtime and other Win32 libraries for the x86 version.
+
+This package contains the libraries which implement the Win32 API.
 
 ```
 sh ../scripts/004-mingw-x86.sh
