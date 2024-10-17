@@ -21,8 +21,8 @@ mkdir build-x86-headers
 cd    build-x86-headers
 
 # Configure the headers. Explanations of the options will come after configure.
-../mingw-w64-headers/configure --prefix=/opt/gcc-14.2-binutils-2.43.1-mingw-v12.0.0-i686 \
-                               --enable-sdk=all                                          \
+../mingw-w64-headers/configure --prefix=/opt/gcc-14.2-binutils-2.43.1-mingw-v12.0.0-i686/i686-w64-mingw32 \
+                               --enable-sdk=all                                                           \
                                --host=i686-w64-mingw32
 
 # --prefix=/opt/*: This switch will install the files into that directory.

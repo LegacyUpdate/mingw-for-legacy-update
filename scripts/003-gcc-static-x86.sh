@@ -30,17 +30,26 @@ mv -v gmp-$GMP_VERSION/ gmp
 mv -v mpfr-$MPFR_VERSION/ mpfr/
 mv -v mpc-$MPC_VERSION/ mpc/
 
+# The expressions are pretty complex to follow. What we are doing here is
+# stripping the /mingw prefix from the path. It is hardcoded for some reason,
+# and in previous versions of GCC this was fine. libtool interferes here though
+# and compilation of everything after MinGW fails as a result.
+#sed -i 's/${prefix}\/mingw//${prefix}\//g' configure
+#sed -i "s#\\/mingw\\//opt/gcc-14.2-binutils-2.43.1-mingw-v12.0.0-i686//\//\\/}\\/#g" gcc/config/i386/mingw32.h
+#             --with-native-system-header-dir=/opt/gcc-14.2-binutils-2.43.1-mingw-v12.0.0-i686/include \
+
 # Create a directory outside of the source tree.
 
 mkdir build
 cd    build
 
-../configure --prefix=/opt/gcc-14.2-binutils-2.43.1-mingw-v12.0.0-i686 \
-             --target=i686-w64-mingw32                                 \
-             --enable-languages=c,c++                                  \
-             --disable-shared                                          \
-             --disable-multilib                                        \
-             --disable-threads                                         &&
+../configure --prefix=/opt/gcc-14.2-binutils-2.43.1-mingw-v12.0.0-i686       \
+             --with-sysroot=/opt/gcc-14.2-binutils-2.43.1-mingw-v12.0.0-i686 \
+             --target=i686-w64-mingw32                                       \
+             --enable-languages=c,c++                                        \
+             --disable-shared                                                \
+             --disable-multilib                                              \
+             --disable-threads                                               &&
 
 # --- Descriptions go here ---
 # --prefix=/opt/*: This switch will install the files into that directory.
@@ -53,9 +62,13 @@ cd    build
 #                            threading library just yet.
 # --disable-multilib:        Disable multilib support since it's not necessary
 #                            here and causes problems.
+# --with-native-system-header-dir: This switch tells GCC to use the headers
+#                            installed by this directory when compiling itself.
+# --with-sysroot:            This switch tells the build system to treat
+#                            /opt/[...] as the root directory.
 
 # Compile the static version of GCC.
-make all-gcc &&
+make all-gcc -j4 &&
 
 # Install the static version of GCC
 sudo make install-gcc
