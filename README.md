@@ -268,3 +268,14 @@ sudo strip --strip-unneeded /opt/gcc-14.2-binutils-2.43.1-mingw-v12.0.0-x86_64/l
 sudo strip --strip-unneeded /opt/gcc-14.2-binutils-2.43.1-mingw-v12.0.0-x86_64/mingw/lib/*
 sudo strip --strip-unneeded /opt/gcc-14.2-binutils-2.43.1-mingw-v12.0.0-x86_64/bin/*
 ```
+
+# Stage 20: Create a tarball with the MinGW toolchain just created for x86_64.
+
+The final part of building the MinGW toolchain for x86_64 is to compress and upload
+it for use with the LegacyUpdate CI system. If you are using these instructions
+for another purpose, you can safely ignore this section.
+
+```
+cd /opt
+sudo tar -cJvf gcc-14.2-binutils-2.43.1-mingw-v12.0.0-x86_64.tar.xz gcc-14.2-binutils-2.43.1-mingw-v12.0.0-x86_64/
+```
