@@ -190,5 +190,5 @@ The static version is needed to build the MinGW C Runtime, winpthreads, and
 other important components which are required to build the full GCC.
 
 ```
-sh ../scripts/009-gcc-static-x86.sh
+sh ../scripts/009-gcc-static-x86_64.sh
 ```
