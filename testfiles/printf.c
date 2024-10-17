@@ -2,6 +2,6 @@
 #include <stdlib.h>
 
 int main() {
-    printf("Testing the compiler\n");
-    exit(0);
+	printf("Testing the compiler.\n");
+	exit(0);
 }

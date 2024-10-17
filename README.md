@@ -138,3 +138,28 @@ That should result in the following output:
 ```
 a.exe: PE32 executable (console) Intel 80386, for MS Windows, 18 sections
 ```
+
+# Stage 10: Remove some unnecessary files from the toolchain for x86.
+
+There's quite a few things here which just take up space, but won't be needed
+in the CI system. We'll remove things like manual pages and info documents, as
+well as strip the binaries of debugging information. Without this, the toolchain
+is 1.8GB. After this, it is 1.3GB.
+
+```
+sudo rm -rf /opt/gcc-14.2-binutils-2.43.1-mingw-v12.0.0-i686/share/{man,info}
+sudo strip --strip-unneeded /opt/gcc-14.2-binutils-2.43.1-mingw-v12.0.0-i686/lib/*
+sudo strip --strip-unneeded /opt/gcc-14.2-binutils-2.43.1-mingw-v12.0.0-i686/mingw/lib/*
+sudo strip --strip-unneeded /opt/gcc-14.2-binutils-2.43.1-mingw-v12.0.0-i686/bin/*
+```
+
+# Stage 11: Create a tarball with the MinGW toolchain just created for x86.
+
+The final part of building the MinGW toolchain for x86 is to compress and upload
+it for use with the LegacyUpdate CI system. If you are using these instructions
+for another purpose, you can safely ignore this section.
+
+```
+cd /opt
+sudo tar -cJvf gcc-14.2-binutils-2.43.1-mingw-v12.0.0-i686.tar.xz gcc-14.2-binutils-2.43.1-mingw-v12.0.0-i686/
+```
