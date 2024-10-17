@@ -193,10 +193,21 @@ other important components which are required to build the full GCC.
 sh ../scripts/009-gcc-static-x86_64.sh
 ```
 
-# Stage 15: Install the MinGW C Runtime and other Win32 libraries for the x86 version.
+# Stage 15: Install the MinGW C Runtime and other Win32 libraries for the x86_64 version.
 
 This package contains the libraries which implement the Win32 API.
 
 ```
 sh ../scripts/010-mingw-x86_64.sh
+```
+
+# Stage 16: Install the MinGW winpthreads library for the x86_64 version.
+
+This includes a POSIX threading implementation, which is needed by GCC. Some
+people have had success building this as part of MinGW's C Runtime, but in our
+case, since we're not using any system libraries, we'll need to build it
+separately. Without this we'll get a bunch of linker errors.
+
+```
+sh ../scripts/011-mingw-winpthreads-x86_64.sh
 ```
