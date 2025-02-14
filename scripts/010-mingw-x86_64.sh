@@ -18,8 +18,9 @@ cd       mingw-w64-v$VERSION
 
 # Configure the package. Explanations of the options will come after configure.
 ./configure --prefix=/opt/gcc-14.2-binutils-2.43.1-mingw-v12.0.0-x86_64/x86_64-w64-mingw32 \
-            --with-sysroot=/opt/gcc-14.2-binutils-2.43.1-mingw-v12.0.0-x86_64 \
-            --host=x86_64-w64-mingw32                                         &&
+            --with-sysroot=/opt/gcc-14.2-binutils-2.43.1-mingw-v12.0.0-x86_64              \
+            --host=x86_64-w64-mingw32                                                      \
+            --with-default-msvcrt=msvcrt                                                   &&
 
 # --- Descriptions go here ---
 # --prefix=/opt/*: This switch will install the files into that directory.
