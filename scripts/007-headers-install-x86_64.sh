@@ -29,6 +29,11 @@ cd    build-x86_64-headers
 # --prefix=/opt/*: This switch will install the files into that directory.
 # --enable-sdk=all: Installs all of the headers for MinGW.
 # --host=x86_64-w64-mingw32: Builds files for the x86_64 version of MinGW.
+# --with-default-msvcrt: Selects the default Visual C++ Runtime as the
+#                        Microsoft Visual C++ Runtime version instead of the
+#                        Universal C++ Runtime (which is only compatible with
+#                        more recent versions of Windows. For LegacyUpdate, we
+#                        need support for Windows 2000 at the earliest).
 
 # This package doesn't do any compilation, so we can just install it!
 sudo make install
