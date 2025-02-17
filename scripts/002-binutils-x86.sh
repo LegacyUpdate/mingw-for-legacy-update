@@ -2,7 +2,7 @@
 
 # This script installs Binutils, which includes a linker and support programs.
 
-VERSION=2.43.1
+VERSION=2.44
 ARCHITECTURE=x86
 PACKAGE=mingw64-$ARCHITECTURE-binutils-$VERSION
 
@@ -20,12 +20,12 @@ mkdir build
 cd    build
 
 # First we'll configure Binutils.
-../configure --prefix=/opt/gcc-14.2-binutils-2.43.1-mingw-v12.0.0-i686       \
-             --target=i686-w64-mingw32                                       \
-             --disable-multilib                                              \
-             --disable-nls                                                   \
-             --with-sysroot=/opt/gcc-14.2-binutils-2.43.1-mingw-v12.0.0-i686 \
-             --disable-werror                                                &&
+../configure --prefix=/opt/gcc-14.2-binutils-2.44-mingw-v12.0.0-i686       \
+             --target=i686-w64-mingw32                                     \
+             --disable-multilib                                            \
+             --disable-nls                                                 \
+             --with-sysroot=/opt/gcc-14.2-binutils-2.44-mingw-v12.0.0-i686 \
+             --disable-werror                                              &&
 
 # --- Descriptions go here ---
 # --prefix=/opt/*: This switch will install the files into that directory.
@@ -47,11 +47,11 @@ make -j4 &&
 sudo make install
 
 # Remove an unnecessary library
-sudo rm -v /opt/gcc-14.2-binutils-2.43.1-mingw-v12.0.0-i686/lib/bfd-plugins/libdep.so
+sudo rm -v /opt/gcc-14.2-binutils-2.44-mingw-v12.0.0-i686/lib/bfd-plugins/libdep.so
 
 
 # GCC requires a symlink of 'mingw' to be a mirror of the i686-w64-mingw32
 # directory, and it needs to be in the same root.
-cd /opt/gcc-14.2-binutils-2.43.1-mingw-v12.0.0-i686
+cd /opt/gcc-14.2-binutils-2.44-mingw-v12.0.0-i686
 sudo ln -sfv ./i686-w64-mingw32 ./mingw
 sudo ln -sfv ./mingw/include include

@@ -12,7 +12,7 @@ this will come later.
 
 GCC 14.2.0
 
-Binutils 2.43.1
+Binutils 2.44
 
 MinGW 12.0.0
 
@@ -27,8 +27,8 @@ MPC 1.3.1
 # Stage 1: Create a directory in /opt to hold our toolchain
 
 ```
-sudo mkdir -pv /opt/gcc-14.2-binutils-2.43.1-mingw-v12.0.0-i686
-sudo mkdir -pv /opt/gcc-14.2-binutils-2.43.1-mingw-v12.0.0-x86_64
+sudo mkdir -pv /opt/gcc-14.2-binutils-2.44-mingw-v12.0.0-i686
+sudo mkdir -pv /opt/gcc-14.2-binutils-2.44-mingw-v12.0.0-x86_64
 ```
 
 # Stage 2: Download the required files
@@ -41,7 +41,7 @@ mkdir scratch
 cd    scratch
 wget  https://sourceforge.net/projects/mingw-w64/files/mingw-w64/mingw-w64-release/mingw-w64-v12.0.0.tar.bz2
 wget  https://ftp.gnu.org/gnu/gcc/gcc-14.2.0/gcc-14.2.0.tar.xz
-wget  https://sourceware.org/pub/binutils/releases/binutils-2.43.1.tar.xz
+wget  https://sourceware.org/pub/binutils/releases/binutils-2.44.tar.xz
 wget  https://ftp.gnu.org/gnu/mpfr/mpfr-4.2.1.tar.xz
 wget  https://ftp.gnu.org/gnu/gmp/gmp-6.3.0.tar.xz
 wget  https://ftp.gnu.org/gnu/mpc/mpc-1.3.1.tar.gz
@@ -113,7 +113,7 @@ computer and run it from a command prompt.
 First, compile the program with:
 
 ```
-PATH=/opt/gcc-14.2-binutils-2.43.1-mingw-v12.0.0-i686/bin:$PATH \
+PATH=/opt/gcc-14.2-binutils-2.44-mingw-v12.0.0-i686/bin:$PATH \
 i686-w64-mingw32-gcc ../testfiles/printf.c -o printf-x86.exe -v -Wl,--verbose &> debug.log
 ```
 
@@ -147,10 +147,10 @@ well as strip the binaries of debugging information. Without this, the toolchain
 is 1.8GB. After this, it is 1.3GB.
 
 ```
-sudo rm -rf /opt/gcc-14.2-binutils-2.43.1-mingw-v12.0.0-i686/share/{man,info}
-sudo strip --strip-unneeded /opt/gcc-14.2-binutils-2.43.1-mingw-v12.0.0-i686/lib/*
-sudo strip --strip-unneeded /opt/gcc-14.2-binutils-2.43.1-mingw-v12.0.0-i686/mingw/lib/*
-sudo strip --strip-unneeded /opt/gcc-14.2-binutils-2.43.1-mingw-v12.0.0-i686/bin/*
+sudo rm -rf /opt/gcc-14.2-binutils-2.44-mingw-v12.0.0-i686/share/{man,info}
+sudo strip --strip-unneeded /opt/gcc-14.2-binutils-2.44-mingw-v12.0.0-i686/lib/*
+sudo strip --strip-unneeded /opt/gcc-14.2-binutils-2.44-mingw-v12.0.0-i686/mingw/lib/*
+sudo strip --strip-unneeded /opt/gcc-14.2-binutils-2.44-mingw-v12.0.0-i686/bin/*
 ```
 
 # Stage 11: Create a tarball with the MinGW toolchain just created for x86.
@@ -161,7 +161,7 @@ for another purpose, you can safely ignore this section.
 
 ```
 cd /opt
-sudo tar -cJvf gcc-14.2-binutils-2.43.1-mingw-v12.0.0-i686.tar.xz gcc-14.2-binutils-2.43.1-mingw-v12.0.0-i686/
+sudo tar -cJvf gcc-14.2-binutils-2.44-mingw-v12.0.0-i686.tar.xz gcc-14.2-binutils-2.44-mingw-v12.0.0-i686/
 ```
 
 # Stage 12: Install the headers for the x86_64 version.
@@ -230,7 +230,7 @@ computer and run it from a command prompt.
 First, compile the program with:
 
 ```
-PATH=/opt/gcc-14.2-binutils-2.43.1-mingw-v12.0.0-x86_64/bin:$PATH \
+PATH=/opt/gcc-14.2-binutils-2.44-mingw-v12.0.0-x86_64/bin:$PATH \
 x86_64-w64-mingw32-gcc ../testfiles/printf.c -o printf-x86_64.exe -v -Wl,--verbose &> debug.log
 ```
 
@@ -263,10 +263,10 @@ well as strip the binaries of debugging information. Without this, the toolchain
 is 1.9GB. After this, it is 1.4GB.
 
 ```
-sudo rm -rf /opt/gcc-14.2-binutils-2.43.1-mingw-v12.0.0-x86_64/share/{man,info}
-sudo strip --strip-unneeded /opt/gcc-14.2-binutils-2.43.1-mingw-v12.0.0-x86_64/lib/*
-sudo strip --strip-unneeded /opt/gcc-14.2-binutils-2.43.1-mingw-v12.0.0-x86_64/mingw/lib/*
-sudo strip --strip-unneeded /opt/gcc-14.2-binutils-2.43.1-mingw-v12.0.0-x86_64/bin/*
+sudo rm -rf /opt/gcc-14.2-binutils-2.44-mingw-v12.0.0-x86_64/share/{man,info}
+sudo strip --strip-unneeded /opt/gcc-14.2-binutils-2.44-mingw-v12.0.0-x86_64/lib/*
+sudo strip --strip-unneeded /opt/gcc-14.2-binutils-2.44-mingw-v12.0.0-x86_64/mingw/lib/*
+sudo strip --strip-unneeded /opt/gcc-14.2-binutils-2.44-mingw-v12.0.0-x86_64/bin/*
 ```
 
 # Stage 20: Create a tarball with the MinGW toolchain just created for x86_64.
@@ -277,5 +277,5 @@ for another purpose, you can safely ignore this section.
 
 ```
 cd /opt
-sudo tar -cJvf gcc-14.2-binutils-2.43.1-mingw-v12.0.0-x86_64.tar.xz gcc-14.2-binutils-2.43.1-mingw-v12.0.0-x86_64/
+sudo tar -cJvf gcc-14.2-binutils-2.44-mingw-v12.0.0-x86_64.tar.xz gcc-14.2-binutils-2.44-mingw-v12.0.0-x86_64/
 ```
