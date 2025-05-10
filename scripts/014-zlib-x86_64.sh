@@ -1,6 +1,7 @@
 #!/bin/bash
 
-# Insert description of the script here
+# This script builds a copy of zlib for MinGW. We need this to compile a new
+# version of NSIS.
 
 VERSION=1.3.1
 ARCHITECTURE=x86_64
