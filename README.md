@@ -24,6 +24,8 @@ MPC 1.3.1
 
 zlib 1.3.1
 
+NSIS 3.11
+
 ## Build Process
 
 # Stage 1: Create a directory in /opt to hold our toolchain
@@ -48,6 +50,7 @@ wget  https://ftp.gnu.org/gnu/mpfr/mpfr-4.2.1.tar.xz
 wget  https://ftp.gnu.org/gnu/gmp/gmp-6.3.0.tar.xz
 wget  https://ftp.gnu.org/gnu/mpc/mpc-1.3.1.tar.gz
 wget  https://www.zlib.net/zlib-1.3.1.tar.gz
+wget  https://prdownloads.sourceforge.net/nsis/NSIS%203/3.11/nsis-3.11-src.tar.bz2
 ```
 
 # Stage 3: Install the headers for the x86 version.
@@ -303,4 +306,29 @@ for another purpose, you can safely ignore this section.
 ```
 cd /opt
 sudo tar -cJvf gcc-14.2-binutils-2.44-mingw-v12.0.0-x86_64.tar.xz gcc-14.2-binutils-2.44-mingw-v12.0.0-x86_64/
+```
+
+# Stage 21: Create a directory to hold our new copy of NSIS
+
+```
+sudo mkdir -pv /opt/nsis-3.11
+```
+
+# Stage 22: Install our new copy of NSIS
+
+Because of a security vulnerability, we need to update our copy of NSIS. The
+version shipped with Ubuntu 22.04 does not have the fix. If you are installing
+a copy of NSIS, make sure that you have installed the optional copies of zlib
+with the instructions listed above. If you have an existing toolchain, you can
+run scripts 013 and 014 separately without recompiling the entire toolchain.
+
+```
+sh ../scripts/015-nsis.sh
+```
+
+# Stage 23: Create a tarball with our new copy of NSIS.
+
+```
+cd /opt
+sudo tar -cJvf nsis-3.11-ubuntu-22.04.tar.xz nsis-3.11/
 ```

@@ -9,6 +9,7 @@ GMP: https://ftp.gnu.org/gnu/gmp/gmp-6.3.0.tar.xz
 MPFR: https://ftp.gnu.org/gnu/mpfr/mpfr-4.2.1.tar.xz
 MPC: https://ftp.gnu.org/gnu/mpc/mpc-1.3.1.tar.gz
 zlib: https://www.zlib.net/zlib-1.3.1.tar.gz
+nss: https://prdownloads.sourceforge.net/nsis/NSIS%203/3.11/nsis-3.11-src.tar.bz2
 
 # Install dependencies
 mingw-w64-i686-dev
@@ -17,3 +18,5 @@ build-essential
 texinfo
 bison
 scons
+libz-dev
+bzip2 # Ubuntu does not ship with bzip2 by default
