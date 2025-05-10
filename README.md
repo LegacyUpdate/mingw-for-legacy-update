@@ -22,6 +22,8 @@ MPFR 4.2.1
 
 MPC 1.3.1
 
+zlib 1.3.1
+
 ## Build Process
 
 # Stage 1: Create a directory in /opt to hold our toolchain
@@ -45,6 +47,7 @@ wget  https://sourceware.org/pub/binutils/releases/binutils-2.44.tar.xz
 wget  https://ftp.gnu.org/gnu/mpfr/mpfr-4.2.1.tar.xz
 wget  https://ftp.gnu.org/gnu/gmp/gmp-6.3.0.tar.xz
 wget  https://ftp.gnu.org/gnu/mpc/mpc-1.3.1.tar.gz
+wget  https://www.zlib.net/zlib-1.3.1.tar.gz
 ```
 
 # Stage 3: Install the headers for the x86 version.
@@ -102,6 +105,17 @@ libraries, includes plugin support, and knows how to use the MinGW C Runtime.
 
 ```
 sh ../scripts/006-gcc-x86.sh
+```
+
+# Stage 8.5: Install a copy of zlib (if you are compiling NSIS).
+
+This step is only required if you are also compiling a custom version of NSIS.
+For LegacyUpdate, this is required to use NSIS 3.11 on Ubuntu 22.04, which we
+need to use to fix a security vulnerability in NSIS. NSIS requires zlib to be
+installed in both the x86 and x86_64 versions of MinGW.
+
+```
+sh ../scripts/013-zlib-x86.sh
 ```
 
 # Stage 9: Test the compiler for x86.
@@ -219,6 +233,17 @@ libraries, includes plugin support, and knows how to use the MinGW C Runtime.
 
 ```
 sh ../scripts/012-gcc-x86_64.sh
+```
+
+# Stage 17.5: Install a copy of zlib (if you are compiling NSIS).
+
+This step is only required if you are also compiling a custom version of NSIS.
+For LegacyUpdate, this is required to use NSIS 3.11 on Ubuntu 22.04, which we
+need to use to fix a security vulnerability in NSIS. NSIS requires zlib to be
+installed in both the x86 and x86_64 versions of MinGW.
+
+```
+sh ../scripts/014-zlib-x86_64.sh
 ```
 
 # Stage 18: Test the compiler for x86_64.
