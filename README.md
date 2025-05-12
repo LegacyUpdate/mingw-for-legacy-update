@@ -10,7 +10,7 @@ this will come later.
 
 ## Versions used
 
-GCC 14.2.0
+GCC 15.1.0
 
 Binutils 2.44
 
@@ -31,8 +31,8 @@ NSIS 3.11
 # Stage 1: Create a directory in /opt to hold our toolchain
 
 ```
-sudo mkdir -pv /opt/gcc-14.2-binutils-2.44-mingw-v12.0.0-i686
-sudo mkdir -pv /opt/gcc-14.2-binutils-2.44-mingw-v12.0.0-x86_64
+sudo mkdir -pv /opt/gcc-15.1-binutils-2.44-mingw-v12.0.0-i686
+sudo mkdir -pv /opt/gcc-15.1-binutils-2.44-mingw-v12.0.0-x86_64
 ```
 
 # Stage 2: Download the required files
@@ -44,7 +44,7 @@ already changed into the directory.
 mkdir scratch
 cd    scratch
 wget  https://sourceforge.net/projects/mingw-w64/files/mingw-w64/mingw-w64-release/mingw-w64-v12.0.0.tar.bz2
-wget  https://ftp.gnu.org/gnu/gcc/gcc-14.2.0/gcc-14.2.0.tar.xz
+wget  https://ftp.gnu.org/gnu/gcc/gcc-15.1.0/gcc-15.1.0.tar.xz
 wget  https://sourceware.org/pub/binutils/releases/binutils-2.44.tar.xz
 wget  https://ftp.gnu.org/gnu/mpfr/mpfr-4.2.2.tar.xz
 wget  https://ftp.gnu.org/gnu/gmp/gmp-6.3.0.tar.xz
@@ -130,7 +130,7 @@ computer and run it from a command prompt.
 First, compile the program with:
 
 ```
-PATH=/opt/gcc-14.2-binutils-2.44-mingw-v12.0.0-i686/bin:$PATH \
+PATH=/opt/gcc-15.1-binutils-2.44-mingw-v12.0.0-i686/bin:$PATH \
 i686-w64-mingw32-gcc ../testfiles/printf.c -o printf-x86.exe -v -Wl,--verbose &> debug.log
 ```
 
@@ -153,7 +153,7 @@ file printf-x86.exe
 That should result in the following output:
 
 ```
-printf-x86.exe: PE32 executable (console) Intel 80386, for MS Windows, 18 sections
+printf-x86.exe: PE32 executable (console) Intel 80386, for MS Windows, 15 sections
 ```
 
 # Stage 10: Remove some unnecessary files from the toolchain for x86.
@@ -164,10 +164,10 @@ well as strip the binaries of debugging information. Without this, the toolchain
 is 1.8GB. After this, it is 1.3GB.
 
 ```
-sudo rm -rf /opt/gcc-14.2-binutils-2.44-mingw-v12.0.0-i686/share/{man,info}
-sudo strip --strip-unneeded /opt/gcc-14.2-binutils-2.44-mingw-v12.0.0-i686/lib/*
-sudo strip --strip-unneeded /opt/gcc-14.2-binutils-2.44-mingw-v12.0.0-i686/mingw/lib/*
-sudo strip --strip-unneeded /opt/gcc-14.2-binutils-2.44-mingw-v12.0.0-i686/bin/*
+sudo rm -rf /opt/gcc-15.1-binutils-2.44-mingw-v12.0.0-i686/share/{man,info}
+sudo strip --strip-unneeded /opt/gcc-15.1-binutils-2.44-mingw-v12.0.0-i686/lib/*
+sudo strip --strip-unneeded /opt/gcc-15.1-binutils-2.44-mingw-v12.0.0-i686/mingw/lib/*
+sudo strip --strip-unneeded /opt/gcc-15.1-binutils-2.44-mingw-v12.0.0-i686/bin/*
 ```
 
 # Stage 11: Create a tarball with the MinGW toolchain just created for x86.
@@ -178,7 +178,7 @@ for another purpose, you can safely ignore this section.
 
 ```
 cd /opt
-sudo tar -cJvf gcc-14.2-binutils-2.44-mingw-v12.0.0-i686.tar.xz gcc-14.2-binutils-2.44-mingw-v12.0.0-i686/
+sudo tar -cJvf gcc-15.1-binutils-2.44-mingw-v12.0.0-i686.tar.xz gcc-15.1-binutils-2.44-mingw-v12.0.0-i686/
 ```
 
 # Stage 12: Install the headers for the x86_64 version.
@@ -258,7 +258,7 @@ computer and run it from a command prompt.
 First, compile the program with:
 
 ```
-PATH=/opt/gcc-14.2-binutils-2.44-mingw-v12.0.0-x86_64/bin:$PATH \
+PATH=/opt/gcc-15.1-binutils-2.44-mingw-v12.0.0-x86_64/bin:$PATH \
 x86_64-w64-mingw32-gcc ../testfiles/printf.c -o printf-x86_64.exe -v -Wl,--verbose &> debug.log
 ```
 
@@ -281,7 +281,7 @@ file printf-x86_64.exe
 That should result in the following output:
 
 ```
-./printf-x86_64.exe: PE32+ executable (console) x86-64, for MS Windows, 19 sections
+./printf-x86_64.exe: PE32+ executable (console) x86-64, for MS Windows, 18 sections
 ```
 # Stage 19: Remove some unnecessary files from the toolchain for x86_64.
 
@@ -291,10 +291,10 @@ well as strip the binaries of debugging information. Without this, the toolchain
 is 1.9GB. After this, it is 1.4GB.
 
 ```
-sudo rm -rf /opt/gcc-14.2-binutils-2.44-mingw-v12.0.0-x86_64/share/{man,info}
-sudo strip --strip-unneeded /opt/gcc-14.2-binutils-2.44-mingw-v12.0.0-x86_64/lib/*
-sudo strip --strip-unneeded /opt/gcc-14.2-binutils-2.44-mingw-v12.0.0-x86_64/mingw/lib/*
-sudo strip --strip-unneeded /opt/gcc-14.2-binutils-2.44-mingw-v12.0.0-x86_64/bin/*
+sudo rm -rf /opt/gcc-15.1-binutils-2.44-mingw-v12.0.0-x86_64/share/{man,info}
+sudo strip --strip-unneeded /opt/gcc-15.1-binutils-2.44-mingw-v12.0.0-x86_64/lib/*
+sudo strip --strip-unneeded /opt/gcc-15.1-binutils-2.44-mingw-v12.0.0-x86_64/mingw/lib/*
+sudo strip --strip-unneeded /opt/gcc-15.1-binutils-2.44-mingw-v12.0.0-x86_64/bin/*
 ```
 
 # Stage 20: Create a tarball with the MinGW toolchain just created for x86_64.
@@ -305,7 +305,7 @@ for another purpose, you can safely ignore this section.
 
 ```
 cd /opt
-sudo tar -cJvf gcc-14.2-binutils-2.44-mingw-v12.0.0-x86_64.tar.xz gcc-14.2-binutils-2.44-mingw-v12.0.0-x86_64/
+sudo tar -cJvf gcc-15.1-binutils-2.44-mingw-v12.0.0-x86_64.tar.xz gcc-15.1-binutils-2.44-mingw-v12.0.0-x86_64/
 ```
 
 # Stage 21: Create a directory to hold our new copy of NSIS
@@ -317,7 +317,7 @@ sudo mkdir -pv /opt/nsis-3.11
 # Stage 22: Install our new copy of NSIS
 
 Because of a security vulnerability, we need to update our copy of NSIS. The
-version shipped with Ubuntu 22.04 does not have the fix. If you are installing
+version shipped with Ubuntu 24.04 does not have the fix. If you are installing
 a copy of NSIS, make sure that you have installed the optional copies of zlib
 with the instructions listed above. If you have an existing toolchain, you can
 run scripts 013 and 014 separately without recompiling the entire toolchain.
@@ -330,5 +330,5 @@ sh ../scripts/015-nsis.sh
 
 ```
 cd /opt
-sudo tar -cJvf nsis-3.11-ubuntu-22.04.tar.xz nsis-3.11/
+sudo tar -cJvf nsis-3.11-ubuntu-24.04.tar.xz nsis-3.11/
 ```

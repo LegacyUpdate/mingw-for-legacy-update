@@ -11,14 +11,14 @@ mkdir    $PACKAGE
 cd       $PACKAGE
 
 # Make sure that we use our new utilities
-export PATH=/opt/gcc-14.2-binutils-2.44-mingw-v12.0.0-x86_64/bin:$PATH
+export PATH=/opt/gcc-15.1-binutils-2.44-mingw-v12.0.0-x86_64/bin:$PATH
 
 tar -xvf ../mingw-w64-v$VERSION.tar.bz2
 cd       mingw-w64-v$VERSION
 
 # Configure the package. Explanations of the options will come after configure.
-./configure --prefix=/opt/gcc-14.2-binutils-2.44-mingw-v12.0.0-x86_64/x86_64-w64-mingw32 \
-            --with-sysroot=/opt/gcc-14.2-binutils-2.44-mingw-v12.0.0-x86_64              \
+./configure --prefix=/opt/gcc-15.1-binutils-2.44-mingw-v12.0.0-x86_64/x86_64-w64-mingw32 \
+            --with-sysroot=/opt/gcc-15.1-binutils-2.44-mingw-v12.0.0-x86_64              \
             --host=x86_64-w64-mingw32                                                    \
             --with-default-msvcrt=msvcrt                                                 &&
 

@@ -20,11 +20,11 @@ mkdir build
 cd    build
 
 # First we'll configure Binutils.
-../configure --prefix=/opt/gcc-14.2-binutils-2.44-mingw-v12.0.0-x86_64       \
+../configure --prefix=/opt/gcc-15.1-binutils-2.44-mingw-v12.0.0-x86_64       \
              --target=x86_64-w64-mingw32                                     \
              --disable-multilib                                              \
              --disable-nls                                                   \
-             --with-sysroot=/opt/gcc-14.2-binutils-2.44-mingw-v12.0.0-x86_64 \
+             --with-sysroot=/opt/gcc-15.1-binutils-2.44-mingw-v12.0.0-x86_64 \
              --disable-werror                                                &&
 
 # --- Descriptions go here ---
@@ -47,10 +47,10 @@ make -j4 &&
 sudo make install
 
 # Remove an unnecessary library
-sudo rm -v /opt/gcc-14.2-binutils-2.44-mingw-v12.0.0-x86_64/lib/bfd-plugins/libdep.so
+sudo rm -v /opt/gcc-15.1-binutils-2.44-mingw-v12.0.0-x86_64/lib/bfd-plugins/libdep.so
 
 # GCC requires a symlink of 'mingw' to be a mirror of the x86_64-w64-mingw32
 # directory, and it needs to be in the same root.
-cd /opt/gcc-14.2-binutils-2.44-mingw-v12.0.0-x86_64
+cd /opt/gcc-15.1-binutils-2.44-mingw-v12.0.0-x86_64
 sudo ln -sfv ./x86_64-w64-mingw32 ./mingw
 sudo ln -sfv ./mingw/include include

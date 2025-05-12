@@ -6,7 +6,7 @@
 VERSION=1.3.1
 ARCHITECTURE=x86_64
 PACKAGE=mingw64-$ARCHITECTURE-zlib-$VERSION
-export PATH=/opt/gcc-14.2-binutils-2.44-mingw-v12.0.0-x86_64/bin:$PATH
+export PATH=/opt/gcc-15.1-binutils-2.44-mingw-v12.0.0-x86_64/bin:$PATH
 
 # Create a separate scratch directory and change into it.
 mkdir    $PACKAGE
@@ -21,7 +21,7 @@ sed -i -e "s/dllwrap/x86_64-w64-mingw32-dllwrap/" win32/Makefile.gcc
 
 # Configure the build. Explanations of the options will come after configure.
 CC=x86_64-w64-mingw32-gcc                                             \
-./configure --prefix=/opt/gcc-14.2-binutils-2.44-mingw-v12.0.0-x86_64 \
+./configure --prefix=/opt/gcc-15.1-binutils-2.44-mingw-v12.0.0-x86_64 \
             -shared                                                   \
             -static                                                   &&
 
@@ -39,7 +39,7 @@ STRIP="x86_64-w64-mingw32-strip" \
 IMPLIB=libz.dll.a                &&
 
 # Install zlib into the toolchain
-sudo cp -v zlib.h zconf.h /opt/gcc-14.2-binutils-2.44-mingw-v12.0.0-x86_64/include
-sudo cp -v libz.a libz.dll.a /opt/gcc-14.2-binutils-2.44-mingw-v12.0.0-x86_64/lib
-sudo mkdir -pv /opt/gcc-14.2-binutils-2.44-mingw-v12.0.0-x86_64/lib/pkgconfig
-sudo cp -v zlib.pc /opt/gcc-14.2-binutils-2.44-mingw-v12.0.0-x86_64/lib/pkgconfig
+sudo cp -v zlib.h zconf.h /opt/gcc-15.1-binutils-2.44-mingw-v12.0.0-x86_64/include
+sudo cp -v libz.a libz.dll.a /opt/gcc-15.1-binutils-2.44-mingw-v12.0.0-x86_64/lib
+sudo mkdir -pv /opt/gcc-15.1-binutils-2.44-mingw-v12.0.0-x86_64/lib/pkgconfig
+sudo cp -v zlib.pc /opt/gcc-15.1-binutils-2.44-mingw-v12.0.0-x86_64/lib/pkgconfig
