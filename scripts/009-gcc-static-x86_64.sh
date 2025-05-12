@@ -8,7 +8,7 @@ VERSION=14.2.0
 ARCHITECTURE=x86_64
 PACKAGE=mingw64-$ARCHITECTURE-gcc-static-$VERSION
 GMP_VERSION=6.3.0
-MPFR_VERSION=4.2.1
+MPFR_VERSION=4.2.2
 MPC_VERSION=1.3.1
 
 # Create a separate scratch directory and change into it.

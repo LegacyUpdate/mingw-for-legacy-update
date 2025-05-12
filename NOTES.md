@@ -10,7 +10,7 @@ Binutils: https://sourceware.org/pub/binutils/releases/binutils-2.43.1.tar.xz
 
 GMP: https://ftp.gnu.org/gnu/gmp/gmp-6.3.0.tar.xz
 
-MPFR: https://ftp.gnu.org/gnu/mpfr/mpfr-4.2.1.tar.xz
+MPFR: https://ftp.gnu.org/gnu/mpfr/mpfr-4.2.2.tar.xz
 
 MPC: https://ftp.gnu.org/gnu/mpc/mpc-1.3.1.tar.gz
 
