@@ -4,7 +4,7 @@
 # version of NSIS.
 
 VERSION=1.3.1
-ARCHITECTURE=i686
+ARCHITECTURE=x86
 PACKAGE=mingw64-$ARCHITECTURE-zlib-$VERSION
 export PATH=/opt/gcc-15.1-binutils-2.44-mingw-v12.0.0-i686/bin:$PATH
 
