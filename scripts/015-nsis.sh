@@ -5,8 +5,8 @@
 
 VERSION=3.11
 PACKAGE=nsis-$VERSION-src
-export PATH=/opt/gcc-15.1-binutils-2.44-mingw-v12.0.0-i686/bin:$PATH
-export PATH=/opt/gcc-15.1-binutils-2.44-mingw-v12.0.0-x86_64/bin:$PATH
+export PATH=/opt/gcc-15.1-binutils-2.44-mingw-v13.0.0-i686/bin:$PATH
+export PATH=/opt/gcc-15.1-binutils-2.44-mingw-v13.0.0-x86_64/bin:$PATH
 
 # Create a separate scratch directory and change into it.
 mkdir    $PACKAGE
@@ -28,7 +28,7 @@ scons VERSION=$VERSION                   \
       SKIPUTILS="NSIS Menu"              \
       STRIP_CP=false                     \
       NSIS_MAX_STRLEN=8192               \
-      ZLIB_W32=/opt/gcc-15.1-binutils-2.44-mingw-v12.0.0-i686/lib &&
+      ZLIB_W32=/opt/gcc-15.1-binutils-2.44-mingw-v13.0.0-i686/lib &&
 
 sudo scons VERSION=$VERSION                   \
            PREFIX=/opt/nsis-$VERSION          \
@@ -36,4 +36,4 @@ sudo scons VERSION=$VERSION                   \
            SKIPUTILS="NSIS Menu"              \
            STRIP_CP=false                     \
            NSIS_MAX_STRLEN=8192               \
-           ZLIB_W32=/opt/gcc-15.1-binutils-2.44-mingw-v12.0.0-i686/lib install
+           ZLIB_W32=/opt/gcc-15.1-binutils-2.44-mingw-v13.0.0-i686/lib install

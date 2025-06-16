@@ -3,7 +3,7 @@
 # This script installs the winpthreads library for GCC. It needs to be done
 # after MinGW, but before GCC.
 
-VERSION=12.0.0
+VERSION=13.0.0
 ARCHITECTURE=x86
 PACKAGE=mingw64-$ARCHITECTURE-mingw_w64-winpthreads-$VERSION
 
@@ -12,14 +12,14 @@ mkdir    $PACKAGE
 cd       $PACKAGE
 
 # Make sure that we use our new utilities
-export PATH=/opt/gcc-15.1-binutils-2.44-mingw-v12.0.0-i686/bin:$PATH
+export PATH=/opt/gcc-15.1-binutils-2.44-mingw-v13.0.0-i686/bin:$PATH
 
 tar -xvf ../mingw-w64-v$VERSION.tar.bz2
 cd       mingw-w64-v$VERSION/mingw-w64-libraries/winpthreads
 
 # Configure the package. Explanations of the options will come after configure.
-./configure --prefix=/opt/gcc-15.1-binutils-2.44-mingw-v12.0.0-i686/i686-w64-mingw32 \
-            --with-sysroot=/opt/gcc-15.1-binutils-2.44-mingw-v12.0.0-i686            \
+./configure --prefix=/opt/gcc-15.1-binutils-2.44-mingw-v13.0.0-i686/i686-w64-mingw32 \
+            --with-sysroot=/opt/gcc-15.1-binutils-2.44-mingw-v13.0.0-i686            \
             --host=i686-w64-mingw32                                                  \
             --with-default-msvcrt=msvcrt                                             &&
 

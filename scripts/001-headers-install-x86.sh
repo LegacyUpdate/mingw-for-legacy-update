@@ -3,7 +3,7 @@
 # The first package that we need to install is the MinGW Headers. These headers
 # contain an implementation of the Win32 API.
 
-VERSION=12.0.0
+VERSION=13.0.0
 ARCHITECTURE=x86
 PACKAGE=mingw64-$ARCHITECTURE-headers-$VERSION
 
@@ -21,7 +21,7 @@ mkdir build-x86-headers
 cd    build-x86-headers
 
 # Configure the headers. Explanations of the options will come after configure.
-../mingw-w64-headers/configure --prefix=/opt/gcc-15.1-binutils-2.44-mingw-v12.0.0-i686/i686-w64-mingw32 \
+../mingw-w64-headers/configure --prefix=/opt/gcc-15.1-binutils-2.44-mingw-v13.0.0-i686/i686-w64-mingw32 \
                                --enable-sdk=all                                                         \
                                --host=i686-w64-mingw32                                                  \
                                --with-default-msvcrt=msvcrt

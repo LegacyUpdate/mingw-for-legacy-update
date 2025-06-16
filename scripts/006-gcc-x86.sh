@@ -19,7 +19,7 @@ tar -xvf ../gcc-$VERSION.tar.xz
 cd       gcc-$VERSION
 
 # Make sure that we use our new utilities
-export PATH=/opt/gcc-15.1-binutils-2.44-mingw-v12.0.0-i686/bin:$PATH
+export PATH=/opt/gcc-15.1-binutils-2.44-mingw-v13.0.0-i686/bin:$PATH
 
 # Building GCC requires GMP, MPFR, and MPC. Let's have the build system build them.
 tar -xvf ../../gmp-$GMP_VERSION.tar.xz
@@ -34,7 +34,7 @@ mv -v mpc-$MPC_VERSION/ mpc/
 mkdir build
 cd    build
 
-../configure --prefix=/opt/gcc-15.1-binutils-2.44-mingw-v12.0.0-i686 \
+../configure --prefix=/opt/gcc-15.1-binutils-2.44-mingw-v13.0.0-i686 \
              --target=i686-w64-mingw32                               \
              --enable-languages=c,c++                                \
              --enable-shared                                         \
@@ -43,7 +43,7 @@ cd    build
              --with-tune=i486                                        \
              --disable-bootstrap                                     \
              --enable-threads=posix                                  \
-             --with-sysroot=/opt/gcc-15.1-binutils-2.44-mingw-v12.0.0-i686 &&
+             --with-sysroot=/opt/gcc-15.1-binutils-2.44-mingw-v13.0.0-i686 &&
 
 # --prefix=/opt/*: This switch will install the files into that directory.
 # --target=i686-w64-mingw32: This switch tells the compiler to target the Win32
