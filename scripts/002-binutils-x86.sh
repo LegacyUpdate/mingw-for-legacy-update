@@ -22,7 +22,6 @@ cd    build
 # First we'll configure Binutils.
 ../configure --prefix=/opt/gcc-15.1-binutils-2.44-mingw-v13.0.0-i686       \
              --target=i686-w64-mingw32                                     \
-             --disable-multilib                                            \
              --disable-nls                                                 \
              --with-sysroot=/opt/gcc-15.1-binutils-2.44-mingw-v13.0.0-i686 \
              --disable-werror                                              &&
@@ -31,8 +30,6 @@ cd    build
 # --prefix=/opt/*: This switch will install the files into that directory.
 # --target=i686-w64-mingw32: This outputs files targeting the i686 version
 #                            of MinGW.
-# --disable-multilib: This switch disables multilib support. We don't need it
-#                     here, and we'll get a broken toolchain if we enable it.
 # --disable-nls:      This switch disables installing files that allow for
 #                     diagnostic output in other language than English.
 # --disable-werror:   This switch tells the build system to not treat warnings
@@ -48,7 +45,6 @@ sudo make install
 
 # Remove an unnecessary library
 sudo rm -v /opt/gcc-15.1-binutils-2.44-mingw-v13.0.0-i686/lib/bfd-plugins/libdep.so
-
 
 # GCC requires a symlink of 'mingw' to be a mirror of the i686-w64-mingw32
 # directory, and it needs to be in the same root.
