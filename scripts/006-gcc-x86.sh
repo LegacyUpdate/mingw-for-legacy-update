@@ -53,12 +53,17 @@ cd    build
 #                            use them.
 # --disable-multilib:        Disable multilib support since it's not necessary
 #                            here and causes problems.
-# --enable-threads=posix:    This switch allows MinGW to use the winpthreads
-#                            library installed by the last package.
 # --with-{arch,tune}=i486:   This switch tells the build system to default to
 #                            generating code for i486. This is so that we can
 #                            guarantee that whatever code gets output will run
 #                            on this CPU.
+# --disable-bootstrap: This switch explictly disables performing the bootstrap
+#                      process in GCC. The process builds several stages, with
+#                      previous stages building the following stages. We don't
+#                      need the benefits of performing this process and it
+#                      saves time.
+# --enable-threads=posix:    This switch allows MinGW to use the winpthreads
+#                            library installed by the last package.
 # --with-sysroot:            This switch tells the build system to treat
 #                            /opt/[...] as the root directory.
 

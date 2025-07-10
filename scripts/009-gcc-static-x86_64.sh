@@ -45,19 +45,17 @@ cd    build
 
 # --- Descriptions go here ---
 # --prefix=/opt/*: This switch will install the files into that directory.
+# --with-sysroot:            This switch tells the build system to treat
+#                            /opt/[...] as the root directory.
 # --target=x86_64-w64-mingw32: This switch tells the compiler to target the Win32
 #                              architecture.
 # --enable-languages=c,c++:  We only need the C and C++ languages to be built.
 # --disable-shared:          Install a static version of GCC since we don't have
 #                            the MinGW C Runtime yet.
-# --disable-threads:         Disable threading support as we don't have a
-#                            threading library just yet.
 # --disable-multilib:        Disable multilib support since it's not necessary
 #                            here and causes problems.
-# --with-native-system-header-dir: This switch tells GCC to use the headers
-#                            installed by this directory when compiling itself.
-# --with-sysroot:            This switch tells the build system to treat
-#                            /opt/[...] as the root directory.
+# --disable-threads:         Disable threading support as we don't have a
+#                            threading library just yet.
 
 # Compile the static version of GCC.
 make all-gcc -j4 &&

@@ -21,10 +21,11 @@ mkdir build-x86_64-headers
 cd    build-x86_64-headers
 
 # Configure the headers. Explanations of the options will come after configure.
-../mingw-w64-headers/configure --prefix=/opt/gcc-15.1-binutils-2.44-mingw-v13.0.0-x86_64/x86_64-w64-mingw32 \
-                               --enable-sdk=all                                                             \
-                               --host=x86_64-w64-mingw32                                                    \
-                               --with-default-msvcrt=msvcrt
+../mingw-w64-headers/configure                                                 \
+  --prefix=/opt/gcc-15.1-binutils-2.44-mingw-v13.0.0-x86_64/x86_64-w64-mingw32 \
+  --enable-sdk=all                                                             \
+  --host=x86_64-w64-mingw32                                                    \
+  --with-default-msvcrt=msvcrt
 
 # --prefix=/opt/*: This switch will install the files into that directory.
 # --enable-sdk=all: Installs all of the headers for MinGW.
