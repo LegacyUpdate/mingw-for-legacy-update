@@ -51,6 +51,11 @@ cd    build
 #                            use them.
 # --disable-multilib:        Disable multilib support since it's not necessary
 #                            here and causes problems.
+# --disable-bootstrap: This switch explictly disables performing the bootstrap
+#                      process in GCC. The process builds several stages, with
+#                      previous stages building the following stages. We don't
+#                      need the benefits of performing this process and it
+#                      saves time.
 # --enable-threads=posix:    This switch allows MinGW to use the winpthreads
 #                            library installed by the last package.
 # --with-sysroot:            This switch tells the build system to treat

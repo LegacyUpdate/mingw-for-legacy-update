@@ -31,6 +31,11 @@ cd       mingw-w64-v$VERSION
 # --disable-lib32: This switch forces the build system to disable building for
 #                  the opposite architecture along with the current one being
 #                  targetted.
+# --with-default-msvcrt: Selects the default Visual C++ Runtime as the
+#                        Microsoft Visual C++ Runtime version instead of the
+#                        Universal C++ Runtime (which is only compatible with
+#                        more recent versions of Windows. For LegacyUpdate, we
+#                        need support for Windows 2000 at the earliest).
 
 make -j4 &&
 

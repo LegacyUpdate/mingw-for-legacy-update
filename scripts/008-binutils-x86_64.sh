@@ -32,10 +32,10 @@ cd    build
 #                              of MinGW.
 # --disable-nls:      This switch disables installing files that allow for
 #                     diagnostic output in other language than English.
-# --disable-werror:   This switch tells the build system to not treat warnings
-#                     as errors.
 # --with-sysroot:     This switch tells the build system to treat /opt/[...] as
 #                     the root directory.
+# --disable-werror:   This switch tells the build system to not treat warnings
+#                     as errors.
 
 # Next, we'll compile Binutils.
 make -j4 &&
