@@ -1,30 +1,30 @@
 #!/bin/bash
+source $(dirname "$0")/variables.in
 
 # This script installs the MinGW C Runtime.
 
-VERSION=13.0.0
 ARCHITECTURE=x86
-PACKAGE=mingw64-$ARCHITECTURE-mingw_w64-$VERSION
+PACKAGE=mingw64-$ARCHITECTURE-mingw_w64-$MINGW_V
 
 # Create a separate scratch directory and change into it.
-mkdir    $PACKAGE
-cd       $PACKAGE
+mkdir $PACKAGE
+cd    $PACKAGE
 
 # Make sure that we use our new utilities
-export PATH=/opt/gcc-15.1-binutils-2.44-mingw-v13.0.0-i686/bin:$PATH
+export PATH=$MINGW_OPT-i686/bin:$PATH
 
-tar -xvf ../mingw-w64-v$VERSION.tar.bz2
-cd       mingw-w64-v$VERSION
+tar -xvf ../mingw-w64-v$MINGW_V.tar.bz2
+cd          mingw-w64-v$MINGW_V
 
 # Configure the package. Explanations of the options will come after configure.
-./configure --prefix=/opt/gcc-15.1-binutils-2.44-mingw-v13.0.0-i686/i686-w64-mingw32 \
-            --with-sysroot=/opt/gcc-15.1-binutils-2.44-mingw-v13.0.0-i686            \
-            --host=i686-w64-mingw32                                                  \
-            --disable-lib64                                                          \
-            --with-default-msvcrt=msvcrt                                             &&
+./configure --prefix=$MINGW_OPT-i686/i686-w64-mingw32 \
+            --with-sysroot=$MINGW_OPT-i686            \
+            --host=i686-w64-mingw32                   \
+            --disable-lib64                           \
+            --with-default-msvcrt=msvcrt             &&
 
 # --- Descriptions go here ---
-# --prefix=/opt/*: This switch will install the files into that directory.
+# --prefix=<...>: This switch will install the files into that directory.
 # --with-sysroot: This switch tells the build system to treat /opt/[...] as
 #                 the root directory.
 # --host=i686-w64-mingw32: This uses the cross compiler that we just built.

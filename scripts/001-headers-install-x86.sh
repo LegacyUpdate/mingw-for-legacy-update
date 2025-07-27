@@ -1,19 +1,19 @@
 #!/bin/bash
+source $(dirname "$0")/variables.in
 
 # The first package that we need to install is the MinGW Headers. These headers
 # contain an implementation of the Win32 API.
 
-VERSION=13.0.0
 ARCHITECTURE=x86
-PACKAGE=mingw64-$ARCHITECTURE-headers-$VERSION
+PACKAGE=mingw64-$ARCHITECTURE-headers-$MINGW_HEADER_V
 
 # Create a separate scratch directory and change into it.
-mkdir    $PACKAGE
-cd       $PACKAGE
+mkdir $PACKAGE
+cd    $PACKAGE
 
 # Extract the tarball and change into the directory.
-tar -xvf ../mingw-w64-v$VERSION.tar.bz2
-cd          mingw-w64-v$VERSION
+tar -xvf ../mingw-w64-v$MINGW_HEADER_V.tar.bz2
+cd          mingw-w64-v$MINGW_HEADER_V
 
 # The source requires that we build it outside of the source tree. We'll work
 # around this by creating a separete directory and changing into it.
@@ -21,13 +21,13 @@ mkdir build-x86-headers
 cd    build-x86-headers
 
 # Configure the headers. Explanations of the options will come after configure.
-../mingw-w64-headers/configure                                             \
-  --prefix=/opt/gcc-15.1-binutils-2.44-mingw-v13.0.0-i686/i686-w64-mingw32 \
-  --enable-sdk=all                                                         \
-  --host=i686-w64-mingw32                                                  \
+../mingw-w64-headers/configure              \
+  --prefix=$MINGW_OPT-i686/i686-w64-mingw32 \
+  --enable-sdk=all                          \
+  --host=i686-w64-mingw32                   \
   --with-default-msvcrt=msvcrt
 
-# --prefix=/opt/*: This switch will install the files into that directory.
+# --prefix=<...>: This switch will install the files into that directory.
 # --enable-sdk=all: Installs all of the headers for MinGW.
 # --host=i686-w64-mingw32: Builds files for the i686 version of MinGW.
 # --with-default-msvcrt: Selects the default Visual C++ Runtime as the
