@@ -6,7 +6,7 @@ MinGW: https://sourceforge.net/projects/mingw-w64/files/mingw-w64/mingw-w64-rele
 
 GCC: https://ftp.gnu.org/gnu/gcc/gcc-15.1.0/gcc-15.1.0.tar.xz
 
-Binutils: https://sourceware.org/pub/binutils/releases/binutils-2.43.1.tar.xz
+Binutils: https://sourceware.org/pub/binutils/releases/binutils-2.45.tar.xz
 
 GMP: https://ftp.gnu.org/gnu/gmp/gmp-6.3.0.tar.xz
 
