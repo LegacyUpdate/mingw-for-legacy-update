@@ -1,18 +1,18 @@
 #!/bin/bash
+source $(dirname "$0")/variables.in
 
 # This script installs Binutils, which includes a linker and support programs.
 
-VERSION=2.44
 ARCHITECTURE=x86_64
-PACKAGE=mingw64-$ARCHITECTURE-binutils-$VERSION
+PACKAGE=mingw64-$ARCHITECTURE-binutils-$BINUTILS_V
 
 # Create a separate scratch directory and change into it.
-mkdir    $PACKAGE
-cd       $PACKAGE
+mkdir $PACKAGE
+cd    $PACKAGE
 
 # Extract the tarball and change into the directory.
-tar -xvf ../binutils-$VERSION.tar.xz
-cd       binutils-$VERSION
+tar -xvf ../binutils-$BINUTILS_V.tar.xz
+cd          binutils-$BINUTILS_V
 
 # This project needs to be built outside of it's source tree. We'll accomodate
 # that by making a new directory and changing into it.
@@ -20,14 +20,14 @@ mkdir build
 cd    build
 
 # First we'll configure Binutils.
-../configure --prefix=/opt/gcc-15.1-binutils-2.44-mingw-v13.0.0-x86_64       \
-             --target=x86_64-w64-mingw32                                     \
-             --disable-nls                                                   \
-             --with-sysroot=/opt/gcc-15.1-binutils-2.44-mingw-v13.0.0-x86_64 \
-             --disable-werror                                                &&
+../configure --prefix=$MINGW_OPT-x86_64       \
+             --target=x86_64-w64-mingw32      \
+             --disable-nls                    \
+             --with-sysroot=$MINGW_OPT-x86_64 \
+             --disable-werror                &&
 
 # --- Descriptions go here ---
-# --prefix=/opt/*: This switch will install the files into that directory.
+# --prefix=<...>: This switch will install the files into that directory.
 # --target=x86_64-w64-mingw32: This outputs files targeting the x86_64 version
 #                              of MinGW.
 # --disable-nls:      This switch disables installing files that allow for
@@ -44,10 +44,10 @@ make -j4 &&
 sudo make install
 
 # Remove an unnecessary library
-sudo rm -v /opt/gcc-15.1-binutils-2.44-mingw-v13.0.0-x86_64/lib/bfd-plugins/libdep.so
+sudo rm -v $MINGW_OPT-x86_64/lib/bfd-plugins/libdep.so
 
 # GCC requires a symlink of 'mingw' to be a mirror of the x86_64-w64-mingw32
 # directory, and it needs to be in the same root.
-cd /opt/gcc-15.1-binutils-2.44-mingw-v13.0.0-x86_64
+cd $MINGW_OPT-x86_64
 sudo ln -sfv ./x86_64-w64-mingw32 ./mingw
 sudo ln -sfv ./mingw/include include

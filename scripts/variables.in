@@ -1,0 +1,16 @@
+# When updating package versions, don't forget to update README.md accordingly.
+# The scripts won't need to be updated unless a package update calls for a
+# needed adjustment.
+
+MINGW_V=13.0.0
+MINGW_HEADER_V=$MINGW_V
+BINUTILS_V=2.44
+GCC_MIN_V=15.1
+GCC_V=$GCC_MIN_V.0
+GMP_V=6.3.0
+MPFR_V=4.2.2
+MPC_V=1.3.1
+MINGW_PTHREAD_V=$MINGW_V
+ZLIB_V=1.3.1
+NSIS_V=3.11
+MINGW_OPT=/opt/gcc-$GCC_MIN_V-binutils-$BINUTILS_V-mingw-v$MINGW_V
