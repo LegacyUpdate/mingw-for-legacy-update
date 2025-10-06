@@ -16,6 +16,19 @@ export PATH=$MINGW_OPT-x86_64/bin:$PATH
 tar -xvf ../mingw-w64-v$MINGW_V.tar.bz2
 cd          mingw-w64-v$MINGW_V
 
+# Apply patches to fix problems with stack smashing protection, and provide
+# emulation of several functions needed to prevent underflows in the stat32
+# functions. Some strange behavior with these functions can cause problems on
+# 64-bit versions of Windows XP, Server 2003, Vista, and Server 2008 in particular.
+# This gets fixed by providing emulation of _fstat32i64, _stat32i64, _wstat32i64,
+# _fstat32, _stat32, and _wstat32 for 64-bit msvcrt builds in MinGW.
+patch -Np1 -i ../../patches/001-mingw-stack-smashing-protection-fix.patch &&
+patch -Np1 -i ../../patches/002-mingw-underflow-check-stat32i64.patch &&
+patch -Np1 -i ../../patches/003-mingw-emulation-_fstat32-_stat32-_wstat32-functions-for-64-bit-msvcrt.patch &&
+patch -Np1 -i ../../patches/004-mingw-emulation-_fstat32i64-_stat32i64-_wstat32i64-for-64-bit-msvcrt.patch &&
+patch -Np1 -i ../../patches/005-mingw-regenerate-crt_Makefile-after-emulation-fixes.patch &&
+patch -Np1 -i ../../patches/006-mingw-check-compiler-support-for-stack-protection.patch &&
+
 # Configure the package. Explanations of the options will come after configure.
 ./configure --prefix=$MINGW_OPT-x86_64/x86_64-w64-mingw32 \
             --with-sysroot=$MINGW_OPT-x86_64              \

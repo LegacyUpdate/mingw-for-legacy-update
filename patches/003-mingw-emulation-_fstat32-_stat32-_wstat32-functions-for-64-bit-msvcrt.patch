@@ -1,0 +1,217 @@
+From 858c1cd0d80bfce8fe5376b166c3bdbc33bcf8e5 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Pali=20Roh=C3=A1r?= <pali.rohar@gmail.com>
+Date: Sat, 21 Jun 2025 13:37:52 +0200
+Subject: [PATCH] crt: Provide emulation of _fstat32, _stat32 and _wstat32
+ functions for 64-bit msvcrt builds
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+All 64-bit CRT libraries except the msvcrt.dll provides native _fstat32,
+_stat32 and _wstat32 functions. 64-bit system os msvcrt.dll is an exception
+and does not contain these function. So implement mingw-w64 emulation of
+these functions via the 64-bit variants of stat functions.
+
+Reported issue: https://github.com/mingw-w64/mingw-w64/issues/103
+
+Signed-off-by: Martin Storsjö <martin@martin.st>
+(cherry picked from commit 3f2917f3b2e845df1aa46d77207ff4fbe08cb29b)
+Signed-off-by: Martin Storsjö <martin@martin.st>
+---
+ mingw-w64-crt/Makefile.am      |  6 +++++
+ mingw-w64-crt/stdio/_fstat32.c | 48 ++++++++++++++++++++++++++++++++++
+ mingw-w64-crt/stdio/_stat32.c  | 48 ++++++++++++++++++++++++++++++++++
+ mingw-w64-crt/stdio/_wstat32.c | 48 ++++++++++++++++++++++++++++++++++
+ 4 files changed, 150 insertions(+)
+ create mode 100644 mingw-w64-crt/stdio/_fstat32.c
+ create mode 100644 mingw-w64-crt/stdio/_stat32.c
+ create mode 100644 mingw-w64-crt/stdio/_wstat32.c
+
+diff --git a/mingw-w64-crt/Makefile.am b/mingw-w64-crt/Makefile.am
+index e0924b470..7562057ca 100644
+--- a/mingw-w64-crt/Makefile.am
++++ b/mingw-w64-crt/Makefile.am
+@@ -624,6 +624,9 @@ src_msvcrt64=\
+   misc/wcsnlen.c \
+   misc/wctob.c \
+   stdio/_fseeki64.c \
++  stdio/_fstat32.c \
++  stdio/_stat32.c \
++  stdio/_wstat32.c \
+   string/wcstok.c
+ 
+ # Files included in libmsvcrt-os.a (for msvcrt.dll) on arm32
+@@ -777,7 +780,10 @@ src_msvcrtarm64=\
+   misc/_getpid.c \
+   misc/__initenv.c \
+   misc/__winitenv.c \
++  stdio/_fstat32.c \
+   stdio/_setmaxstdio.c \
++  stdio/_stat32.c \
++  stdio/_wstat32.c \
+   stdio/gets.c
+ 
+ if ARM64EC
+diff --git a/mingw-w64-crt/stdio/_fstat32.c b/mingw-w64-crt/stdio/_fstat32.c
+new file mode 100644
+index 000000000..2b4bbf4f2
+--- /dev/null
++++ b/mingw-w64-crt/stdio/_fstat32.c
+@@ -0,0 +1,48 @@
++/**
++ * This file has no copyright assigned and is placed in the Public Domain.
++ * This file is part of the mingw-w64 runtime package.
++ * No warranty is given; refer to the file DISCLAIMER.PD within this package.
++ */
++
++#include <sys/stat.h>
++#include <stdint.h>
++#include <errno.h>
++
++/* When the file time does not fit into the st_Xtime field:
++ *           crtdll-msvcr71   msvcr80+
++ * st_Xtime       -1             -1
++ * errno       no change       EINVAL
++ * returns         0              0
++ *
++ * When the file size does not fit into the st_size field:
++ *           crtdll-msvcr90   msvcr100   msvcr110+
++ * st_size      truncate         0           0
++ * errno       no change     no change   EOVERFLOW
++ * returns         0            -1          -1
++ *
++ * This file is used only for 64-bit msvcrt.dll builds.
++ * The stat function on 32-bit system os msvcrt.dll behaves
++ * like the msvcr80/msvcr90, so use this behavior.
++ */
++int __cdecl _fstat32(int _FileDes,struct _stat32 *_Stat)
++{
++  struct _stat64 st;
++  int ret=_fstat64(_FileDes,&st);
++  if (ret != 0)
++    return ret;
++  _Stat->st_dev=st.st_dev;
++  _Stat->st_ino=st.st_ino;
++  _Stat->st_mode=st.st_mode;
++  _Stat->st_nlink=st.st_nlink;
++  _Stat->st_uid=st.st_uid;
++  _Stat->st_gid=st.st_gid;
++  _Stat->st_rdev=st.st_rdev;
++  _Stat->st_size=(_off_t) st.st_size; /* truncate 64-bit st_size to 32-bit */
++  _Stat->st_atime=((st.st_atime < 0 || st.st_atime > INT32_MAX) ? -1 : st.st_atime);
++  _Stat->st_mtime=((st.st_mtime < 0 || st.st_mtime > INT32_MAX) ? -1 : st.st_mtime);
++  _Stat->st_ctime=((st.st_ctime < 0 || st.st_ctime > INT32_MAX) ? -1 : st.st_ctime);
++  if (_Stat->st_atime == -1 || _Stat->st_mtime == -1 || _Stat->st_ctime == -1)
++    errno = EINVAL;
++  return 0;
++}
++int (__cdecl *__MINGW_IMP_SYMBOL(_fstat32))(int, struct _stat32 *) = _fstat32;
+diff --git a/mingw-w64-crt/stdio/_stat32.c b/mingw-w64-crt/stdio/_stat32.c
+new file mode 100644
+index 000000000..34cb4e3bc
+--- /dev/null
++++ b/mingw-w64-crt/stdio/_stat32.c
+@@ -0,0 +1,48 @@
++/**
++ * This file has no copyright assigned and is placed in the Public Domain.
++ * This file is part of the mingw-w64 runtime package.
++ * No warranty is given; refer to the file DISCLAIMER.PD within this package.
++ */
++
++#include <sys/stat.h>
++#include <stdint.h>
++#include <errno.h>
++
++/* When the file time does not fit into the st_Xtime field:
++ *           crtdll-msvcr71   msvcr80+
++ * st_Xtime       -1             -1
++ * errno       no change       EINVAL
++ * returns         0              0
++ *
++ * When the file size does not fit into the st_size field:
++ *           crtdll-msvcr90   msvcr100   msvcr110+
++ * st_size      truncate         0           0
++ * errno       no change     no change   EOVERFLOW
++ * returns         0            -1          -1
++ *
++ * This file is used only for 64-bit msvcrt.dll builds.
++ * The stat function on 32-bit system os msvcrt.dll behaves
++ * like the msvcr80/msvcr90, so use this behavior.
++ */
++int __cdecl _stat32(const char *_Name,struct _stat32 *_Stat)
++{
++  struct _stat64 st;
++  int ret=_stat64(_Name,&st);
++  if (ret != 0)
++    return ret;
++  _Stat->st_dev=st.st_dev;
++  _Stat->st_ino=st.st_ino;
++  _Stat->st_mode=st.st_mode;
++  _Stat->st_nlink=st.st_nlink;
++  _Stat->st_uid=st.st_uid;
++  _Stat->st_gid=st.st_gid;
++  _Stat->st_rdev=st.st_rdev;
++  _Stat->st_size=(_off_t) st.st_size; /* truncate 64-bit st_size to 32-bit */
++  _Stat->st_atime=((st.st_atime < 0 || st.st_atime > INT32_MAX) ? -1 : st.st_atime);
++  _Stat->st_mtime=((st.st_mtime < 0 || st.st_mtime > INT32_MAX) ? -1 : st.st_mtime);
++  _Stat->st_ctime=((st.st_ctime < 0 || st.st_ctime > INT32_MAX) ? -1 : st.st_ctime);
++  if (_Stat->st_atime == -1 || _Stat->st_mtime == -1 || _Stat->st_ctime == -1)
++    errno = EINVAL;
++  return 0;
++}
++int (__cdecl *__MINGW_IMP_SYMBOL(_stat32))(const char *, struct _stat32 *) = _stat32;
+diff --git a/mingw-w64-crt/stdio/_wstat32.c b/mingw-w64-crt/stdio/_wstat32.c
+new file mode 100644
+index 000000000..8ef681a42
+--- /dev/null
++++ b/mingw-w64-crt/stdio/_wstat32.c
+@@ -0,0 +1,48 @@
++/**
++ * This file has no copyright assigned and is placed in the Public Domain.
++ * This file is part of the mingw-w64 runtime package.
++ * No warranty is given; refer to the file DISCLAIMER.PD within this package.
++ */
++
++#include <sys/stat.h>
++#include <stdint.h>
++#include <errno.h>
++
++/* When the file time does not fit into the st_Xtime field:
++ *           crtdll-msvcr71   msvcr80+
++ * st_Xtime       -1             -1
++ * errno       no change       EINVAL
++ * returns         0              0
++ *
++ * When the file size does not fit into the st_size field:
++ *           crtdll-msvcr90   msvcr100   msvcr110+
++ * st_size      truncate         0           0
++ * errno       no change     no change   EOVERFLOW
++ * returns         0            -1          -1
++ *
++ * This file is used only for 64-bit msvcrt.dll builds.
++ * The stat function on 32-bit system os msvcrt.dll behaves
++ * like the msvcr80/msvcr90, so use this behavior.
++ */
++int __cdecl _wstat32(const wchar_t *_Name,struct _stat32 *_Stat)
++{
++  struct _stat64 st;
++  int ret=_wstat64(_Name,&st);
++  if (ret != 0)
++    return ret;
++  _Stat->st_dev=st.st_dev;
++  _Stat->st_ino=st.st_ino;
++  _Stat->st_mode=st.st_mode;
++  _Stat->st_nlink=st.st_nlink;
++  _Stat->st_uid=st.st_uid;
++  _Stat->st_gid=st.st_gid;
++  _Stat->st_rdev=st.st_rdev;
++  _Stat->st_size=(_off_t) st.st_size; /* truncate 64-bit st_size to 32-bit */
++  _Stat->st_atime=((st.st_atime < 0 || st.st_atime > INT32_MAX) ? -1 : st.st_atime);
++  _Stat->st_mtime=((st.st_mtime < 0 || st.st_mtime > INT32_MAX) ? -1 : st.st_mtime);
++  _Stat->st_ctime=((st.st_ctime < 0 || st.st_ctime > INT32_MAX) ? -1 : st.st_ctime);
++  if (_Stat->st_atime == -1 || _Stat->st_mtime == -1 || _Stat->st_ctime == -1)
++    errno = EINVAL;
++  return 0;
++}
++int (__cdecl *__MINGW_IMP_SYMBOL(_wstat32))(const wchar_t *, struct _stat32 *) = _wstat32;
+

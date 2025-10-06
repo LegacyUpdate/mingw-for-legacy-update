@@ -1,0 +1,46 @@
+From 894de991e541546e14153f329356767468aff8f1 Mon Sep 17 00:00:00 2001
+From: LIU Hao <lh_mouse@126.com>
+Date: Tue, 15 Jul 2025 10:32:42 +0800
+Subject: [PATCH] crt: Check for compiler support for `no_stack_protector`
+
+This commit contains two changes:
+
+1. `no_stack_protector` is applied only when one of the `-fstack-protector*`
+   options is in effect, for example, when someone builds the CRT with such
+   an option in their `CFLAGS`.
+
+2. When the attribute is required but is not supported by the compiler, it
+   results in broken executables. Now in this case an error is triggered.
+
+Signed-off-by: LIU Hao <lh_mouse@126.com>
+(cherry picked from commit f6f95ec556ff0ada2d65b5e1fcc2a30a56da4cab)
+Signed-off-by: LIU Hao <lh_mouse@126.com>
+---
+ mingw-w64-crt/ssp/stack_chk_guard.c | 10 +++++++++-
+ 1 file changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/mingw-w64-crt/ssp/stack_chk_guard.c b/mingw-w64-crt/ssp/stack_chk_guard.c
+index be43d8c7e..b9a8584c1 100644
+--- a/mingw-w64-crt/ssp/stack_chk_guard.c
++++ b/mingw-w64-crt/ssp/stack_chk_guard.c
+@@ -10,10 +10,18 @@
+ 
+ void *__stack_chk_guard;
+ 
++#if defined __SSP__ || defined __SSP_STRONG__ || defined __SSP_ALL__
+ // This function requires `no_stack_protector` because it changes the
+ // value of `__stack_chk_guard`, causing stack checks to fail before
+ // returning from this function.
+-__attribute__((__constructor__, __no_stack_protector__))
++# if (defined __GNUC__ && __GNUC__ >= 11) || (defined __clang__ && __clang_major__ >= 7)
++__attribute__((__no_stack_protector__))
++# else
++#  error This file can not be built with stack protector enabled. Remove \
++         -fstack-protector* options from CFLAGS.
++# endif
++#endif
++__attribute__((__constructor__))
+ static void __cdecl init(void)
+ {
+   unsigned int ui;
+

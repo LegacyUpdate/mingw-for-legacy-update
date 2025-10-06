@@ -26,6 +26,33 @@ zlib 1.3.1
 
 NSIS 3.11
 
+# Patches Used
+
+As part of diagnosing problems that some users were happening on 64-bit copies
+of Windows XP/Server 2003, as well as Vista/Server 2008 in some cases, I
+discovered that we were bumping into an underflow in MinGW's stat32 functions.
+This occurs on some systems where the system time is set to prior to 1970
+when the CMOS battery is faulty, and a user forgets to set it. Windows itself
+works fine because it contains modified versions of these functions in the msvcrt
+on 64-bit systems. To work around this, we're applying patches from upstream at
+https://github.com/mingw-w64/mingw-w64/commits/v13.x/ to check for the underflow,
+and provide the necessary emulations of `_fstat32, _stat32, _wstat32, _fstat32i64,
+_stat32i64, and _wstat32i64` for 64-bit versions of MinGW. We're also fixing stack
+smashing protection as well. These patches can be found in the 'patches/' directory
+for review, and it's recommended that builders copy them into the same directory
+that their source tarballs are in.
+
+There are six patches in total:
+
+```
+001-mingw-stack-smashing-protection-fix.patch
+002-mingw-underflow-check-stat32i64.patch
+003-mingw-emulation-_fstat32-_stat32-_wstat32-functions-for-64-bit-msvcrt.patch
+004-mingw-emulation-_fstat32i64-_stat32i64-_wstat32i64-for-64-bit-msvcrt.patch
+005-mingw-regenerate-crt_Makefile-after-emulation-fixes.patch
+006-mingw-check-compiler-support-for-stack-protection.patch
+```
+
 ## Build Process
 
 # Stage 1: Create a directory in /opt to hold our toolchain
