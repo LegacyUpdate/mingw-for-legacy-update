@@ -137,10 +137,24 @@ libraries, includes plugin support, and knows how to use the MinGW C Runtime.
 sh ../scripts/006-gcc-x86.sh
 ```
 
-# Stage 8.5: Install a copy of zlib (if you are compiling NSIS).
+# Stage 9: Install widl for the x86 version.
 
-This step is only required if you are also compiling a custom version of NSIS.
-For LegacyUpdate, this is required to use NSIS 3.11 on Ubuntu 22.04, which we
+This program is now needed to compile LegacyUpdate. It's job is to generate
+a header file, as well as client and server stubs, proxy and dlldata files,
+a typelib, or a UUID file depending on the contents of the IDL file. It comes
+from Wine, but a copy is available in the mingw-w64-tools directory, which
+is what we'll use for this toolchain. Note that a more up to date version is
+available on the LegacyUpdate CI server, as it uses whichever version of Wine
+is in Gaming Linux From Scratch at the time.
+
+```
+sh ../scripts/016-mingw-tools-widl-x86.sh
+```
+
+# Stage 9: Install zlib for the x86 version.
+
+This step is required if you are also using our custom copy of NSIS.
+For LegacyUpdate, this is required to use NSIS 3.11 on Ubuntu 24.04, which we
 need to use to fix a security vulnerability in NSIS. NSIS requires zlib to be
 installed in both the x86 and x86_64 versions of MinGW.
 
@@ -148,7 +162,7 @@ installed in both the x86 and x86_64 versions of MinGW.
 sh ../scripts/013-zlib-x86.sh
 ```
 
-# Stage 9: Test the compiler for x86.
+# Stage 10: Test the compiler for x86.
 
 The next step is to test our compiler. We'll use a C file that prints a line of
 text to the screen. After the file is compiled, you should copy it to a Windows
@@ -183,7 +197,7 @@ That should result in the following output:
 printf-x86.exe: PE32 executable (console) Intel 80386, for MS Windows, 15 sections
 ```
 
-# Stage 10: Remove some unnecessary files from the toolchain for x86.
+# Stage 11: Remove some unnecessary files from the toolchain for x86.
 
 There's quite a few things here which just take up space, but won't be needed
 in the CI system. We'll remove things like manual pages and info documents, as
@@ -197,7 +211,7 @@ sudo strip --strip-unneeded /opt/gcc-15.1-binutils-2.45-mingw-v13.0.0-i686/mingw
 sudo strip --strip-unneeded /opt/gcc-15.1-binutils-2.45-mingw-v13.0.0-i686/bin/*
 ```
 
-# Stage 11: Create a tarball with the MinGW toolchain just created for x86.
+# Stage 12: Create a tarball with the MinGW toolchain just created for x86.
 
 The final part of building the MinGW toolchain for x86 is to compress and upload
 it for use with the LegacyUpdate CI system. If you are using these instructions
@@ -208,7 +222,7 @@ cd /opt
 sudo tar -cJvf gcc-15.1-binutils-2.45-mingw-v13.0.0-i686.tar.xz gcc-15.1-binutils-2.45-mingw-v13.0.0-i686/
 ```
 
-# Stage 12: Install the headers for the x86_64 version.
+# Stage 13: Install the headers for the x86_64 version.
 
 This package includes the headers for the Win32 API provided by MinGW, and is
 needed for all of the packages used in the toolchain.
@@ -217,7 +231,7 @@ needed for all of the packages used in the toolchain.
 sh ../scripts/007-headers-install-x86_64.sh
 ```
 
-# Stage 13: Install Binutils for the x86_64 version.
+# Stage 14: Install Binutils for the x86_64 version.
 
 Binutils provides the linker for the GNU Toolchain as well as several other
 useful utilities for using ELF (and in our case later) PE binaries and libraries.
@@ -228,7 +242,7 @@ resources, and more.
 sh ../scripts/008-binutils-x86_64.sh
 ```
 
-# Stage 14: Install the static version of GCC for the x86_64 version.
+# Stage 15: Install the static version of GCC for the x86_64 version.
 
 The static version is needed to build the MinGW C Runtime, winpthreads, and
 other important components which are required to build the full GCC.
@@ -237,7 +251,7 @@ other important components which are required to build the full GCC.
 sh ../scripts/009-gcc-static-x86_64.sh
 ```
 
-# Stage 15: Install the MinGW C Runtime and other Win32 libraries for the x86_64 version.
+# Stage 16: Install the MinGW C Runtime and other Win32 libraries for the x86_64 version.
 
 This package contains the libraries which implement the Win32 API.
 
@@ -245,7 +259,7 @@ This package contains the libraries which implement the Win32 API.
 sh ../scripts/010-mingw-x86_64.sh
 ```
 
-# Stage 16: Install the MinGW winpthreads library for the x86_64 version.
+# Stage 17: Install the MinGW winpthreads library for the x86_64 version.
 
 This includes a POSIX threading implementation, which is needed by GCC. Some
 people have had success building this as part of MinGW's C Runtime, but in our
@@ -256,7 +270,7 @@ separately. Without this we'll get a bunch of linker errors.
 sh ../scripts/011-mingw-winpthreads-x86_64.sh
 ```
 
-# Stage 17: Install the final version of GCC for the x86_64 version.
+# Stage 18: Install the final version of GCC for the x86_64 version.
 
 This version is a more complete version of GCC that now has all of it's
 libraries, includes plugin support, and knows how to use the MinGW C Runtime.
@@ -265,10 +279,24 @@ libraries, includes plugin support, and knows how to use the MinGW C Runtime.
 sh ../scripts/012-gcc-x86_64.sh
 ```
 
-# Stage 17.5: Install a copy of zlib (if you are compiling NSIS).
+# Stage 19: Install widl for the x86_64 version.
 
-This step is only required if you are also compiling a custom version of NSIS.
-For LegacyUpdate, this is required to use NSIS 3.11 on Ubuntu 22.04, which we
+This program is now needed to compile LegacyUpdate. It's job is to generate
+a header file, as well as client and server stubs, proxy and dlldata files,
+a typelib, or a UUID file depending on the contents of the IDL file. It comes
+from Wine, but a copy is available in the mingw-w64-tools directory, which
+is what we'll use for this toolchain. Note that a more up to date version is
+available on the LegacyUpdate CI server, as it uses whichever version of Wine
+is in Gaming Linux From Scratch at the time.
+
+```
+sh ../scripts/017-mingw-tools-widl-x86_64.sh
+```
+
+# Stage 20: Install a copy of zlib for the x86_64 version.
+
+This step is required if you are using our custom copy of NSIS.
+For LegacyUpdate, this is required to use NSIS 3.11 on Ubuntu 24.04, which we
 need to use to fix a security vulnerability in NSIS. NSIS requires zlib to be
 installed in both the x86 and x86_64 versions of MinGW.
 
@@ -276,7 +304,7 @@ installed in both the x86 and x86_64 versions of MinGW.
 sh ../scripts/014-zlib-x86_64.sh
 ```
 
-# Stage 18: Test the compiler for x86_64.
+# Stage 21: Test the compiler for x86_64.
 
 The next step is to test our compiler. We'll use a C file that prints a line of
 text to the screen. After the file is compiled, you should copy it to a Windows
@@ -310,7 +338,7 @@ That should result in the following output:
 ```
 ./printf-x86_64.exe: PE32+ executable (console) x86-64, for MS Windows, 16 sections
 ```
-# Stage 19: Remove some unnecessary files from the toolchain for x86_64.
+# Stage 22: Remove some unnecessary files from the toolchain for x86_64.
 
 There's quite a few things here which just take up space, but won't be needed
 in the CI system. We'll remove things like manual pages and info documents, as
@@ -324,7 +352,7 @@ sudo strip --strip-unneeded /opt/gcc-15.1-binutils-2.45-mingw-v13.0.0-x86_64/min
 sudo strip --strip-unneeded /opt/gcc-15.1-binutils-2.45-mingw-v13.0.0-x86_64/bin/*
 ```
 
-# Stage 20: Create a tarball with the MinGW toolchain just created for x86_64.
+# Stage 23: Create a tarball with the MinGW toolchain just created for x86_64.
 
 The final part of building the MinGW toolchain for x86_64 is to compress and upload
 it for use with the LegacyUpdate CI system. If you are using these instructions
@@ -335,13 +363,13 @@ cd /opt
 sudo tar -cJvf gcc-15.1-binutils-2.45-mingw-v13.0.0-x86_64.tar.xz gcc-15.1-binutils-2.45-mingw-v13.0.0-x86_64/
 ```
 
-# Stage 21: Create a directory to hold our new copy of NSIS
+# Stage 24: Create a directory to hold our new copy of NSIS
 
 ```
 sudo mkdir -pv /opt/nsis-3.11
 ```
 
-# Stage 22: Install our new copy of NSIS
+# Stage 25: Install our new copy of NSIS
 
 Because of a security vulnerability, we need to update our copy of NSIS. The
 version shipped with Ubuntu 24.04 does not have the fix. If you are installing
@@ -353,7 +381,7 @@ run scripts 013 and 014 separately without recompiling the entire toolchain.
 sh ../scripts/015-nsis.sh
 ```
 
-# Stage 23: Create a tarball with our new copy of NSIS.
+# Stage 26: Create a tarball with our new copy of NSIS.
 
 ```
 cd /opt
