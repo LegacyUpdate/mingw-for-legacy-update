@@ -4,7 +4,7 @@
 
 MinGW: https://sourceforge.net/projects/mingw-w64/files/mingw-w64/mingw-w64-release/mingw-w64-v13.0.0.tar.bz2
 
-GCC: https://ftp.gnu.org/gnu/gcc/gcc-15.1.0/gcc-15.1.0.tar.xz
+GCC: https://ftp.gnu.org/gnu/gcc/gcc-15.2.0/gcc-15.2.0.tar.xz
 
 Binutils: https://sourceware.org/pub/binutils/releases/binutils-2.45.tar.xz
 
