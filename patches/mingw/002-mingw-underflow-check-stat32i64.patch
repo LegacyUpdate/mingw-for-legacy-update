@@ -1,0 +1,72 @@
+From 5ffe43c45ed06f819da4d4b0d3988c5a3a087fcf Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Pali=20Roh=C3=A1r?= <pali.rohar@gmail.com>
+Date: Sat, 21 Jun 2025 13:37:51 +0200
+Subject: [PATCH] crt: Check for underflow in *stat32i64 functions
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+msvcrt *stat32* functions do not work for time before year 1970.
+Add similar underflow checks into mingw-w64 emulations.
+
+Signed-off-by: Martin Storsjö <martin@martin.st>
+(cherry picked from commit 75a467dc2944daa9b07ccd68dcea147c438ecf68)
+Signed-off-by: Martin Storsjö <martin@martin.st>
+---
+ mingw-w64-crt/stdio/_fstat32i64.c | 6 +++---
+ mingw-w64-crt/stdio/_stat32i64.c  | 6 +++---
+ mingw-w64-crt/stdio/_wstat32i64.c | 6 +++---
+ 3 files changed, 9 insertions(+), 9 deletions(-)
+
+diff --git a/mingw-w64-crt/stdio/_fstat32i64.c b/mingw-w64-crt/stdio/_fstat32i64.c
+index 1bd63cd60..d10c35577 100644
+--- a/mingw-w64-crt/stdio/_fstat32i64.c
++++ b/mingw-w64-crt/stdio/_fstat32i64.c
+@@ -30,9 +30,9 @@ int __cdecl _fstat32i64(int _FileDes,struct _stat32i64 *_Stat)
+   _Stat->st_gid=st.st_gid;
+   _Stat->st_rdev=st.st_rdev;
+   _Stat->st_size=st.st_size;
+-  _Stat->st_atime=((st.st_atime > INT32_MAX) ? -1 : st.st_atime);
+-  _Stat->st_mtime=((st.st_mtime > INT32_MAX) ? -1 : st.st_mtime);
+-  _Stat->st_ctime=((st.st_ctime > INT32_MAX) ? -1 : st.st_ctime);
++  _Stat->st_atime=((st.st_atime < 0 || st.st_atime > INT32_MAX) ? -1 : st.st_atime);
++  _Stat->st_mtime=((st.st_mtime < 0 || st.st_mtime > INT32_MAX) ? -1 : st.st_mtime);
++  _Stat->st_ctime=((st.st_ctime < 0 || st.st_ctime > INT32_MAX) ? -1 : st.st_ctime);
+   return 0;
+ }
+ int (__cdecl *__MINGW_IMP_SYMBOL(_fstat32i64))(int, struct _stat32i64 *) = _fstat32i64;
+diff --git a/mingw-w64-crt/stdio/_stat32i64.c b/mingw-w64-crt/stdio/_stat32i64.c
+index 641f2f556..3d3d2702a 100644
+--- a/mingw-w64-crt/stdio/_stat32i64.c
++++ b/mingw-w64-crt/stdio/_stat32i64.c
+@@ -30,9 +30,9 @@ int __cdecl _stat32i64(const char *_Name,struct _stat32i64 *_Stat)
+   _Stat->st_gid=st.st_gid;
+   _Stat->st_rdev=st.st_rdev;
+   _Stat->st_size=st.st_size;
+-  _Stat->st_atime=((st.st_atime > INT32_MAX) ? -1 : st.st_atime);
+-  _Stat->st_mtime=((st.st_mtime > INT32_MAX) ? -1 : st.st_mtime);
+-  _Stat->st_ctime=((st.st_ctime > INT32_MAX) ? -1 : st.st_ctime);
++  _Stat->st_atime=((st.st_atime < 0 || st.st_atime > INT32_MAX) ? -1 : st.st_atime);
++  _Stat->st_mtime=((st.st_mtime < 0 || st.st_mtime > INT32_MAX) ? -1 : st.st_mtime);
++  _Stat->st_ctime=((st.st_ctime < 0 || st.st_ctime > INT32_MAX) ? -1 : st.st_ctime);
+   return 0;
+ }
+ int (__cdecl *__MINGW_IMP_SYMBOL(_stat32i64))(const char *, struct _stat32i64 *) = _stat32i64;
+diff --git a/mingw-w64-crt/stdio/_wstat32i64.c b/mingw-w64-crt/stdio/_wstat32i64.c
+index dab760069..b6f2e0b0c 100644
+--- a/mingw-w64-crt/stdio/_wstat32i64.c
++++ b/mingw-w64-crt/stdio/_wstat32i64.c
+@@ -30,9 +30,9 @@ int __cdecl _wstat32i64(const wchar_t *_Name,struct _stat32i64 *_Stat)
+   _Stat->st_gid=st.st_gid;
+   _Stat->st_rdev=st.st_rdev;
+   _Stat->st_size=st.st_size;
+-  _Stat->st_atime=((st.st_atime > INT32_MAX) ? -1 : st.st_atime);
+-  _Stat->st_mtime=((st.st_mtime > INT32_MAX) ? -1 : st.st_mtime);
+-  _Stat->st_ctime=((st.st_ctime > INT32_MAX) ? -1 : st.st_ctime);
++  _Stat->st_atime=((st.st_atime < 0 || st.st_atime > INT32_MAX) ? -1 : st.st_atime);
++  _Stat->st_mtime=((st.st_mtime < 0 || st.st_mtime > INT32_MAX) ? -1 : st.st_mtime);
++  _Stat->st_ctime=((st.st_ctime < 0 || st.st_ctime > INT32_MAX) ? -1 : st.st_ctime);
+   return 0;
+ }
+ int (__cdecl *__MINGW_IMP_SYMBOL(_wstat32i64))(const wchar_t *, struct _stat32i64 *) = _wstat32i64;
+
