@@ -1,0 +1,66 @@
+From 413668c681d55c21d09454bee769c1561d7d55a6 Mon Sep 17 00:00:00 2001
+From: Richard Biener <rguenther@suse.de>
+Date: Thu, 30 Oct 2025 13:30:21 +0100
+Subject: [PATCH] [i386] Fix type in ix86_move_max setup
+
+There's a typo in the way we compute opts->x_ix86_move_max:
+
+  if (opts_set->x_ix86_move_max == PVW_NONE)
+    {
+      /* Set the maximum number of bits can be moved from memory to
+         memory efficiently.  */
+      if (opts_set->x_prefer_vector_width_type != PVW_NONE)
+        opts->x_ix86_move_max = opts->x_prefer_vector_width_type;
+      else if (ix86_tune_features[X86_TUNE_AVX512_MOVE_BY_PIECES])
+        opts->x_ix86_move_max = PVW_AVX512;
+      else if (ix86_tune_features[X86_TUNE_AVX256_MOVE_BY_PIECES])
+        opts->x_ix86_move_max = PVW_AVX256;
+      else
+        {
+          opts->x_ix86_move_max = opts->x_prefer_vector_width_type;
+ /* */    if (opts_set->x_ix86_move_max == PVW_NONE)
+            {
+              if (TARGET_AVX512F_P (opts->x_ix86_isa_flags))
+                opts->x_ix86_move_max = PVW_AVX512;
+              /* Align with vectorizer to avoid potential STLF issue.  */
+              else if (TARGET_AVX_P (opts->x_ix86_isa_flags))
+                opts->x_ix86_move_max = PVW_AVX256;
+              else
+                opts->x_ix86_move_max = PVW_AVX128;
+            }
+        }
+    }
+
+as written the /* */ condition is redundant with the outermost one.
+But intended is (IMO) that the earlier set opts->x_prefer_vector_width_type
+via X86_TUNE_{AVX128,AVX256}_OPTIMAL takes precedence over the ISA
+based setup that follows.  So instead of checking opts_set we want
+to check whether the previous assignment left us with still PVW_NONE.
+The issue makes us ignore X86_TUNE_AVX128_OPTIMAL/X86_TUNE_AVX256_OPTIMAL
+when determining opts->x_ix86_move_max.
+
+	* config/i386/i386-options.cc (ix86_option_override_internal):
+	Fix check during opts->x_ix86_move_max initialization.
+
+(cherry picked from commit 3474482bb57604f6581f6e7dc5b2917495d42502)
+---
+ gcc/config/i386/i386-options.cc | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/gcc/config/i386/i386-options.cc b/gcc/config/i386/i386-options.cc
+index 964449fa8cd7..4d52d102a550 100644
+--- a/gcc/config/i386/i386-options.cc
++++ b/gcc/config/i386/i386-options.cc
+@@ -3047,7 +3047,7 @@ ix86_option_override_internal (bool main_args_p,
+       else
+ 	{
+ 	  opts->x_ix86_move_max = opts->x_prefer_vector_width_type;
+-	  if (opts_set->x_ix86_move_max == PVW_NONE)
++	  if (opts->x_ix86_move_max == PVW_NONE)
+ 	    {
+ 	      if (TARGET_AVX512F_P (opts->x_ix86_isa_flags)
+ 		  && TARGET_EVEX512_P (opts->x_ix86_isa_flags2))
+-- 
+2.43.7
+
+

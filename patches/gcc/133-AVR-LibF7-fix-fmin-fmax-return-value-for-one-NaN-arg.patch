@@ -1,0 +1,341 @@
+From 038bb0fb0cc9fbfc26a96b8f3854abc85ba5df8a Mon Sep 17 00:00:00 2001
+From: Georg-Johann Lay <avr@gjlay.de>
+Date: Sun, 5 Oct 2025 20:56:56 +0200
+Subject: [PATCH] AVR/LibF7: target/122177 - fix fmin / fmax return value for
+ one NaN arg.
+
+fmin and fmax should return the non-NaN argument in the case where
+exactly one argument is a NaN.
+
+Moreover, IEEE double fmin and fmax can be performed without
+first converting the args to the internal representation and
+then converting back again.
+
+	PR target/122177
+libgcc/config/avr/libf7/
+	* libf7-common.mk (m_ddd): Remove: fmin, fmax.
+	(F7_ASM_PARTS): Add: D_fminfmax.
+	* libf7-asm.sx (D_fmanfmax): New module.
+	* f7-wraps.h: Rebuild.
+
+gcc/testsuite/
+	* gcc.target/avr/fminfmax-1.c: New test.
+
+(cherry picked from commit efb3cd64fdefab88c7787b16ad33be33f4c4a2a4)
+---
+ gcc/testsuite/gcc.target/avr/fminfmax-1.c | 116 ++++++++++++++++++++++
+ libgcc/config/avr/libf7/f7-wraps.h        |  26 +----
+ libgcc/config/avr/libf7/libf7-asm.sx      |  90 ++++++++++++++++-
+ libgcc/config/avr/libf7/libf7-common.mk   |   4 +-
+ 4 files changed, 206 insertions(+), 30 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.target/avr/fminfmax-1.c
+
+diff --git a/gcc/testsuite/gcc.target/avr/fminfmax-1.c b/gcc/testsuite/gcc.target/avr/fminfmax-1.c
+new file mode 100644
+index 000000000000..eba910cff8c3
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/avr/fminfmax-1.c
+@@ -0,0 +1,116 @@
++/* { dg-do run { target { ! avr_tiny } } } */
++/* { dg-additional-options { -std=gnu99 -Os -mcall-prologues } } */
++
++typedef __INT8_TYPE__   int8_t;
++typedef __UINT8_TYPE__  uint8_t;
++typedef __UINT16_TYPE__ uint16_t;
++typedef __UINT64_TYPE__ uint64_t;
++typedef __INT64_TYPE__  int64_t;
++
++#define ARRAY_SIZE(X) (sizeof(X) / sizeof(*X))
++
++const __flash uint64_t vals[] =
++  {
++    // NaNs
++    0xffffffffffffffff,
++    0x7fffffffffffffff,
++    0xfff0000000000001,
++    0x7ff0000000000001,
++
++    // Some non-NaN doubles, increasing in magnitude.
++    0xfff0000000000000, // -Inf
++    0xffefffffffffffff,
++    0xffe0000000000000,
++    0x8010000000000000,
++    0x800fffffffffffff,
++    0x800ffffffffffffe,
++    0x8007fffffffffffe,
++    0x8000000000000001,
++    0x0000000000000000,
++    0x0000000000000001,
++    0x0007fffffffffffe,
++    0x000ffffffffffffe,
++    0x000fffffffffffff,
++    0x0010000000000000,
++    0x7fe0000000000000,
++    0x7fefffffffffffff,
++    0x7ff0000000000000  // +Inf
++  };
++
++#define SMASK ((uint64_t) 1 << 63)
++
++char d64_nan_p (uint64_t a)
++{
++  return (a & ~SMASK) > (uint64_t) 0x7ff << 52;
++}
++
++extern uint64_t xmin (uint64_t, uint64_t) __asm("__fmin");
++extern uint64_t xmax (uint64_t, uint64_t) __asm("__fmax");
++
++void test_fmin (uint8_t i, uint8_t j)
++{
++  uint64_t a = vals[i];
++  uint64_t b = vals[j];
++  uint64_t m = xmin (a, b);
++
++  char a_nan_p = d64_nan_p (a);
++  char b_nan_p = d64_nan_p (b);
++
++  if (a_nan_p + b_nan_p == 2)
++    {
++      if (!d64_nan_p (m))
++	__builtin_exit (__LINE__);
++    }
++  else
++    {
++      uint64_t r = 0?0
++	: a_nan_p ? b
++	: b_nan_p ? a
++	: i < j ? a : b;
++      if (r != m)
++	__builtin_exit (__LINE__);
++    }
++}
++
++
++void test_fmax (uint8_t i, uint8_t j)
++{
++  uint64_t a = vals[i];
++  uint64_t b = vals[j];
++  uint64_t m = xmax (a, b);
++
++  char a_nan_p = d64_nan_p (a);
++  char b_nan_p = d64_nan_p (b);
++
++  if (a_nan_p + b_nan_p == 2)
++    {
++      if (!d64_nan_p (m))
++	__builtin_exit (__LINE__);
++    }
++  else
++    {
++      uint64_t r = 0?0
++	: a_nan_p ? b
++	: b_nan_p ? a
++	: i > j ? a : b;
++      if (r != m)
++	__builtin_exit (__LINE__);
++    }
++}
++
++
++void tests (void)
++{
++  for (uint8_t i = 0; i < ARRAY_SIZE (vals); ++i)
++    for (uint8_t j = 0; j < ARRAY_SIZE (vals); ++j)
++      {
++	test_fmin (i, j);
++      }
++}
++
++
++int main (void)
++{
++  tests ();
++  return 0;
++}
+diff --git a/libgcc/config/avr/libf7/f7-wraps.h b/libgcc/config/avr/libf7/f7-wraps.h
+index 7c39783aef05..9033e962ad27 100644
+--- a/libgcc/config/avr/libf7/f7-wraps.h
++++ b/libgcc/config/avr/libf7/f7-wraps.h
+@@ -169,7 +169,7 @@ _ENDF __extendsfdf2
+ 
+ ;; Functions that usually live in libm:  Depending on [long] double layout,
+ ;; define <name> and <name>l as weak alias(es) of __<name> for <name> in:
+-;; pow fmin fmax fmod hypot atan2 fdim
++;; pow fmod hypot atan2 fdim
+ 
+ ;; double __pow (double, double)
+ #ifdef F7MOD_D_pow_
+@@ -183,30 +183,6 @@ _DEFUN __pow
+ _ENDF __pow
+ #endif /* F7MOD_D_pow_ */
+ 
+-;; double __fmin (double, double)
+-#ifdef F7MOD_D_fmin_
+-_DEFUN __fmin
+-    DALIAS fmin
+-    LALIAS fminl
+-    .global F7_NAME(fmin)
+-    ldi     ZH,     hi8(gs(F7_NAME(fmin)))
+-    ldi     ZL,     lo8(gs(F7_NAME(fmin)))
+-    F7jmp   call_ddd
+-_ENDF __fmin
+-#endif /* F7MOD_D_fmin_ */
+-
+-;; double __fmax (double, double)
+-#ifdef F7MOD_D_fmax_
+-_DEFUN __fmax
+-    DALIAS fmax
+-    LALIAS fmaxl
+-    .global F7_NAME(fmax)
+-    ldi     ZH,     hi8(gs(F7_NAME(fmax)))
+-    ldi     ZL,     lo8(gs(F7_NAME(fmax)))
+-    F7jmp   call_ddd
+-_ENDF __fmax
+-#endif /* F7MOD_D_fmax_ */
+-
+ ;; double __fmod (double, double)
+ #ifdef F7MOD_D_fmod_
+ _DEFUN __fmod
+diff --git a/libgcc/config/avr/libf7/libf7-asm.sx b/libgcc/config/avr/libf7/libf7-asm.sx
+index 186beb29cc5a..33e8f78006cf 100644
+--- a/libgcc/config/avr/libf7/libf7-asm.sx
++++ b/libgcc/config/avr/libf7/libf7-asm.sx
+@@ -1765,10 +1765,14 @@ ENDF class_D
+ ;;; T = 0: Comparison is ordered, and Z, N, C, S flags are set according
+ ;;; to compare (double A, double B) as if set by a signed int comparison.
+ ;;; Note that f(+0) = f(-0) = 0.
+-;;; In any case, return R24 = 1.
++;;; In any case:
++;;; -  return R24 = 1.
++;;; -  return R25.0 = isNaN (A)
++;;; -  return R25.1 = isNaN (B)
+ DEFUN D_cmp
+     rcall   D_cmp.map_i64
+-    brts 9f
++    bld     __tmp_reg__, 0
++    push    __tmp_reg__
+     ;; Save A somewhere else...
+     wmov    AA6, A6
+     mov     AA5, A5
+@@ -1794,7 +1798,14 @@ DEFUN D_cmp
+     cpc     AA5, BB5
+     cpc     AA6, BB6
+     cpc     AA7, BB7
+-9:  ldi     r24, 1
++    pop     r25
++    ;; R25.0 <=> A is NaN
++    ;; R25.1 <=> B is NaN
++    ;; T <=> comparison is unordered
++    bld     r25, 1
++    sbrc    r25, 0
++    set
++    ldi     r24, 1
+     ret
+ 
+ ;;; A is NaN: Set T=1.
+@@ -1904,6 +1915,79 @@ _DEFUN __unorddf2
+ _ENDF __unorddf2
+ #endif /* F7MOD_D_unord_ */
+ 
++#ifdef F7MOD_D_fminfmax_
++_DEFUN __fmin
++DALIAS fmin
++LALIAS fminl
++    inc     __zero_reg__
++
++_LABEL __fmax
++DALIAS fmax
++LALIAS fmaxl
++    ;; Push A[].
++    push    r25
++    push    r24
++    push    r23
++    push    r22
++    push    r21
++    push    r20
++    push    r19
++    push    r18
++    ;; fmin or fmax
++    push    __zero_reg__
++    clr     __zero_reg__
++
++    XCALL   __gedf2
++
++    pop     __tmp_reg__
++    andi    r25, 0x3            ; NaNs?
++    brne .Lnan
++    ;; No NaNs involved.
++    eor     __tmp_reg__, r24    ; (f == fmin) ^ (A >= B)
++    brne 1f
++2:
++    ;; Return B since the cases are:
++    ;; fmax && A < B
++    ;; fmin && A >= B
++#ifdef __AVR_XMEGA__
++    in      XL, __SP_L__
++    in      XH, __SP_H__
++    adiw    XL, 8
++    out     __SP_L__, XL
++    out     __SP_H__, XH
++#else
++    pop r0  $  pop r0  $  pop r0  $  pop r0
++    pop r0  $  pop r0  $  pop r0  $  pop r0
++#endif
++    wmov    r24, r16
++    wmov    r22, r14
++    wmov    r20, r12
++    wmov    r18, r10
++    ret
++1:
++    ;; Return A since the cases are:
++    ;; fmax && A >= B
++    ;; fmin && A < B
++    pop     r18
++    pop     r19
++    pop     r20
++    pop     r21
++    pop     r22
++    pop     r23
++    pop     r24
++    pop     r25
++    ret
++
++.Lnan:
++    ;; There are NaNs.
++    ;; When only the 1st argument is a NaN, then return the 2nd argument
++    cpi     r25, 0x1
++    breq 2b
++    ;; When the 2nd argument is a NaN, then return the 1st argument.
++    ;; When both arguments are NaNs, then return NaN (e.g. the 1st argument).
++    rjmp 1b
++_ENDF __fmax
++#endif /* F7MOD_D_fminfmax_ */
+ 
+ #ifdef F7MOD_call_dd_
+ 
+diff --git a/libgcc/config/avr/libf7/libf7-common.mk b/libgcc/config/avr/libf7/libf7-common.mk
+index 0e6acfdbdf77..2d3adaf45697 100644
+--- a/libgcc/config/avr/libf7/libf7-common.mk
++++ b/libgcc/config/avr/libf7/libf7-common.mk
+@@ -24,7 +24,7 @@ F7_ASM_PARTS += store_expo sqrt16 sqrt_approx div
+ 
+ F7_ASM_PARTS += D_class D_fma D_powi
+ F7_ASM_PARTS += D_isnan D_isinf D_isfinite D_signbit D_copysign D_neg D_fabs
+-F7_ASM_PARTS += D_cmp D_eq D_ne D_ge D_gt D_le D_lt D_unord
++F7_ASM_PARTS += D_cmp D_eq D_ne D_ge D_gt D_le D_lt D_unord D_fminfmax
+ 
+ F7_ASM_PARTS += call_dd call_ddd
+ 
+@@ -35,7 +35,7 @@ g_xdd_cmp +=
+ g_dx += floatunsidf floatsidf extendsfdf2
+ g_xd += fixdfsi fixdfdi fixunsdfdi fixunsdfsi truncdfsf2
+ 
+-m_ddd += pow fmin fmax fmod hypot atan2 fdim
++m_ddd += pow fmod hypot atan2 fdim
+ m_ddx += ldexp frexp
+ m_dd += sqrt cbrt exp exp10 pow10 log log10 log2 sin cos tan cotan asin acos atan
+ m_dd += ceil floor trunc round sinh cosh tanh
+-- 
+2.43.7
+
+

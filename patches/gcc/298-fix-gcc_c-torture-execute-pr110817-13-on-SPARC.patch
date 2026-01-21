@@ -1,0 +1,100 @@
+From a45e792d2021a8134ac794a6ffb5d2fa4e0ea9a8 Mon Sep 17 00:00:00 2001
+From: Eric Botcazou <ebotcazou@adacore.com>
+Date: Tue, 6 Jan 2026 15:18:34 +0100
+Subject: [PATCH] Fix gcc.c-torture/execute/pr110817-[13].c on the SPARC
+
+As discussed in the audit trail, the TARGET_VECTORIZE_GET_MASK_MODE hook of
+the SPARC back-end always returns Pmode (SImode would probably have been OK)
+and this causes build_truth_vector_type_for_mode to generate questionable
+types like:
+
+<vector_type 0x7ffff6f6da80
+    type <boolean_type 0x7ffff6f6d9d8 public QI
+        size <integer_cst 0x7ffff6e04f18 constant 8>
+        unit-size <integer_cst 0x7ffff6e04f30 constant 1>
+        align:8 warn_if_not_align:0 symtab:0 alias-set -1 canonical-type
+0x7ffff6f6d9d8 precision:1 min <integer_cst 0x7ffff6f69678 -1> max
+<integer_cst 0x7ffff6f7deb8 0>>
+    DI
+    size <integer_cst 0x7ffff6e04e28 type <integer_type 0x7ffff6e150a8
+bitsizetype> constant 64>
+    unit-size <integer_cst 0x7ffff6e04e40 type <integer_type 0x7ffff6e15000
+sizetype> constant 8>
+    align:64 warn_if_not_align:0 symtab:0 alias-set -1 canonical-type
+0x7ffff6f6da80 nunits:1>
+
+which then go through this trick in store_constructor:
+
+        /* Use sign-extension for uniform boolean vectors with
+           integer modes and single-bit mask entries.
+           Effectively "vec_duplicate" for bitmasks.  */
+        if (elt_size == 1
+            && !TREE_SIDE_EFFECTS (exp)
+            && VECTOR_BOOLEAN_TYPE_P (type)
+            && SCALAR_INT_MODE_P (TYPE_MODE (type))
+            && (elt = uniform_vector_p (exp))
+            && !VECTOR_TYPE_P (TREE_TYPE (elt)))
+          {
+            rtx op0 = force_reg (TYPE_MODE (TREE_TYPE (elt)),
+                                 expand_normal (elt));
+            rtx tmp = gen_reg_rtx (mode);
+            convert_move (tmp, op0, 0);
+
+            /* Ensure no excess bits are set.
+               GCN needs this for nunits < 64.
+               x86 needs this for nunits < 8.  */
+            auto nunits = TYPE_VECTOR_SUBPARTS (type).to_constant ();
+            if (maybe_ne (GET_MODE_PRECISION (mode), nunits))
+              tmp = expand_binop (mode, and_optab, tmp,
+                          GEN_INT ((HOST_WIDE_INT_1U << nunits) - 1),
+                          target, true, OPTAB_WIDEN);
+            if (tmp != target)
+              emit_move_insn (target, tmp);
+            break;
+          }
+
+to yield code that cannot possibly work on a big-endian platform.
+
+Coaxing build_truth_vector_type_for_mode to generate more sensible types
+fixes the problem but runs afoul of the TARGET_VECTORIZE_GET_MASK_MODE
+hook for some AVX512 modes, so is probably not worth the risk.  Moreover,
+I didn't manage to come up with a big-endian implementation of the above
+trick that would make some sense for the questionable vector types, so the
+fix simply disables it.
+
+gcc/
+	PR target/121192
+	* expr.cc (store_constructor) <VECTOR_TYPE>: Disable the special
+	trick for uniform boolean vectors with integer modes and single-bit
+	mask entries on big-endian platforms.
+---
+ gcc/expr.cc | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/gcc/expr.cc b/gcc/expr.cc
+index 48ad1e8d1d6a..e76acdea77c8 100644
+--- a/gcc/expr.cc
++++ b/gcc/expr.cc
+@@ -8023,7 +8023,8 @@ store_constructor (tree exp, rtx target, int cleared, poly_int64 size,
+ 	    && VECTOR_BOOLEAN_TYPE_P (type)
+ 	    && SCALAR_INT_MODE_P (TYPE_MODE (type))
+ 	    && (elt = uniform_vector_p (exp))
+-	    && !VECTOR_TYPE_P (TREE_TYPE (elt)))
++	    && !VECTOR_TYPE_P (TREE_TYPE (elt))
++	    && !BYTES_BIG_ENDIAN)
+ 	  {
+ 	    rtx op0 = force_reg (TYPE_MODE (TREE_TYPE (elt)),
+ 				 expand_normal (elt));
+@@ -8033,7 +8034,7 @@ store_constructor (tree exp, rtx target, int cleared, poly_int64 size,
+ 	    /* Ensure no excess bits are set.
+ 	       GCN needs this for nunits < 64.
+ 	       x86 needs this for nunits < 8.  */
+-	    auto nunits = TYPE_VECTOR_SUBPARTS (type).to_constant ();
++	    unsigned int nunits = TYPE_VECTOR_SUBPARTS (type).to_constant ();
+ 	    if (maybe_ne (GET_MODE_PRECISION (mode), nunits))
+ 	      tmp = expand_binop (mode, and_optab, tmp,
+ 				  GEN_INT ((HOST_WIDE_INT_1U << nunits) - 1),
+-- 
+2.43.7
+
+

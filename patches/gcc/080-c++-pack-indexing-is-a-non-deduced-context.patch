@@ -1,0 +1,86 @@
+From a03c244f530346ed04a3ecac0c718d83ed7fae47 Mon Sep 17 00:00:00 2001
+From: Patrick Palka <ppalka@redhat.com>
+Date: Fri, 12 Sep 2025 14:21:25 -0400
+Subject: [PATCH] c++: pack indexing is a non-deduced context [PR121795]
+
+We weren't explicitly treating a pack index specifier as a non-deduced
+context (as per [temp.deduct.type]/5), leading to an ICE for the first
+testcase below.
+
+	PR c++/121795
+
+gcc/cp/ChangeLog:
+
+	* pt.cc (unify) <case PACK_INDEX_TYPE>: New non-deduced context
+	case.
+
+gcc/testsuite/ChangeLog:
+
+	* g++.dg/cpp26/pack-indexing17.C: New test.
+	* g++.dg/cpp26/pack-indexing17a.C: New test.
+
+Reviewed-by: Marek Polacek <polacek@redhat.com>
+Reviewed-by: Jason Merrill <jason@redhat.com>
+(cherry picked from commit 8e3230f4fed0d41e790d68c2534c057911bab35c)
+---
+ gcc/cp/pt.cc                                  |  4 ++--
+ gcc/testsuite/g++.dg/cpp26/pack-indexing17.C  | 11 +++++++++++
+ gcc/testsuite/g++.dg/cpp26/pack-indexing17a.C | 12 ++++++++++++
+ 3 files changed, 25 insertions(+), 2 deletions(-)
+ create mode 100644 gcc/testsuite/g++.dg/cpp26/pack-indexing17.C
+ create mode 100644 gcc/testsuite/g++.dg/cpp26/pack-indexing17a.C
+
+diff --git a/gcc/cp/pt.cc b/gcc/cp/pt.cc
+index 061691370757..3a3577f9d566 100644
+--- a/gcc/cp/pt.cc
++++ b/gcc/cp/pt.cc
+@@ -25975,8 +25975,8 @@ unify (tree tparms, tree targs, tree parm, tree arg, int strict,
+     case TYPEOF_TYPE:
+     case DECLTYPE_TYPE:
+     case TRAIT_TYPE:
+-      /* Cannot deduce anything from TYPEOF_TYPE, DECLTYPE_TYPE,
+-	 or TRAIT_TYPE nodes.  */
++    case PACK_INDEX_TYPE:
++      /* These are non-deduced contexts.  */
+       return unify_success (explain_p);
+ 
+     case ERROR_MARK:
+diff --git a/gcc/testsuite/g++.dg/cpp26/pack-indexing17.C b/gcc/testsuite/g++.dg/cpp26/pack-indexing17.C
+new file mode 100644
+index 000000000000..8450ed64bd5f
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/cpp26/pack-indexing17.C
+@@ -0,0 +1,11 @@
++// PR c++/121795
++// { dg-do compile { target c++26 } }
++
++template<class T, class... Ts>
++struct A;
++
++template<class... Ts>
++struct A<Ts...[sizeof...(Ts)-1], Ts...> { };
++
++A<int, int> x;
++A<char, int> y; // { dg-error "incomplete" }
+diff --git a/gcc/testsuite/g++.dg/cpp26/pack-indexing17a.C b/gcc/testsuite/g++.dg/cpp26/pack-indexing17a.C
+new file mode 100644
+index 000000000000..445f0d94ad20
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/cpp26/pack-indexing17a.C
+@@ -0,0 +1,12 @@
++// PR c++/121795
++// A version of pack-indexing17.C using a nontype pack.
++// { dg-do compile { target c++26 } }
++
++template<int N, int... Ns>
++struct A;
++
++template<int... Ns>
++struct A<Ns...[sizeof...(Ns)-1], Ns...> { };
++
++A<0, 0> x;
++A<0, 1> y; // { dg-error "incomplete" }
+-- 
+2.43.7
+
+

@@ -1,0 +1,92 @@
+From be81c5af3dc18c4ceaf193be386ae8bbaed08168 Mon Sep 17 00:00:00 2001
+From: Patrick Palka <ppalka@redhat.com>
+Date: Sat, 20 Sep 2025 10:45:22 -0400
+Subject: [PATCH] c++: find_template_parameters and NTTPs [PR121981]
+
+Here the normal form of the two immediately-declared D<<placeholder>, V>
+constraints is the same, so we rightfully share the normal form between
+them.  We first compute the normal form from the context of auto deduction
+for W in which case the placeholder has level 2 where the set of
+in-scope template parameters has depth 2 (a dummy level is added from
+normalize_placeholder_type_constraints).
+
+Naturally the atomic constraint only depends on the template parameter
+V of depth 1 index 0.  The depth 2 of current_template_parms however
+means that find_template_parameters when it sees V within the atomic
+constraint will recurse into its TREE_TYPE, an auto of level 2, and mark
+the atomic constraint as also depending on the template parameter of
+depth 2 index 0, which is clearly wrong.  Later during constraint
+checking for B we ICE within the satisfaction cache since we lack two
+levels of template arguments supposedly needed by the cached atomic
+constraint.
+
+I think when find_template_parameters sees an NTTP, it doesn't need to
+walk its TREE_TYPE because NTTP substitution is done obliviously with
+respect to its type -- only the corresponding NTTP argument matters,
+not other template arguments possibly used within its type.  This is
+most clearly true for (unconstrained) auto NTTPs as in the testcase, but
+also true for other NTTPs.  Doing so fixes the testcase because we no
+longer record any depth 2 when walking V within the atomic constraint.
+
+	PR c++/121981
+
+gcc/cp/ChangeLog:
+
+	* pt.cc (any_template_parm_r) <case TEMPLATE_TYPE_PARM>:
+	Don't walk TREE_TYPE.
+
+gcc/testsuite/ChangeLog:
+
+	* g++.dg/cpp2a/concepts-placeholder15.C: New test.
+
+Reviewed-by: Jason Merrill <jason@redhat.com>
+(cherry picked from commit 396e9118849c4b918eaf3edcfa60d36e2b973019)
+---
+ gcc/cp/pt.cc                                    |  5 ++++-
+ .../g++.dg/cpp2a/concepts-placeholder15.C       | 17 +++++++++++++++++
+ 2 files changed, 21 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/g++.dg/cpp2a/concepts-placeholder15.C
+
+diff --git a/gcc/cp/pt.cc b/gcc/cp/pt.cc
+index 03e0432bd0d5..bdbb439d98dc 100644
+--- a/gcc/cp/pt.cc
++++ b/gcc/cp/pt.cc
+@@ -11117,7 +11117,10 @@ any_template_parm_r (tree t, void *data)
+       break;
+ 
+     case TEMPLATE_PARM_INDEX:
+-      WALK_SUBTREE (TREE_TYPE (t));
++      /* No need to consider template parameters within the type of an NTTP:
++	 substitution into an NTTP is done directly with the corresponding
++	 template argument, and its type only comes into play earlier during
++	 coercion.  */
+       break;
+ 
+     case TEMPLATE_DECL:
+diff --git a/gcc/testsuite/g++.dg/cpp2a/concepts-placeholder15.C b/gcc/testsuite/g++.dg/cpp2a/concepts-placeholder15.C
+new file mode 100644
+index 000000000000..e6571e9f18cd
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/cpp2a/concepts-placeholder15.C
+@@ -0,0 +1,17 @@
++// PR c++/121981
++// { dg-do compile { target c++20 } }
++
++template<auto V>
++concept C = requires { V; };
++
++template<class T, auto V>
++concept D = C<V>;
++
++template<auto V, D<V> auto W>
++struct A { };
++
++template<auto V, D<V> T>
++struct B { };
++
++A<0, 1> a;
++B<0, int> b;
+-- 
+2.43.7
+
+

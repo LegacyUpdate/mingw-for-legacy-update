@@ -1,0 +1,84 @@
+From f70ea624d1435027da9bb54d42f53caff68d97e2 Mon Sep 17 00:00:00 2001
+From: Andrew Pinski <andrew.pinski@oss.qualcomm.com>
+Date: Wed, 15 Oct 2025 09:59:25 -0700
+Subject: [PATCH] riscv: Fix gimple folding of the vset* intrinsics [PR122270]
+
+The problem here is that when the backend folds the vset intrinsics,
+it tries to keep the lhs of the new statement to be the same as the old statement
+due to the check in gsi_replace. The problem is with a MEM_REF vset::fold was
+unsharing the new lhs here and using the original lhs in the other new statement.
+This meant the check in gsi_replace would fail.
+This fixes that oversight by switching around which statement gets the unshared
+version.
+
+Note the comment in vset::fold was already correct just not matching the code:
+    /* Replace the call with two statements: a copy of the full tuple
+       to the call result, followed by an update of the individual vector.
+
+       The fold routines expect the replacement statement to have the
+       same lhs as the original call, so return the copy statement
+       rather than the field update.  */
+
+Changes since v1:
+* v2: Fix testcase.
+
+	PR target/122270
+
+gcc/ChangeLog:
+
+	* config/riscv/riscv-vector-builtins-bases.cc (vset::fold): Use the
+	unshare_expr for the statement that will be added seperately rather
+	the one which will be used for the replacement.
+
+gcc/testsuite/ChangeLog:
+
+	* gcc.target/riscv/rvv/base/pr122270-1.c: New test.
+
+Signed-off-by: Andrew Pinski <andrew.pinski@oss.qualcomm.com>
+(cherry picked from commit 42f5f1004ff16ab25b97d3315a365614c68c6201)
+---
+ gcc/config/riscv/riscv-vector-builtins-bases.cc      |  5 +++--
+ gcc/testsuite/gcc.target/riscv/rvv/base/pr122270-1.c | 10 ++++++++++
+ 2 files changed, 13 insertions(+), 2 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.target/riscv/rvv/base/pr122270-1.c
+
+diff --git a/gcc/config/riscv/riscv-vector-builtins-bases.cc b/gcc/config/riscv/riscv-vector-builtins-bases.cc
+index bf5172c6e041..5ccb872df639 100644
+--- a/gcc/config/riscv/riscv-vector-builtins-bases.cc
++++ b/gcc/config/riscv/riscv-vector-builtins-bases.cc
+@@ -1792,12 +1792,13 @@ public:
+        The fold routines expect the replacement statement to have the
+        same lhs as the original call, so return the copy statement
+        rather than the field update.  */
+-    gassign *copy = gimple_build_assign (unshare_expr (f.lhs), rhs_tuple);
++    gassign *copy = gimple_build_assign (f.lhs, rhs_tuple);
+ 
+     /* Get a reference to the individual vector.  */
+     tree field = tuple_type_field (TREE_TYPE (f.lhs));
+     tree lhs_array
+-      = build3 (COMPONENT_REF, TREE_TYPE (field), f.lhs, field, NULL_TREE);
++      = build3 (COMPONENT_REF, TREE_TYPE (field), unshare_expr (f.lhs),
++		field, NULL_TREE);
+     tree lhs_vector = build4 (ARRAY_REF, TREE_TYPE (rhs_vector), lhs_array,
+ 			      index, NULL_TREE, NULL_TREE);
+     gassign *update = gimple_build_assign (lhs_vector, rhs_vector);
+diff --git a/gcc/testsuite/gcc.target/riscv/rvv/base/pr122270-1.c b/gcc/testsuite/gcc.target/riscv/rvv/base/pr122270-1.c
+new file mode 100644
+index 000000000000..a026a7e16d7e
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/riscv/rvv/base/pr122270-1.c
+@@ -0,0 +1,10 @@
++/* { dg-options "" } */
++/* { dg-do compile } */
++/* { dg-add-options riscv_v } */
++/* PR target/122270 */
++
++#include "riscv_vector.h"
++
++void a(vfloat32m1_t b, vfloat32m1x4_t *c) {
++  *c = __riscv_vset_v_f32m1_f32m1x4(*c, 3, b);
++}
+-- 
+2.43.7
+
+

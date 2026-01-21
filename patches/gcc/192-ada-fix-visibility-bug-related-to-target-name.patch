@@ -1,0 +1,81 @@
+From 3c42004d6e1524ce18f9f456b1cf8a78d54fc0b2 Mon Sep 17 00:00:00 2001
+From: Bob Duff <duff@adacore.com>
+Date: Wed, 20 Aug 2025 14:07:14 -0400
+Subject: [PATCH] Ada: Fix visibility bug related to target name
+
+This patch fixes the following bug:
+If the right-hand side of an expression contains a target name
+(i.e. "@"), and also contains a reference to a user-defined operator
+that is directly visible because of a "use type" clause on a renaming of
+the package where the operator is declared, the compiler gives an
+incorrect error saying that the renamed package is not visible.
+
+It turns out that setting Entity of resolved nodes is unnecessary
+and wrong; the fix is to simply remove that code.
+
+gcc/ada/ChangeLog:
+	PR ada/118208
+	* exp_ch5.adb
+	(Expand_Assign_With_Target_Names.Replace_Target):
+	Remove code setting Entity to Empty.
+	* sinfo.ads (Has_Target_Names):
+	Improve comment: add "@" to clarify what "target name"
+	means, and remove the content-free phrase "and must
+	be expanded accordingly."
+---
+ gcc/ada/exp_ch5.adb | 17 ++---------------
+ gcc/ada/sinfo.ads   |  2 +-
+ 2 files changed, 3 insertions(+), 16 deletions(-)
+
+diff --git a/gcc/ada/exp_ch5.adb b/gcc/ada/exp_ch5.adb
+index 3d8a542c24e0..bdd7d19dcc0e 100644
+--- a/gcc/ada/exp_ch5.adb
++++ b/gcc/ada/exp_ch5.adb
+@@ -2254,7 +2254,8 @@ package body Exp_Ch5 is
+       function Replace_Target (N : Node_Id) return Traverse_Result;
+       --  Replace occurrences of the target name by the proper entity: either
+       --  the entity of the LHS in simple cases, or the formal of the
+-      --  constructed procedure otherwise.
++      --  constructed procedure otherwise. Mark all nodes as Analyzed=False
++      --  so reanalysis will occur.
+ 
+       --------------------
+       -- Replace_Target --
+@@ -2264,20 +2265,6 @@ package body Exp_Ch5 is
+       begin
+          if Nkind (N) = N_Target_Name then
+             Rewrite (N, New_Occurrence_Of (Ent, Sloc (N)));
+-
+-         --  The expression will be reanalyzed when the enclosing assignment
+-         --  is reanalyzed, so reset the entity, which may be a temporary
+-         --  created during analysis, e.g. a loop variable for an iterated
+-         --  component association. However, if entity is callable then
+-         --  resolution has established its proper identity (including in
+-         --  rewritten prefixed calls) so we must preserve it.
+-
+-         elsif Is_Entity_Name (N) then
+-            if Present (Entity (N))
+-              and then not Is_Overloadable (Entity (N))
+-            then
+-               Set_Entity (N, Empty);
+-            end if;
+          end if;
+ 
+          Set_Analyzed (N, False);
+diff --git a/gcc/ada/sinfo.ads b/gcc/ada/sinfo.ads
+index d22f1030d427..1ad81715a2bc 100644
+--- a/gcc/ada/sinfo.ads
++++ b/gcc/ada/sinfo.ads
+@@ -1477,7 +1477,7 @@ package Sinfo is
+ 
+    --  Has_Target_Names
+    --    Present in assignment statements. Indicates that the RHS contains
+-   --    target names (see AI12-0125-3) and must be expanded accordingly.
++   --    target names ("@" -- see AI12-0125-3).
+ 
+    --  Has_Wide_Character
+    --    Present in string literals, set if any wide character (i.e. character
+-- 
+2.43.7
+
+

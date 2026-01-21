@@ -1,0 +1,118 @@
+From 8fc013b4c8c1d441707cafa6825a8678312ad930 Mon Sep 17 00:00:00 2001
+From: Nathaniel Shead <nathanieloshead@gmail.com>
+Date: Sat, 15 Nov 2025 15:11:55 +1100
+Subject: [PATCH] c++/modules: Keep tracking instantiations of static class
+ variable templates [PR122625]
+
+r16-4930-gfd5c057c2d01 ensured that we noted all class-scope variables.
+But I also added a clause to 'read_var_def' to skip all class-scope
+instantiations, under the mistaken belief that this would be handled in
+read_class_def.
+
+But as the testcase shows, read_class_def cannot (and should not)
+register instantiations of member variable templates, as when reading
+the class it just sees the template declaration.  So this patch
+re-enables tracking instantiations of class-scope variable templates.
+
+	PR c++/122625
+
+gcc/cp/ChangeLog:
+
+	* module.cc (trees_in::read_var_def): Also track class-scope
+	primary template specialisations.
+
+gcc/testsuite/ChangeLog:
+
+	* g++.dg/modules/inst-7_a.C: New test.
+	* g++.dg/modules/inst-7_b.C: New test.
+
+Signed-off-by: Nathaniel Shead <nathanieloshead@gmail.com>
+Reviewed-by: Jason Merrill <jason@redhat.com>
+(cherry picked from commit 4711901000ab141dbf3995ec4541f9d9a2351472)
+---
+ gcc/cp/module.cc                        |  6 +++--
+ gcc/testsuite/g++.dg/modules/inst-7_a.C | 33 +++++++++++++++++++++++++
+ gcc/testsuite/g++.dg/modules/inst-7_b.C | 13 ++++++++++
+ 3 files changed, 50 insertions(+), 2 deletions(-)
+ create mode 100644 gcc/testsuite/g++.dg/modules/inst-7_a.C
+ create mode 100644 gcc/testsuite/g++.dg/modules/inst-7_b.C
+
+diff --git a/gcc/cp/module.cc b/gcc/cp/module.cc
+index eed84706686b..b7e137124b29 100644
+--- a/gcc/cp/module.cc
++++ b/gcc/cp/module.cc
+@@ -12848,8 +12848,10 @@ trees_in::read_var_def (tree decl, tree maybe_template)
+ 	  if (DECL_EXPLICIT_INSTANTIATION (decl)
+ 	      && !DECL_EXTERNAL (decl))
+ 	    setup_explicit_instantiation_definition_linkage (decl);
+-	  /* Class static data members are handled in read_class_def.  */
+-	  if (!DECL_CLASS_SCOPE_P (decl)
++	  /* Class non-template static members are handled in read_class_def.
++	     But still handle specialisations of member templates.  */
++	  if ((!DECL_CLASS_SCOPE_P (decl)
++	       || primary_template_specialization_p (decl))
+ 	      && (DECL_IMPLICIT_INSTANTIATION (decl)
+ 		  || (DECL_EXPLICIT_INSTANTIATION (decl)
+ 		      && !DECL_EXTERNAL (decl))))
+diff --git a/gcc/testsuite/g++.dg/modules/inst-7_a.C b/gcc/testsuite/g++.dg/modules/inst-7_a.C
+new file mode 100644
+index 000000000000..7489edfa2522
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/modules/inst-7_a.C
+@@ -0,0 +1,33 @@
++// PR c++/122625
++// { dg-additional-options "-fmodules" }
++// { dg-module-cmi M }
++
++export module M;
++struct integral_constant {
++  void f() const {}
++};
++struct span {
++  template <int> static constexpr integral_constant __v{};
++  template <int, int> static constexpr integral_constant partial{};
++};
++template <int x> constexpr integral_constant span::partial<x, 0>{};
++
++template <typename T>
++struct nested {
++  template <typename U> static const U arr[3];
++};
++template <typename T>
++struct nested<T*> {
++  template <typename U> static const U arr[3];
++};
++template <typename T> template <typename U> const U nested<T>::arr[3] = {};
++template <typename T> template <typename U> const U nested<T*>::arr[3] = {};
++template <typename T> template <typename U> const U nested<T*>::arr<U*>[3] = {};
++
++export inline void format() {
++  span::__v<1>.f();
++  span::partial<5, 0>.f();
++  nested<int>::arr<integral_constant>[0].f();
++  nested<int*>::arr<integral_constant>[0].f();
++  nested<int*>::arr<integral_constant*>[0].f();
++}
+diff --git a/gcc/testsuite/g++.dg/modules/inst-7_b.C b/gcc/testsuite/g++.dg/modules/inst-7_b.C
+new file mode 100644
+index 000000000000..3a49b516beac
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/modules/inst-7_b.C
+@@ -0,0 +1,13 @@
++// PR c++/122625
++// { dg-additional-options "-fmodules" }
++
++import M;
++int main() {
++  format();
++}
++
++// { dg-final { scan-assembler {_ZNW1M4span3__vILi1EEE:} } }
++// { dg-final { scan-assembler {_ZNW1M4span7partialILi5ELi0EEE:} } }
++// { dg-final { scan-assembler {_ZNW1M6nestedIiE3arrIS_17integral_constantEE:} } }
++// { dg-final { scan-assembler {_ZNW1M6nestedIPiE3arrIS_17integral_constantEE:} } }
++// { dg-final { scan-assembler {_ZNW1M6nestedIPiE3arrIPS_17integral_constantEE:} } }
+-- 
+2.43.7
+
+

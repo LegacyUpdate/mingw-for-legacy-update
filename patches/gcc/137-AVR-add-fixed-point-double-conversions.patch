@@ -1,0 +1,282 @@
+From 5ce2681ca0798d3c41d8ffd3d6cb5b62ed71278e Mon Sep 17 00:00:00 2001
+From: Georg-Johann Lay <avr@gjlay.de>
+Date: Wed, 8 Oct 2025 20:02:53 +0200
+Subject: [PATCH] AVR: target/122210 - Add fixed-point -> double conversions.
+
+	PR target/122210
+libgcc/config/avr/libf7/
+	* libf7-common.mk (F7_ASM_PARTS): Add <fx>2D modules.
+	* libf7-asm.sx: Implement the <fx>2D modules.
+
+gcc/testsuite/
+	* gcc.target/avr/fxtod.c: New test.
+
+(cherry picked from commit 7304e83f1f29c39df7a9de888d9c6d40b58c512a)
+---
+ gcc/testsuite/gcc.target/avr/fxtod.c    | 115 ++++++++++++++++++++++++
+ libgcc/config/avr/libf7/libf7-asm.sx    | 112 +++++++++++++++++++++++
+ libgcc/config/avr/libf7/libf7-common.mk |   4 +
+ 3 files changed, 231 insertions(+)
+ create mode 100644 gcc/testsuite/gcc.target/avr/fxtod.c
+
+diff --git a/gcc/testsuite/gcc.target/avr/fxtod.c b/gcc/testsuite/gcc.target/avr/fxtod.c
+new file mode 100644
+index 000000000000..e069a312290d
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/avr/fxtod.c
+@@ -0,0 +1,115 @@
++/* { dg-do run { target { ! avr_tiny } } } */
++/* { dg-additional-options { -std=gnu99 -Os -mcall-prologues -fwrapv -Wno-overflow } } */
++
++#include <stdfix.h>
++
++#if __SIZEOF_LONG_DOUBLE__ == 8
++
++#define NI __attribute__((noipa))
++
++typedef long double D;
++
++extern D ldexpl (D, int);
++
++typedef short fract hr_t;
++typedef unsigned short fract uhr_t;
++typedef fract r_t;
++typedef unsigned fract ur_t;
++
++typedef short accum hk_t;
++typedef unsigned short accum uhk_t;
++typedef accum k_t;
++typedef unsigned accum uk_t;
++
++#define FBITuhr 8
++#define FBIThr  7
++#define FBITur  16
++#define FBITr   15
++
++#define FBITuhk 8
++#define FBIThk  7
++#define FBITuk  16
++#define FBITk   15
++
++#define VALff(S) ((2ul << (8 * sizeof (S##bits(0)) - 1)) - 1)
++#define VAL80(S) (1ul << (8 * sizeof (S##bits(0)) - 1))
++#define VAL00(S) 0
++#define VAL01(S) 1
++
++
++#define TEST_U(S, V)				\
++  NI void test_##S##_##V (void)			\
++  {						\
++    S##_t x = S##bits (VAL##V (S));		\
++    __asm ("" : "+r" (x));			\
++    D d = (D) x;				\
++    D z = ldexpl (VAL##V (S), - FBIT##S);	\
++    if (d != z)					\
++      __builtin_exit (1);			\
++  }
++
++#define TEST_S(S, V)				\
++  NI void test_##S##_##V (void)			\
++  {						\
++    uint32_t u32 = (VAL##V (S) & VAL80 (S))	\
++      ? 1u + (VAL##V (S) ^ VALff (S))		\
++      : VAL##V (S);				\
++    S##_t x = S##bits (VAL##V (S));		\
++    __asm ("" : "+r" (x));			\
++    D d = (D) x;				\
++    D z = ldexpl (u32, - FBIT##S);		\
++    int s = (VAL##V (S) & VAL80 (S)) != 0;	\
++    if (s == 0 && d != z)			\
++      __builtin_exit (2);			\
++    if (s == 1 && d != -z)			\
++      __builtin_exit (3);			\
++  }
++
++#define TESTS_U(S)				\
++  TEST_U (S, 00)				\
++  TEST_U (S, 01)				\
++  TEST_U (S, ff)				\
++  TEST_U (S, 80)
++
++#define TESTS_S(S)				\
++  TEST_S (S, 00)				\
++  TEST_S (S, 01)				\
++  TEST_S (S, ff)				\
++  TEST_S (S, 80)
++
++TESTS_U (uhr)
++TESTS_U (ur)
++TESTS_U (uhk)
++TESTS_U (uk)
++
++TESTS_S (hr)
++TESTS_S (r)
++TESTS_S (hk)
++TESTS_S (k)
++
++#define RUN(S)		\
++  test_##S##_00 ();	\
++  test_##S##_01 ();	\
++  test_##S##_ff ();	\
++  test_##S##_80 ()
++  
++int main (void)
++{
++  RUN (uhr);
++  RUN (ur);
++  RUN (uhk);
++  RUN (uk);
++
++  RUN (hr);
++  RUN (r);
++  RUN (hk);
++  RUN (k);
++
++  return 0;
++}
++#else
++int main (void)
++{
++  return 0;
++}
++#endif
+diff --git a/libgcc/config/avr/libf7/libf7-asm.sx b/libgcc/config/avr/libf7/libf7-asm.sx
+index bafb490c5c7e..18e676ace0f8 100644
+--- a/libgcc/config/avr/libf7/libf7-asm.sx
++++ b/libgcc/config/avr/libf7/libf7-asm.sx
+@@ -2209,4 +2209,116 @@ _DEFUN __powidf2
+ _ENDF __powidf2
+ #endif /* F7MOD_D_powi_ */
+ 
++
++;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
++;;; Fixed-point -> double conversions.
++
++;;; The double exponent starts at bit 52 since the encoded mantissa has 52 bits.
++;;; Note that when X is a multiple of 16, then dex_lo(x) evaluates to 0.
++#define dex_lo(x) hlo8((x) << (52 - 32))
++#define dex_hi(x) hhi8((x) << (52 - 32))
++
++#ifdef F7MOD_usa2D_
++_DEFUN __fractusadf
++    ;; Convert USI to DF.
++    XCALL   __floatunsidf
++    ;; The MSB indicates a value of 0.
++    cpse    r25, __zero_reg__
++    ;; Divide non-zero values by 2^16 in order to adjust for FBIT = 16.
++    subi    r25, dex_hi (16)
++    ret
++_ENDF __fractusadf
++#endif /* F7MOD_usa2D_ */
++
++#ifdef F7MOD_sa2D_
++_DEFUN __fractsadf
++    ;; Convert SI to DF.
++    XCALL   __floatsidf
++    ;; The MSB indicates a value of 0.
++    tst     r25
++    breq 0f
++    ;; Divide non-zero values by 2^15 in order to adjust for FBIT = 15.
++    subi    r24, dex_lo (15)
++    sbci    r25, dex_hi (15)
++0:  ret
++_ENDF __fractsadf
++#endif /* F7MOD_sa2D_ */
++
++#ifdef F7MOD_uha2D_
++_DEFUN __fractuhadf
++    ;; Extend UHA to USA.
++    clr     r22
++    mov     r23, r24
++    mov     r24, r25
++    clr     r25
++    XJMP    __fractusadf
++_ENDF __fractuhadf
++#endif /* F7MOD_uha2D_ */
++
++#ifdef F7MOD_ha2D_
++_DEFUN __fracthadf
++    ;; Extend HA to SA.
++    clr     r22
++    mov     r23, r24
++    mov     r24, r25
++    lsl     r25
++    sbc     r25, r25
++    XJMP    __fractsadf
++_ENDF __fracthadf
++#endif /* F7MOD_ha2D_ */
++
++
++#ifdef F7MOD_usq2D_
++_DEFUN __fractusqdf
++    ;; Convert USI to DF.
++    XCALL   __floatunsidf
++    ;; The MSB indicates a value of 0.
++    cpse    r25, __zero_reg__
++    ;; Divide non-zero values by 2^32 in order to adjust for FBIT = 32.
++    subi    r25, dex_hi (32)
++    ret
++_ENDF __fractusqdf
++#endif /* F7MOD_usq2D_ */
++
++#ifdef F7MOD_sq2D_
++_DEFUN __fractsqdf
++    ;; Convert SI to DF.
++    XCALL   __floatsidf
++    ;; The MSB indicates a value of 0.
++    tst     r25
++    breq 0f
++    ;; Divide non-zero values by 2^31 in order to adjust for FBIT = 31.
++    subi    r24, dex_lo (31)
++    sbci    r25, dex_hi (31)
++0:  ret
++_ENDF __fractsqdf
++#endif /* F7MOD_sq2D_ */
++
++#ifdef F7MOD_uqq2D_
++_DEFUN __fractuqqdf
++    ;; Extend UQQ to UHQ.
++    mov     r25, r24
++    clr     r24
++_LABEL __fractuhqdf
++    ;; Extend UHQ to USQ.
++    clr     r23
++    clr     r22
++    XJMP    __fractusqdf
++_ENDF __fractuqqdf
++#endif /* F7MOD_uqq2D_ */
++
++#ifdef F7MOD_qq2D_
++_DEFUN __fractqqdf
++    ;; Extend QQ to HQ.
++    mov     r25, r24
++    clr     r24
++_LABEL __fracthqdf
++    ;; Extend HQ to SQ.
++    clr     r23
++    clr     r22
++    XJMP    __fractsqdf
++_ENDF __fractqqdf
++#endif /* F7MOD_qq2D_ */
++
++
+ #endif /* !AVR_TINY */
+diff --git a/libgcc/config/avr/libf7/libf7-common.mk b/libgcc/config/avr/libf7/libf7-common.mk
+index 153266ba141e..85f835049698 100644
+--- a/libgcc/config/avr/libf7/libf7-common.mk
++++ b/libgcc/config/avr/libf7/libf7-common.mk
+@@ -28,6 +28,10 @@ F7_ASM_PARTS += D_cmp D_eq D_ne D_ge D_gt D_le D_lt D_unord D_fminfmax
+ 
+ F7_ASM_PARTS += call_dd call_ddd
+ 
++# Fixed-point -> double conversions
++F7_ASM_PARTS += qq2D uqq2D            sq2D usq2D
++F7_ASM_PARTS +=            ha2D uha2D sa2D usa2D
++
+ # Stuff that will be wrapped in f7-wraps.h (included by libf7-asm.sx)
+ # and give f7_asm_D_*.o modules.
+ g_ddd += add sub mul div
+-- 
+2.43.7
+
+

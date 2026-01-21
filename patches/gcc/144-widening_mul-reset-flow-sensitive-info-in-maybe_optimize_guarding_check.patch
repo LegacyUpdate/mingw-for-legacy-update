@@ -1,0 +1,69 @@
+From 5d74b473f8c9b3cfd7328d2f898f8ddc40a1ce65 Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Sat, 4 Oct 2025 17:06:16 +0200
+Subject: [PATCH] widening_mul: Reset flow sensitive info in
+ maybe_optimize_guarding_check [PR122104]
+
+In PR95852 I've added an optimization where next to just pattern
+recognizing r = x * y; r / x != y or r = x * y; r / x == y
+as .MUL_OVERFLOW or negation thereof it also recognizes
+r = x * y; x && (r / x != y) or r = x * y; !x || (r / x == y)
+by optimizing the guarding condition to always true/false.
+
+The problem with that is that some value ranges recorded for
+the SSA_NAMEs in the formerly conditional, now unconditional
+basic block can be invalid.
+
+This patch fixes it by calling reset_flow_sensitive_info_in_bb
+if we optimize the guarding condition.
+
+2025-10-04  Jakub Jelinek  <jakub@redhat.com>
+
+	PR tree-optimization/122104
+	* tree-ssa-math-opts.cc (maybe_optimize_guarding_check): Call
+	reset_flow_sensitive_info_in_bb on bb when optimizing out the
+	guarding condition.
+
+	* gcc.target/i386/pr122104.c: New test.
+
+(cherry picked from commit 867f777cee9f44027a3724fbad266c5cfb3a311f)
+---
+ gcc/testsuite/gcc.target/i386/pr122104.c | 12 ++++++++++++
+ gcc/tree-ssa-math-opts.cc                |  1 +
+ 2 files changed, 13 insertions(+)
+ create mode 100644 gcc/testsuite/gcc.target/i386/pr122104.c
+
+diff --git a/gcc/testsuite/gcc.target/i386/pr122104.c b/gcc/testsuite/gcc.target/i386/pr122104.c
+new file mode 100644
+index 000000000000..be88933e3ec6
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/i386/pr122104.c
+@@ -0,0 +1,12 @@
++/* PR tree-optimization/122104 */
++/* { dg-do compile } */
++/* { dg-options "-O2 -fdump-tree-widening_mul-alias" } */
++/* { dg-final { scan-tree-dump "\\.MUL_OVERFLOW" "widening_mul" } } */
++/* { dg-final { scan-tree-dump-not "# RANGE \\\[irange\\\] unsigned int \\\[1, " "widening_mul" } } */
++
++int
++foo (int x)
++{
++  int r = (unsigned) x * 35;
++  return x && ((unsigned) r / x) != 35U;
++}
+diff --git a/gcc/tree-ssa-math-opts.cc b/gcc/tree-ssa-math-opts.cc
+index 1954c287c0ac..c3b2ac28e46e 100644
+--- a/gcc/tree-ssa-math-opts.cc
++++ b/gcc/tree-ssa-math-opts.cc
+@@ -3802,6 +3802,7 @@ maybe_optimize_guarding_check (vec<gimple *> &mul_stmts, gimple *cond_stmt,
+   else
+     gimple_cond_make_false (zero_cond);
+   update_stmt (zero_cond);
++  reset_flow_sensitive_info_in_bb (bb);
+   *cfg_changed = true;
+ }
+ 
+-- 
+2.43.7
+
+

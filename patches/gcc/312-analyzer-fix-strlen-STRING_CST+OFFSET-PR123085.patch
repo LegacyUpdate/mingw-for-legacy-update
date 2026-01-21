@@ -1,0 +1,92 @@
+From 004e2f3cc5a6c895c62b991c696cff1a58744da4 Mon Sep 17 00:00:00 2001
+From: David Malcolm <dmalcolm@redhat.com>
+Date: Mon, 15 Dec 2025 11:48:49 -0500
+Subject: [PATCH] analyzer: fix strlen(STRING_CST + OFFSET) [PR123085]
+
+gcc/analyzer/ChangeLog:
+	PR analyzer/123085
+	* region-model.cc (region_model::scan_for_null_terminator_1): Use
+	byte offset when accessing string constant.
+
+gcc/testsuite/ChangeLog:
+	PR analyzer/123085
+	* c-c++-common/analyzer/strlen-pr123085.c: New test.
+
+Signed-off-by: David Malcolm <dmalcolm@redhat.com>
+
+(cherry picked from commit 8f84c84e571ae6ef045dd7c510e49e76f6ca1b7d)
+---
+ gcc/analyzer/region-model.cc                  | 37 +++++++++++--------
+ .../c-c++-common/analyzer/strlen-pr123085.c   |  8 ++++
+ 2 files changed, 30 insertions(+), 15 deletions(-)
+ create mode 100644 gcc/testsuite/c-c++-common/analyzer/strlen-pr123085.c
+
+diff --git a/gcc/analyzer/region-model.cc b/gcc/analyzer/region-model.cc
+index 84b81e968002..4c90f28760a1 100644
+--- a/gcc/analyzer/region-model.cc
++++ b/gcc/analyzer/region-model.cc
+@@ -4330,24 +4330,31 @@ region_model::scan_for_null_terminator_1 (const region *reg,
+   if (const string_region *str_reg = base_reg->dyn_cast_string_region ())
+     {
+       tree string_cst = str_reg->get_string_cst ();
+-      if (const void *p = memchr (TREE_STRING_POINTER (string_cst),
+-				  0,
+-				  TREE_STRING_LENGTH (string_cst)))
++      if (src_byte_offset >= 0
++	  && src_byte_offset < TREE_STRING_LENGTH (string_cst)
++	  && wi::fits_shwi_p (src_byte_offset))
+ 	{
+-	  size_t num_bytes_read
+-	    = (const char *)p - TREE_STRING_POINTER (string_cst) + 1;
+-	  /* Simulate the read.  */
+-	  byte_range bytes_to_read (0, num_bytes_read);
+-	  const svalue *sval = get_store_bytes (reg, bytes_to_read, ctxt);
+-	  if (out_sval)
+-	    *out_sval = sval;
+-	  if (logger)
+-	    logger->log ("using string_cst");
+-	  return m_mgr->get_or_create_int_cst (size_type_node,
+-					       num_bytes_read);
++	  HOST_WIDE_INT str_byte_offset = src_byte_offset.to_shwi ();
++	  const char *effective_start
++	    = TREE_STRING_POINTER (string_cst) + str_byte_offset;
++	  size_t effective_len
++	    = TREE_STRING_LENGTH (string_cst) - str_byte_offset;
++	  if (const void *p = memchr (effective_start, 0, effective_len))
++	    {
++	      size_t num_bytes_read
++		= (const char *)p - effective_start + 1;
++	      /* Simulate the read.  */
++	      byte_range bytes_to_read (0, num_bytes_read);
++	      const svalue *sval = get_store_bytes (reg, bytes_to_read, ctxt);
++	      if (out_sval)
++		*out_sval = sval;
++	      if (logger)
++		logger->log ("using string_cst");
++	      return m_mgr->get_or_create_int_cst (size_type_node,
++						   num_bytes_read);
++	    }
+ 	}
+     }
+-
+   const binding_cluster *cluster = m_store.get_cluster (base_reg);
+   iterable_cluster c (cluster);
+   if (logger)
+diff --git a/gcc/testsuite/c-c++-common/analyzer/strlen-pr123085.c b/gcc/testsuite/c-c++-common/analyzer/strlen-pr123085.c
+new file mode 100644
+index 000000000000..85552e76a887
+--- /dev/null
++++ b/gcc/testsuite/c-c++-common/analyzer/strlen-pr123085.c
+@@ -0,0 +1,8 @@
++static int bug(const char *dirname) {
++    dirname++;
++    return __builtin_strlen(dirname); /* { dg-bogus "buffer over-read" } */
++}
++
++int main (void) {
++    return bug("abcd");
++}
+-- 
+2.43.7
+
+

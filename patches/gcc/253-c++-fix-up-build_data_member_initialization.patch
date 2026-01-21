@@ -1,0 +1,81 @@
+From 5ef6443cc80fe6f8419095a6bcba533a356cd22e Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Fri, 21 Nov 2025 14:17:01 +0100
+Subject: [PATCH] c++: Fix up build_data_member_initialization [PR121445]
+
+The following testcase ICEs, because the constexpr ctor in C++14
+or later doesn't contain any member initializers and so the
+massage_constexpr_body -> build_constexpr_constructor_member_initializers
+-> build_data_member_initialization member initialization discovery
+looks at the ctor body instead.  And while it has various
+cases where it punts, including COMPONENT_REF with a VAR_DECL as first
+operand on lhs of INIT_EXPR, here there is COMPONENT_REF with
+several COMPONENT_REFs and VAR_DECL only inside the innermost.
+
+The following patch makes sure we punt on those as well, instead of
+blindly assuming it is anonymous union member initializer or asserting
+it is a vtable store.
+
+An alternative to this would be some flag on the INIT_EXPRs created
+by perform_member_init and let build_data_member_initialization inspect
+only INIT_EXPRs with that flag set.
+
+2025-11-21  Jakub Jelinek  <jakub@redhat.com>
+
+	PR c++/121445
+	* constexpr.cc (build_data_member_initialization): Just return
+	false if member is COMPONENT_REF of COMPONENT_REF with
+	VAR_P get_base_address.
+
+	* g++.dg/cpp1y/constexpr-121445.C: New test.
+
+(cherry picked from commit 0ac5a60c37d9a40e8993b8207e904b713e73b5d3)
+---
+ gcc/cp/constexpr.cc                           |  3 +++
+ gcc/testsuite/g++.dg/cpp1y/constexpr-121445.C | 19 +++++++++++++++++++
+ 2 files changed, 22 insertions(+)
+ create mode 100644 gcc/testsuite/g++.dg/cpp1y/constexpr-121445.C
+
+diff --git a/gcc/cp/constexpr.cc b/gcc/cp/constexpr.cc
+index 0751490cc71c..e667c5221732 100644
+--- a/gcc/cp/constexpr.cc
++++ b/gcc/cp/constexpr.cc
+@@ -464,6 +464,9 @@ build_data_member_initialization (tree t, vec<constructor_elt, va_gc> **vec)
+       if (TREE_CODE (aggr) != COMPONENT_REF)
+ 	/* Normal member initialization.  */
+ 	member = TREE_OPERAND (member, 1);
++      else if (VAR_P (get_base_address (aggr)))
++	/* Initializing a local variable, don't add anything.  */
++	return true;
+       else if (ANON_AGGR_TYPE_P (TREE_TYPE (aggr)))
+ 	/* Initializing a member of an anonymous union.  */
+ 	return build_anon_member_initialization (member, init, vec);
+diff --git a/gcc/testsuite/g++.dg/cpp1y/constexpr-121445.C b/gcc/testsuite/g++.dg/cpp1y/constexpr-121445.C
+new file mode 100644
+index 000000000000..b210aaffaf40
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/cpp1y/constexpr-121445.C
+@@ -0,0 +1,19 @@
++// PR c++/121445
++// { dg-do compile { target c++14 } }
++
++struct D {
++  const char *d;
++  const char *foo () { return ""; };			// { dg-message "declared here" "" { target c++20_down } }
++  constexpr D () : d (foo ()) {}			// { dg-error "call to non-'constexpr' function 'const char\\\* D::foo\\\(\\\)'" "" { target c++20_down } }
++  constexpr D &operator= (const char *) { return *this; }
++};
++struct S {
++  constexpr S ()
++  {
++    struct A { D a; };
++    struct B { A b; };
++    struct C { B c; };
++    C d {};
++    d.c.b.a = "";
++  }
++};
+-- 
+2.43.7
+
+

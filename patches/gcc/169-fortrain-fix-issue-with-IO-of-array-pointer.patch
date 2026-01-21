@@ -1,0 +1,120 @@
+From 857ab305e884bc1ea586f1da1e50f4d17aa7df03 Mon Sep 17 00:00:00 2001
+From: Harald Anlauf <anlauf@gmx.de>
+Date: Fri, 3 Oct 2025 21:16:19 +0200
+Subject: [PATCH] Fortran: fix issue with I/O of array pointer [PR107968]
+
+	PR fortran/107968
+
+gcc/fortran/ChangeLog:
+
+	* trans-io.cc (gfc_trans_transfer): Also scalarize I/O of section
+	of an array pointer.
+
+gcc/testsuite/ChangeLog:
+
+	* gfortran.dg/implied_do_io_9.f90: New test.
+
+(cherry picked from commit e3431c6fd4691d5a0c48ee78869e5f9a79f217c3)
+---
+ gcc/fortran/trans-io.cc                       |  4 +-
+ gcc/testsuite/gfortran.dg/implied_do_io_9.f90 | 72 +++++++++++++++++++
+ 2 files changed, 75 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/gfortran.dg/implied_do_io_9.f90
+
+diff --git a/gcc/fortran/trans-io.cc b/gcc/fortran/trans-io.cc
+index 824f232988c2..f7686543cadd 100644
+--- a/gcc/fortran/trans-io.cc
++++ b/gcc/fortran/trans-io.cc
+@@ -2645,7 +2645,9 @@ gfc_trans_transfer (gfc_code * code)
+ 	 && ((expr->symtree->n.sym->ts.type == BT_DERIVED && expr->ts.deferred)
+ 	     || (expr->symtree->n.sym->assoc
+ 		 && expr->symtree->n.sym->assoc->variable)
+-	     || gfc_expr_attr (expr).pointer))
++	     || gfc_expr_attr (expr).pointer
++	     || (expr->symtree->n.sym->attr.pointer
++		 && gfc_expr_attr (expr).target)))
+ 	goto scalarize;
+ 
+       /* With array-bounds checking enabled, force scalarization in some
+diff --git a/gcc/testsuite/gfortran.dg/implied_do_io_9.f90 b/gcc/testsuite/gfortran.dg/implied_do_io_9.f90
+new file mode 100644
+index 000000000000..5180b8ace66c
+--- /dev/null
++++ b/gcc/testsuite/gfortran.dg/implied_do_io_9.f90
+@@ -0,0 +1,72 @@
++! { dg-do run }
++! { dg-additional-options "-O2" }
++!
++! PR fortran/107968
++!
++! Verify that array I/O optimization is not used for a section
++! of an array pointer as the pointee can be non-contiguous
++!
++! Contributed by Nils Dreier
++
++PROGRAM foo
++  implicit none
++
++  TYPE t_geographical_coordinates
++     REAL :: lon
++     REAL :: lat
++  END TYPE t_geographical_coordinates
++
++  TYPE t_vertices
++     REAL, POINTER          :: vlon(:) => null()
++     REAL, POINTER          :: vlat(:) => null()
++  END TYPE t_vertices
++
++  TYPE(t_geographical_coordinates), TARGET :: vertex(2)
++  TYPE(t_vertices), POINTER :: vertices_pointer
++  TYPE(t_vertices), TARGET  :: vertices_target
++
++  character(24)           :: s0, s1, s2
++  character(*), parameter :: fmt = '(2f8.3)'
++
++  ! initialization
++  vertex%lon = [1,3]
++  vertex%lat = [2,4]
++
++  ! obtain pointer to (non-contiguous) field
++  vertices_target%vlon => vertex%lon
++
++  ! reference output of write
++  write (s0,fmt) vertex%lon
++
++  ! set pointer vertices_pointer in a subroutine
++  CALL set_vertices_pointer(vertices_target)
++
++  write (s1,fmt) vertices_pointer%vlon
++  write (s2,fmt) vertices_pointer%vlon(1:)
++  if (s1 /= s0 .or. s2 /= s0) then
++     print *, s0, s1, s2
++     stop 3
++  end if
++
++CONTAINS
++
++  SUBROUTINE set_vertices_pointer(vertices)
++    TYPE(t_vertices), POINTER, INTENT(IN) :: vertices
++
++    vertices_pointer => vertices
++
++    write (s1,fmt) vertices        %vlon
++    write (s2,fmt) vertices        %vlon(1:)
++    if (s1 /= s0 .or. s2 /= s0) then
++       print *, s0, s1, s2
++       stop 1
++    end if
++
++    write (s1,fmt) vertices_pointer%vlon
++    write (s2,fmt) vertices_pointer%vlon(1:)
++    if (s1 /= s0 .or. s2 /= s0) then
++       print *, s0, s1, s2
++       stop 2
++    end if
++  END SUBROUTINE set_vertices_pointer
++END PROGRAM foo
+-- 
+2.43.7
+
+

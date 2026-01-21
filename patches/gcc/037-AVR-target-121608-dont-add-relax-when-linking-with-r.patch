@@ -1,0 +1,34 @@
+From f8c8edf88d98c22a74019b79fbc26d15207789f7 Mon Sep 17 00:00:00 2001
+From: Georg-Johann Lay <avr@gjlay.de>
+Date: Wed, 20 Aug 2025 10:53:37 +0200
+Subject: [PATCH] AVR: target/121608 - Don't add --relax when linking with -r.
+
+The linker rejects --relax in relocatable links (-r), hence only
+add --relax when -r is not specified.
+
+gcc/
+	PR target/121608
+	* config/avr/specs.h (LINK_RELAX_SPEC): Wrap in %{!r...}.
+
+(cherry picked from commit 0f15ff7b511493e9197e6153b794081c1557ba02)
+---
+ gcc/config/avr/specs.h | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/gcc/config/avr/specs.h b/gcc/config/avr/specs.h
+index ff269bf43bdf..c95c75856cb0 100644
+--- a/gcc/config/avr/specs.h
++++ b/gcc/config/avr/specs.h
+@@ -57,7 +57,7 @@ along with GCC; see the file COPYING3.  If not see
+   "%(asm_errata_skip) "
+ 
+ #define LINK_RELAX_SPEC                         \
+-  "%{mrelax:--relax} "
++  "%{!r:%{mrelax:--relax}} "
+ 
+ #undef  LINK_SPEC
+ #define LINK_SPEC                               \
+-- 
+2.43.7
+
+

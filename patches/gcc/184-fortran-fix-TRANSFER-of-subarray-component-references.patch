@@ -1,0 +1,137 @@
+From 696bfbab0a46ccc263cffd88254582d236a84278 Mon Sep 17 00:00:00 2001
+From: Harald Anlauf <anlauf@gmx.de>
+Date: Thu, 23 Oct 2025 21:21:04 +0200
+Subject: [PATCH] Fortran: fix TRANSFER of subarray component references
+ [PR122386]
+
+Commit r16-518 introduced a change that fixed inquiry references of complex
+arrays as argument to the TRANSFER intrinsic by forcing a temporary.  The
+solution taken however turned out not to be generalizable to component
+references of nested derived-type arrays.  A better way is the revert that
+patch and force the generation of a temporary when the SOURCE expression is
+a not simply-contiguous array.
+
+	PR fortran/122386
+
+gcc/fortran/ChangeLog:
+
+	* dependency.cc (gfc_ref_needs_temporary_p): Revert r16-518.
+	* trans-intrinsic.cc (gfc_conv_intrinsic_transfer): Force temporary
+	for SOURCE not being a simply-contiguous array.
+
+gcc/testsuite/ChangeLog:
+
+	* gfortran.dg/transfer_array_subref_2.f90: New test.
+
+(cherry picked from commit 2febf3b968329aceeeea7805af98ed98a8c67e75)
+---
+ gcc/fortran/dependency.cc                     |  6 +--
+ gcc/fortran/trans-intrinsic.cc                |  7 ++-
+ .../gfortran.dg/transfer_array_subref_2.f90   | 52 +++++++++++++++++++
+ 3 files changed, 59 insertions(+), 6 deletions(-)
+ create mode 100644 gcc/testsuite/gfortran.dg/transfer_array_subref_2.f90
+
+diff --git a/gcc/fortran/dependency.cc b/gcc/fortran/dependency.cc
+index aa8a57a80e0e..57c0c49391bd 100644
+--- a/gcc/fortran/dependency.cc
++++ b/gcc/fortran/dependency.cc
+@@ -944,12 +944,8 @@ gfc_ref_needs_temporary_p (gfc_ref *ref)
+ 	   types), not in characters.  */
+ 	return subarray_p;
+ 
+-      case REF_INQUIRY:
+-	/* Within an array reference, inquiry references of complex
+-	   variables generally need a temporary.  */
+-	return subarray_p;
+-
+       case REF_COMPONENT:
++      case REF_INQUIRY:
+ 	break;
+       }
+ 
+diff --git a/gcc/fortran/trans-intrinsic.cc b/gcc/fortran/trans-intrinsic.cc
+index d748dd72569b..75099ad7cb50 100644
+--- a/gcc/fortran/trans-intrinsic.cc
++++ b/gcc/fortran/trans-intrinsic.cc
+@@ -8541,13 +8541,18 @@ gfc_conv_intrinsic_transfer (gfc_se * se, gfc_expr * expr)
+     }
+   else
+     {
++      bool simply_contiguous = gfc_is_simply_contiguous (arg->expr,
++							 false, true);
+       argse.want_pointer = 0;
++      /* A non-contiguous SOURCE needs packing.  */
++      if (!simply_contiguous)
++	argse.force_tmp = 1;
+       gfc_conv_expr_descriptor (&argse, arg->expr);
+       source = gfc_conv_descriptor_data_get (argse.expr);
+       source_type = gfc_get_element_type (TREE_TYPE (argse.expr));
+ 
+       /* Repack the source if not simply contiguous.  */
+-      if (!gfc_is_simply_contiguous (arg->expr, false, true))
++      if (!simply_contiguous)
+ 	{
+ 	  tmp = gfc_build_addr_expr (NULL_TREE, argse.expr);
+ 
+diff --git a/gcc/testsuite/gfortran.dg/transfer_array_subref_2.f90 b/gcc/testsuite/gfortran.dg/transfer_array_subref_2.f90
+new file mode 100644
+index 000000000000..9ff519866dc8
+--- /dev/null
++++ b/gcc/testsuite/gfortran.dg/transfer_array_subref_2.f90
+@@ -0,0 +1,52 @@
++! { dg-do run }
++! { dg-additional-options "-O2 -fdump-tree-optimized" }
++!
++! PR fortran/122386 - passing of component ref of nested DT array to TRANSFER
++
++program main
++  implicit none
++  integer, parameter :: dp = 4
++
++  type cx
++     real(dp) :: re, im
++  end type cx
++
++  type complex_wrap1
++     type(cx) :: z(2)
++  end type complex_wrap1
++
++  type complex_wrap2
++     type(cx), dimension(:), allocatable :: z
++  end type complex_wrap2
++
++  type(complex_wrap1) :: x = complex_wrap1([cx(1,2), cx(3,4)])
++  type(complex_wrap2) :: w
++
++  w%z = x%z
++
++  ! The following statements should get optimized away...
++  if (size (transfer ( x%z%re ,[1.0_dp])) /= 2) error stop 1
++  if (size (transfer ((x%z%re),[1.0_dp])) /= 2) error stop 2
++  if (size (transfer ([x%z%re],[1.0_dp])) /= 2) error stop 3
++  if (size (transfer ( x%z%im ,[1.0_dp])) /= 2) error stop 4
++  if (size (transfer ((x%z%im),[1.0_dp])) /= 2) error stop 5
++  if (size (transfer ([x%z%im],[1.0_dp])) /= 2) error stop 6
++
++  ! ... while the following may not:
++  if (any  (transfer ( x%z%re ,[1.0_dp])  /= x%z%re)) stop 7
++  if (any  (transfer ( x%z%im ,[1.0_dp])  /= x%z%im)) stop 8
++
++  if (size (transfer ( w%z%re ,[1.0_dp])) /= 2) stop 11
++  if (size (transfer ((w%z%re),[1.0_dp])) /= 2) stop 12
++  if (size (transfer ([w%z%re],[1.0_dp])) /= 2) stop 13
++  if (size (transfer ( w%z%im ,[1.0_dp])) /= 2) stop 14
++  if (size (transfer ((w%z%im),[1.0_dp])) /= 2) stop 15
++  if (size (transfer ([w%z%im],[1.0_dp])) /= 2) stop 16
++
++  if (any  (transfer ( w%z%re ,[1.0_dp])  /= x%z%re)) stop 17
++  if (any  (transfer ( w%z%im ,[1.0_dp])  /= x%z%im)) stop 18
++
++  deallocate (w%z)
++end program main
++
++! { dg-final { scan-tree-dump-not "_gfortran_error_stop_numeric" "optimized" } }
+-- 
+2.43.7
+
+

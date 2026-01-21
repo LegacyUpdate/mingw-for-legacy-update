@@ -1,0 +1,37 @@
+From 9e00f7c49ce19298b0a9f2b9d4f951c33810bdac Mon Sep 17 00:00:00 2001
+From: Nathaniel Shead <nathanieloshead@gmail.com>
+Date: Sun, 17 Aug 2025 13:06:52 +1000
+Subject: [PATCH] testsuite: Fix PR108080 testcase for some targets [PR121396]
+
+I added a testcase for the (temporary) warning that we don't currently
+support the 'gnu::optimize' or 'gnu::target' attributes in r15-10183;
+however, some targets produce target nodes even when only an optimize
+attribute is present.  This adjusts the warning.
+
+	PR c++/108080
+	PR c++/121396
+
+gcc/testsuite/ChangeLog:
+
+	* g++.dg/modules/pr108080.H: Also allow target warnings.
+
+Signed-off-by: Nathaniel Shead <nathanieloshead@gmail.com>
+(cherry picked from commit 82e4932623e57ded0f9303621fe329ee5aaba508)
+---
+ gcc/testsuite/g++.dg/modules/pr108080.H | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/gcc/testsuite/g++.dg/modules/pr108080.H b/gcc/testsuite/g++.dg/modules/pr108080.H
+index b05d9573b076..e26afcbba2a2 100644
+--- a/gcc/testsuite/g++.dg/modules/pr108080.H
++++ b/gcc/testsuite/g++.dg/modules/pr108080.H
+@@ -2,4 +2,4 @@
+ // { dg-additional-options "-fmodules" }
+ // Give a diagnostic message rather than a crash for unsupported features.
+ 
+-[[gnu::optimize("-O3")]] void foo();  // { dg-warning "optimize" }
++[[gnu::optimize("-O3")]] void foo();  // { dg-warning "optimize|target" }
+-- 
+2.43.7
+
+

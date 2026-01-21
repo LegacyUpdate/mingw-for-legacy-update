@@ -1,0 +1,144 @@
+From a4d224859d0b92c5141a84fa12aa7eb1c1818997 Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Tue, 25 Nov 2025 10:06:46 +0100
+Subject: [PATCH] alias: Fix up BITINT_TYPE and non-standard INTEGER_TYPE alias
+ handling [PR122624]
+
+The testcase in the PR is miscompiled on aarch64 with
+--param=ggc-min-expand=0 --param=ggc-min-heapsize=0 -O2
+(not including it in the testsuite because it is too much of
+a lottery).
+
+Anyway, the problem is that the testcase only uses unsigned _BitInt(66)
+and never uses _BitInt(66), get_alias_set remembers alias set for
+ARRAY_TYPE (of its element type in ARRAY_TYPE's TYPE_ALIAS_SET),
+c_common_get_alias_set does not remember in TYPE_ALIAS_SET alias of
+unsigned types and instead asks for get_alias_set of corresponding
+signed type and that creates a new alias set for each new canonical
+type.
+So, in this case, when being asked about get_alias_set on ARRAY_TYPE
+unsigned _BitInt(66) [N], it recurses down to c_common_get_alias_set
+which asks for alias set of at that point newly created signed type
+_BitInt(66), new alias set is created for it, remembered in that
+signed _BitInt(66) TYPE_ALIAS_SET, not remembered in unsigned _BitInt(66)
+and remembered in ARRAY_TYPE's TYPE_ALIAS_SET.
+Next a GC collection comes, signed _BitInt(66) is not used anywhere in
+any reachable from GC roots, so it is removed.
+Later on we ask alias oracle whether the above mentioned ARRAY_TYPE
+can for TBAA alias pointer dereference with the same unsigned _BitInt(66)
+type.  For the ARRAY_TYPE, we have the above created alias set remembered
+in TYPE_ALIAS_SET, so that is what we use, but for the unsigned _BitInt(66)
+we don't, so create a new signed _BitInt(66), create a new alias set for it
+and that is what is returned, so we have to distinct alias sets and return
+that they can't alias.
+Now, for standard INTEGER_TYPEs this isn't a problem, because both the
+signed and unsigned variants of those types are always reachable from GTY
+roots.  For BITINT_TYPE (or build_nonstandard_integer_type built types)
+that isn't the case.  I'm not convinced we need to fix it for
+build_nonstandard_integer_type built INTEGER_TYPEs though, for bit-fields
+their address can't be taken in C/C++, but for BITINT_TYPE this clearly
+is a problem.
+
+So, the following patch solves it by
+1) remembering the alias set we got from get_alias_set on the signed
+   _BitInt(N) type in the unsigned _BitInt(N) type
+2) returning -1 for unsigned _BitInt(1), because there is no corresponding
+   signed _BitInt type and so we can handle it normally
+3) so that the signed _BitInt(N) type isn't later GC collected and later
+   readded with a new alias set incompatible with the still reachable
+   unsigned _BitInt(N) type, the patch for signed _BitInt(N) types checks
+   if corresponding unsigned _BitInt(N) type doesn't already have
+   TYPE_ALIAS_SET_KNOWN_P, in that case it remembers and returns that;
+   in order to avoid infinite recursion, it doesn't call get_alias_set
+   on the unsigned _BitInt(N) type though
+4) while type_hash_canon remembers in the type_hash_table both the hash
+   and the type, so what exactly we use as the hash isn't that important,
+   I think using type_hash_canon_hash for BITINT_TYPEs is actually better over
+   hasing TYPE_MAX_VALUE, because especially for larger BITINT_TYPEs
+   TYPE_MAX_VALUE can have lots of HWIs in the number, for
+   type_hash_canon_hash hashes for BITINT_TYPEs only
+   i) TREE_CODE (i.e. BITINT_TYPE)
+   ii) TYPE_STRUCTURAL_EQUALITY_P flag (likely false)
+   iii) TYPE_PRECISION
+   iv) TYPE_UNSIGNED
+   so 3 ints and one flag, while the old way can hash one HWI up to
+   1024 HWIs; note it is also more consistent with most other
+   type_hash_canon calls, except for build_nonstandard_integer_type; for
+   some reason changing that one to use also type_hash_canon_hash doesn't
+   work, causes tons of ICEs
+
+2025-11-25  Jakub Jelinek  <jakub@redhat.com>
+
+	PR middle-end/122624
+	* c-common.cc (c_common_get_alias_set): Fix up handling of
+	BITINT_TYPEs.  For unsigned _BitInt(1) always return -1.  For other
+	unsigned types set TYPE_ALIAS_SET to get_alias_set of corresponding
+	signed type and return that.  For signed types check if corresponding
+	unsigned type has TYPE_ALIAS_SET_KNOWN_P and if so copy its
+	TYPE_ALIAS_SET and return that.
+
+(cherry picked from commit 5836d9322a2adb0b6d1a5d576fb5ceb9569009b2)
+---
+ gcc/c-family/c-common.cc | 38 ++++++++++++++++++++++++++++++++++++--
+ 1 file changed, 36 insertions(+), 2 deletions(-)
+
+diff --git a/gcc/c-family/c-common.cc b/gcc/c-family/c-common.cc
+index 9e873e11d211..edf7e386d140 100644
+--- a/gcc/c-family/c-common.cc
++++ b/gcc/c-family/c-common.cc
+@@ -3938,8 +3938,7 @@ c_common_get_alias_set (tree t)
+   /* The C standard specifically allows aliasing between signed and
+      unsigned variants of the same type.  We treat the signed
+      variant as canonical.  */
+-  if ((TREE_CODE (t) == INTEGER_TYPE || TREE_CODE (t) == BITINT_TYPE)
+-      && TYPE_UNSIGNED (t))
++  if (TREE_CODE (t) == INTEGER_TYPE && TYPE_UNSIGNED (t))
+     {
+       tree t1 = c_common_signed_type (t);
+ 
+@@ -3947,6 +3946,41 @@ c_common_get_alias_set (tree t)
+       if (t1 != t)
+ 	return get_alias_set (t1);
+     }
++  if (TREE_CODE (t) == BITINT_TYPE)
++    {
++      /* For normal INTEGER_TYPEs (except ones built by
++	 build_nonstandard_integer_type), both signed and unsigned variants
++	 of the type are always reachable from GTY roots, so just calling
++	 get_alias_set on the signed type is ok.  For BITINT_TYPE and
++	 non-standard INTEGER_TYPEs, only unsigned could be used and the
++	 corresponding signed type could be created on demand and garbage
++	 collected as unused, so the alias set of unsigned type could keep
++	 changing.
++	 Avoid that by remembering the signed type alias set in
++	 TYPE_ALIAS_SET and also when being asked about !TYPE_UNSIGNED
++	 check if there isn't a corresponding unsigned type with
++	 TYPE_ALIAS_SET_KNOWN_P.  */
++      if (TYPE_UNSIGNED (t))
++	{
++	  /* There is no signed _BitInt(1).  */
++	  if (TYPE_PRECISION (t) == 1)
++	    return -1;
++	  tree t1 = c_common_signed_type (t);
++	  gcc_checking_assert (t != t1);
++	  TYPE_ALIAS_SET (t) = get_alias_set (t1);
++	  return TYPE_ALIAS_SET (t);
++	}
++      else
++	{
++	  tree t1 = c_common_unsigned_type (t);
++	  gcc_checking_assert (t != t1);
++	  if (TYPE_ALIAS_SET_KNOWN_P (t1))
++	    {
++	      TYPE_ALIAS_SET (t) = TYPE_ALIAS_SET (t1);
++	      return TYPE_ALIAS_SET (t);
++	    }
++	}
++    }
+ 
+   return -1;
+ }
+-- 
+2.43.7
+
+

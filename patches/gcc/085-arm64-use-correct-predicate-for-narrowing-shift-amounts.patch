@@ -1,0 +1,190 @@
+From b8c702f508a8111c68ee00a4ff1a00a64f6e25fc Mon Sep 17 00:00:00 2001
+From: Kyrylo Tkachov <ktkachov@nvidia.com>
+Date: Tue, 2 Sep 2025 00:43:14 -0700
+Subject: [PATCH] aarch64: PR target/121749: Use correct predicate for
+ narrowing shift amounts
+
+With g:d20b2ad845876eec0ee80a3933ad49f9f6c4ee30 the narrowing shift instructions
+are now represented with standard RTL and more merging optimisations occur.
+This exposed a wrong predicate for the shift amount operand.
+The shift amount is the number of bits of the narrow destination, not the input
+sources.
+Correct this by using the vn_mode attribute when specifying the predicate, which
+exists for this purpose.
+
+I've spotted a few more narrowing shift patterns that need the restriction, so
+they are updated as well.
+
+Bootstrapped and tested on aarch64-none-linux-gnu.
+
+Signed-off-by: Kyrylo Tkachov <ktkachov@nvidia.com>
+
+gcc/
+
+	PR target/121749
+	* config/aarch64/aarch64-simd.md (aarch64_<shrn_op>shrn_n<mode>):
+	Use aarch64_simd_shift_imm_offset_<vn_mode> instead of
+	aarch64_simd_shift_imm_offset_<ve_mode> predicate.
+	(aarch64_<shrn_op>shrn_n<mode> VQN define_expand): Likewise.
+	(*aarch64_<shrn_op>rshrn_n<mode>_insn): Likewise.
+	(aarch64_<shrn_op>rshrn_n<mode>): Likewise.
+	(aarch64_<shrn_op>rshrn_n<mode> VQN define_expand): Likewise.
+	(aarch64_sqshrun_n<mode>_insn): Likewise.
+	(aarch64_sqshrun_n<mode>): Likewise.
+	(aarch64_sqshrun_n<mode> VQN define_expand): Likewise.
+	(aarch64_sqrshrun_n<mode>_insn): Likewise.
+	(aarch64_sqrshrun_n<mode>): Likewise.
+	(aarch64_sqrshrun_n<mode>): Likewise.
+	* config/aarch64/iterators.md (vn_mode): Handle DI, SI, HI modes.
+
+gcc/testsuite/
+
+	PR target/121749
+	* gcc.target/aarch64/simd/pr121749.c: New test.
+
+(cherry picked from commit cb508e54140687a50790059fac548d87515df6be)
+---
+ gcc/config/aarch64/aarch64-simd.md            | 22 +++++++++----------
+ gcc/config/aarch64/iterators.md               |  3 ++-
+ .../gcc.target/aarch64/simd/pr121749.c        | 11 ++++++++++
+ 3 files changed, 24 insertions(+), 12 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.target/aarch64/simd/pr121749.c
+
+diff --git a/gcc/config/aarch64/aarch64-simd.md b/gcc/config/aarch64/aarch64-simd.md
+index e2afe87e5130..97558c9687ce 100644
+--- a/gcc/config/aarch64/aarch64-simd.md
++++ b/gcc/config/aarch64/aarch64-simd.md
+@@ -6678,7 +6678,7 @@
+ 	(SAT_TRUNC:<VNARROWQ>
+ 	  (<TRUNC_SHIFT>:SD_HSDI
+ 	    (match_operand:SD_HSDI 1 "register_operand" "w")
+-	    (match_operand:SI 2 "aarch64_simd_shift_imm_offset_<ve_mode>"))))]
++	    (match_operand:SI 2 "aarch64_simd_shift_imm_offset_<vn_mode>"))))]
+   "TARGET_SIMD"
+   "<shrn_op>shrn\t%<vn2>0<Vmntype>, %<v>1<Vmtype>, %2"
+   [(set_attr "type" "neon_shift_imm_narrow_q")]
+@@ -6700,7 +6700,7 @@
+ 	(ALL_TRUNC:<VNARROWQ>
+ 	  (<TRUNC_SHIFT>:VQN
+ 	    (match_operand:VQN 1 "register_operand")
+-	    (match_operand:SI 2 "aarch64_simd_shift_imm_offset_<ve_mode>"))))]
++	    (match_operand:SI 2 "aarch64_simd_shift_imm_offset_<vn_mode>"))))]
+   "TARGET_SIMD"
+   {
+     operands[2] = aarch64_simd_gen_const_vector_dup (<MODE>mode,
+@@ -6731,7 +6731,7 @@
+ 	      (<TRUNCEXTEND>:<DWI>
+ 	        (match_operand:SD_HSDI 1 "register_operand" "w"))
+ 	      (match_operand:<DWI> 3 "aarch64_int_rnd_operand"))
+-	    (match_operand:SI 2 "aarch64_simd_shift_imm_offset_<ve_mode>"))))]
++	    (match_operand:SI 2 "aarch64_simd_shift_imm_offset_<vn_mode>"))))]
+   "TARGET_SIMD
+    && aarch64_const_vec_rnd_cst_p (operands[3], operands[2])"
+   "<shrn_op>rshrn\t%<vn2>0<Vmntype>, %<v>1<Vmtype>, %2"
+@@ -6746,7 +6746,7 @@
+ 	      (<TRUNCEXTEND>:<V2XWIDE>
+ 	        (match_operand:SD_HSDI 1 "register_operand"))
+ 	      (match_dup 3))
+-	    (match_operand:SI 2 "aarch64_simd_shift_imm_offset_<ve_mode>"))))]
++	    (match_operand:SI 2 "aarch64_simd_shift_imm_offset_<vn_mode>"))))]
+   "TARGET_SIMD"
+   {
+     /* Use this expander to create the rounding constant vector, which is
+@@ -6766,7 +6766,7 @@
+ 	      (<TRUNCEXTEND>:<V2XWIDE>
+ 	        (match_operand:VQN 1 "register_operand"))
+ 	      (match_dup 3))
+-	    (match_operand:SI 2 "aarch64_simd_shift_imm_offset_<ve_mode>"))))]
++	    (match_operand:SI 2 "aarch64_simd_shift_imm_offset_<vn_mode>"))))]
+   "TARGET_SIMD"
+   {
+     if (<CODE> == TRUNCATE
+@@ -6808,7 +6808,7 @@
+ 	  (smax:SD_HSDI
+ 	    (ashiftrt:SD_HSDI
+ 	      (match_operand:SD_HSDI 1 "register_operand" "w")
+-	      (match_operand:SI 2 "aarch64_simd_shift_imm_offset_<ve_mode>"))
++	      (match_operand:SI 2 "aarch64_simd_shift_imm_offset_<vn_mode>"))
+ 	    (const_int 0))
+ 	  (const_int <half_mask>)))]
+   "TARGET_SIMD"
+@@ -6819,7 +6819,7 @@
+ (define_expand "aarch64_sqshrun_n<mode>"
+   [(match_operand:<VNARROWQ> 0 "register_operand")
+    (match_operand:SD_HSDI 1 "register_operand")
+-   (match_operand:SI 2 "aarch64_simd_shift_imm_offset_<ve_mode>")]
++   (match_operand:SI 2 "aarch64_simd_shift_imm_offset_<vn_mode>")]
+   "TARGET_SIMD"
+   {
+     rtx dst = gen_reg_rtx (<MODE>mode);
+@@ -6837,7 +6837,7 @@
+ 	    (smax:VQN
+ 	      (ashiftrt:VQN
+ 		(match_operand:VQN 1 "register_operand")
+-		(match_operand:SI 2 "aarch64_simd_shift_imm_offset_<ve_mode>"))
++		(match_operand:SI 2 "aarch64_simd_shift_imm_offset_<vn_mode>"))
+ 	      (match_dup 3))
+ 	    (match_dup 4))))]
+   "TARGET_SIMD"
+@@ -6879,7 +6879,7 @@
+ 		(sign_extend:<DWI>
+ 		  (match_operand:SD_HSDI 1 "register_operand" "w"))
+ 		(match_operand:<DWI> 3 "aarch64_int_rnd_operand"))
+-	      (match_operand:SI 2 "aarch64_simd_shift_imm_offset_<ve_mode>"))
++	      (match_operand:SI 2 "aarch64_simd_shift_imm_offset_<vn_mode>"))
+ 	    (const_int 0))
+ 	  (const_int <half_mask>)))]
+   "TARGET_SIMD
+@@ -6891,7 +6891,7 @@
+ (define_expand "aarch64_sqrshrun_n<mode>"
+   [(match_operand:<VNARROWQ> 0 "register_operand")
+    (match_operand:SD_HSDI 1 "register_operand")
+-   (match_operand:SI 2 "aarch64_simd_shift_imm_offset_<ve_mode>")]
++   (match_operand:SI 2 "aarch64_simd_shift_imm_offset_<vn_mode>")]
+   "TARGET_SIMD"
+   {
+     int prec = GET_MODE_UNIT_PRECISION (<DWI>mode);
+@@ -6914,7 +6914,7 @@
+ 		  (sign_extend:<V2XWIDE>
+ 		    (match_operand:VQN 1 "register_operand"))
+ 		  (match_dup 3))
+-		(match_operand:SI 2 "aarch64_simd_shift_imm_offset_<ve_mode>"))
++		(match_operand:SI 2 "aarch64_simd_shift_imm_offset_<vn_mode>"))
+ 	      (match_dup 4))
+ 	    (match_dup 5))))]
+   "TARGET_SIMD"
+diff --git a/gcc/config/aarch64/iterators.md b/gcc/config/aarch64/iterators.md
+index 47a9bdf2d038..4d60322b45dd 100644
+--- a/gcc/config/aarch64/iterators.md
++++ b/gcc/config/aarch64/iterators.md
+@@ -2126,7 +2126,8 @@
+ 			   (SI   "si")])
+ 
+ ;; Like ve_mode but for the half-width modes.
+-(define_mode_attr vn_mode [(V8HI  "qi") (V4SI  "hi") (V2DI  "si")])
++(define_mode_attr vn_mode [(V8HI  "qi") (V4SI  "hi") (V2DI  "si") (DI "si")
++			   (SI "hi") (HI "qi")])
+ 
+ ;; Vm for lane instructions is restricted to FP_LO_REGS.
+ (define_mode_attr vwx [(V4HI "x") (V8HI "x") (HI "x")
+diff --git a/gcc/testsuite/gcc.target/aarch64/simd/pr121749.c b/gcc/testsuite/gcc.target/aarch64/simd/pr121749.c
+new file mode 100644
+index 000000000000..c4e1a2d76cfb
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/aarch64/simd/pr121749.c
+@@ -0,0 +1,11 @@
++/* { dg-do compile } */
++/* { dg-options "-O2" } */
++
++#include <arm_neon.h>
++
++uint32_t
++foo (uint64_t v0)
++{
++  return vqshrnd_n_u64 (vshrd_n_u64 (v0, 26), 7);
++}
++
+-- 
+2.43.7
+
+

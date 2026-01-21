@@ -1,0 +1,184 @@
+From 57305e18fdf78a656efe1985d5a4e99d438edbd5 Mon Sep 17 00:00:00 2001
+From: Andrew MacLeod <amacleod@redhat.com>
+Date: Wed, 7 Jan 2026 10:55:49 -0500
+Subject: [PATCH] Early builtin_unreachable removal must examine dependencies.
+
+Even if all uses of a name are dominated by the unreachable branch,
+recomputation of a value in the defintion of a name might be reachable.
+
+	PR tree-optimization/123300
+	gcc/
+	* gimple-range-gori.cc (gori_map::exports_and_deps): New.
+	* gimple-range-gori.h (exports_and_deps): New prototype.
+	(FOR_EACH_GORI_EXPORT_AND_DEP_NAME): New macro.
+	* tree-vrp.cc (remove_unreachable:remove_unreachable): Initialize
+	m_tmp bitmap.
+	(remove_unreachable:~remove_unreachable): Dispose of m_tmp bitmap.
+	(remove_unreachable:fully_replaceable): Move from static function
+	and check reachability of exports and dependencies.
+
+	gcc/testsuite/
+	* gcc.dg/pr123300.c: New.
+---
+ gcc/gimple-range-gori.cc        | 22 ++++++++++++++++++++++
+ gcc/gimple-range-gori.h         |  9 ++++++++-
+ gcc/testsuite/gcc.dg/pr123300.c | 29 +++++++++++++++++++++++++++++
+ gcc/tree-vrp.cc                 | 16 ++++++++++------
+ 4 files changed, 69 insertions(+), 7 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.dg/pr123300.c
+
+diff --git a/gcc/gimple-range-gori.cc b/gcc/gimple-range-gori.cc
+index 9761abffc005..9ce066692328 100644
+--- a/gcc/gimple-range-gori.cc
++++ b/gcc/gimple-range-gori.cc
+@@ -383,6 +383,28 @@ gori_map::exports (basic_block bb)
+   return m_outgoing[bb->index];
+ }
+ 
++// Return the bitmap vector of all exports AND their dependencies from BB
++// in TMPBIT.  Calculate if necessary.  Return TMPBIT.
++
++bitmap
++gori_map::exports_and_deps (basic_block bb, bitmap tmpbit)
++{
++  if (bb->index >= (signed int)m_outgoing.length () || !m_outgoing[bb->index])
++    calculate_gori (bb);
++  bitmap_copy (tmpbit, m_outgoing[bb->index]);
++  if (!bitmap_empty_p (tmpbit))
++    {
++      tree name;
++      FOR_EACH_GORI_EXPORT_NAME (this, bb, name)
++	{
++	  bitmap dep = get_def_chain (name);
++	  if (dep)
++	    bitmap_ior_into (tmpbit, dep);
++	}
++    }
++  return tmpbit;
++}
++
+ // Return the bitmap vector of all imports to BB.  Calculate if necessary.
+ 
+ bitmap
+diff --git a/gcc/gimple-range-gori.h b/gcc/gimple-range-gori.h
+index 15eaa91d7add..16a41bd882fd 100644
+--- a/gcc/gimple-range-gori.h
++++ b/gcc/gimple-range-gori.h
+@@ -99,6 +99,7 @@ public:
+   bool is_export_p (tree name, basic_block bb = NULL);
+   bool is_import_p (tree name, basic_block bb);
+   bitmap exports (basic_block bb);
++  bitmap exports_and_deps (basic_block bb, bitmap tmpbit);
+   bitmap imports (basic_block bb);
+   void set_range_invariant (tree name, bool invariant = true);
+ 
+@@ -223,7 +224,7 @@ bool gori_on_edge (class ssa_cache &r, edge e, range_query *query = NULL);
+ bool gori_name_on_edge (vrange &r, tree name, edge e, range_query *q = NULL);
+ 
+ // For each name that is an import into BB's exports..
+-#define FOR_EACH_GORI_IMPORT_NAME(gorimap, bb, name)			\
++#define FOR_EACH_GORI_IMPORT_NAME(gorimap, bb, name)		\
+   for (gori_export_iterator iter ((gorimap)->imports ((bb)));	\
+        ((name) = iter.get_name ());				\
+        iter.next ())
+@@ -234,6 +235,12 @@ bool gori_name_on_edge (vrange &r, tree name, edge e, range_query *q = NULL);
+        ((name) = iter.get_name ());				\
+        iter.next ())
+ 
++// For each name and all their dependencies possibly exported from block BB.
++#define FOR_EACH_GORI_EXPORT_AND_DEP_NAME(gorimap, bb, name, bm)	   \
++  for (gori_export_iterator iter ((gorimap)->exports_and_deps ((bb),(bm))); \
++       ((name) = iter.get_name ());					   \
++       iter.next ())
++
+ // Used to assist with iterating over the GORI export list in various ways
+ class gori_export_iterator {
+ public:
+diff --git a/gcc/testsuite/gcc.dg/pr123300.c b/gcc/testsuite/gcc.dg/pr123300.c
+new file mode 100644
+index 000000000000..7309f3dd9c0b
+--- /dev/null
++++ b/gcc/testsuite/gcc.dg/pr123300.c
+@@ -0,0 +1,29 @@
++/* { dg-do compile } */
++/* { dg-options "-O2 -fdump-tree-vrp1" } */
++[[gnu::noipa]] void
++bar (int a, int b)
++{
++  if (a < 0)
++    __builtin_abort ();
++}
++
++[[gnu::noipa]] void
++foo (int n, bool p)
++{
++  for (int i = n; i-- > 0;)
++    {
++      const int x = 1 << i;
++      if (x <= 0)
++	__builtin_unreachable ();
++      if (p)
++	bar (i, x);
++    }
++}
++
++int
++main ()
++{
++  foo (4, true);
++}
++/* { dg-final { scan-tree-dump "__builtin_unreachable" "vrp1" } } */
++
+diff --git a/gcc/tree-vrp.cc b/gcc/tree-vrp.cc
+index 5aeb1e066cf9..9b2d3d708cc3 100644
+--- a/gcc/tree-vrp.cc
++++ b/gcc/tree-vrp.cc
+@@ -87,15 +87,17 @@ along with GCC; see the file COPYING3.  If not see
+ class remove_unreachable {
+ public:
+   remove_unreachable (range_query &r, bool all) : m_ranger (r), final_p (all)
+-    { m_list.create (30); }
+-  ~remove_unreachable () { m_list.release (); }
++    { m_list.create (30); m_tmp = BITMAP_ALLOC (NULL); }
++  ~remove_unreachable () { BITMAP_FREE (m_tmp); m_list.release (); }
+   void handle_early (gimple *s, edge e);
+   void maybe_register (gimple *s);
+   bool remove ();
+   bool remove_and_update_globals ();
++  bool fully_replaceable (tree name, basic_block bb);
+   vec<std::pair<int, int> > m_list;
+   range_query &m_ranger;
+   bool final_p;
++  bitmap m_tmp;
+ };
+ 
+ // Check if block BB has a __builtin_unreachable () call on one arm, and
+@@ -141,8 +143,8 @@ remove_unreachable::maybe_register (gimple *s)
+ //    goto <bb 3>; [0.00%]
+ //  Any additional use of _1 or _2 in this block invalidates early replacement.
+ 
+-static bool
+-fully_replaceable (tree name, basic_block bb)
++bool
++remove_unreachable::fully_replaceable (tree name, basic_block bb)
+ {
+   use_operand_p use_p;
+   imm_use_iterator iter;
+@@ -213,9 +215,11 @@ remove_unreachable::handle_early (gimple *s, edge e)
+   gcc_checking_assert (gimple_outgoing_range_stmt_p (e->src) == s);
+   gcc_checking_assert (!final_p);
+ 
+-  // Check if every export use is dominated by this branch.
++  // Check if every export and its dependencies are dominated by this branch.
++  // Dependencies are required as it needs to dominate potential
++  // recalculations.  See PR 123300.
+   tree name;
+-  FOR_EACH_GORI_EXPORT_NAME (m_ranger.gori_ssa (), e->src, name)
++  FOR_EACH_GORI_EXPORT_AND_DEP_NAME (m_ranger.gori_ssa (), e->src, name, m_tmp)
+     {
+       if (!fully_replaceable (name, e->src))
+ 	return;
+-- 
+2.43.7
+
+

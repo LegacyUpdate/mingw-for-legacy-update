@@ -1,0 +1,57 @@
+From 353e4d2afb5b9b0ac592cab858999a5217dacfdf Mon Sep 17 00:00:00 2001
+From: Jonathan Wakely <jwakely@redhat.com>
+Date: Tue, 19 Aug 2025 17:29:12 +0100
+Subject: [PATCH] libstdc++: Fix std::numeric_limits<__float128>::max_digits10
+ [PR121374]
+
+When I added this explicit specialization in r14-1433-gf150a084e25eaa I
+used the wrong value for the number of mantissa digits (I used 112
+instead of 113). Then when I refactored it in r14-1582-g6261d10521f9fd I
+used the value calculated from the incorrect value (35 instead of 36).
+
+libstdc++-v3/ChangeLog:
+
+	PR libstdc++/121374
+	* include/std/limits (numeric_limits<__float128>::max_digits10):
+	Fix value.
+	* testsuite/18_support/numeric_limits/128bit.cc: Check value.
+
+(cherry picked from commit cf88ed5bf20c86ca38da19358ff79a34adb4d0b5)
+---
+ libstdc++-v3/include/std/limits                            | 2 +-
+ libstdc++-v3/testsuite/18_support/numeric_limits/128bit.cc | 5 +++++
+ 2 files changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/libstdc++-v3/include/std/limits b/libstdc++-v3/include/std/limits
+index 2331c25599a0..5662a22e9275 100644
+--- a/libstdc++-v3/include/std/limits
++++ b/libstdc++-v3/include/std/limits
+@@ -2129,7 +2129,7 @@ __glibcxx_float_n(128)
+       static _GLIBCXX_USE_CONSTEXPR int digits = 113;
+       static _GLIBCXX_USE_CONSTEXPR int digits10 = 33;
+ #if __cplusplus >= 201103L
+-      static constexpr int max_digits10 = 35;
++      static constexpr int max_digits10 = 36;
+ #endif
+       static _GLIBCXX_USE_CONSTEXPR bool is_signed = true;
+       static _GLIBCXX_USE_CONSTEXPR bool is_integer = false;
+diff --git a/libstdc++-v3/testsuite/18_support/numeric_limits/128bit.cc b/libstdc++-v3/testsuite/18_support/numeric_limits/128bit.cc
+index b13d83776ba3..bf12b65f91a5 100644
+--- a/libstdc++-v3/testsuite/18_support/numeric_limits/128bit.cc
++++ b/libstdc++-v3/testsuite/18_support/numeric_limits/128bit.cc
+@@ -4,6 +4,11 @@
+ 
+ #if __SIZEOF_FLOAT128__
+ __extension__ template class std::numeric_limits<__float128>;
++
++# if __cplusplus >= 201103L
++static_assert( std::numeric_limits<__float128>::max_digits10 == 36,
++	       "PR libstdc++/121374" );
++# endif
+ #endif
+ 
+ #if __SIZEOF_INT128__
+-- 
+2.43.7
+
+

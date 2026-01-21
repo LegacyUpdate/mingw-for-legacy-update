@@ -1,0 +1,234 @@
+From 916323889f3401109147f1b1114b6479a909c764 Mon Sep 17 00:00:00 2001
+From: Georg-Johann Lay <avr@gjlay.de>
+Date: Wed, 8 Oct 2025 20:02:53 +0200
+Subject: [PATCH] AVR: target/122210 - Add double -> fixed-point conversions.
+
+	PR target/122210
+libgcc/config/avr/libf7/
+	* libf7-common.mk (F7_ASM_PARTS): Add D2<fx> modules.
+	* libf7-asm.sx: Implement the D2<fx> modules.
+
+gcc/testsuite/
+	* gcc.target/avr/dtofx.c: New test.
+
+(cherry picked from commit b0bc615d9374ca6293996cf3afca8cabaca0defd)
+---
+ gcc/testsuite/gcc.target/avr/dtofx.c    | 98 +++++++++++++++++++++++++
+ libgcc/config/avr/libf7/libf7-asm.sx    | 81 ++++++++++++++++++++
+ libgcc/config/avr/libf7/libf7-common.mk |  4 +
+ 3 files changed, 183 insertions(+)
+ create mode 100644 gcc/testsuite/gcc.target/avr/dtofx.c
+
+diff --git a/gcc/testsuite/gcc.target/avr/dtofx.c b/gcc/testsuite/gcc.target/avr/dtofx.c
+new file mode 100644
+index 000000000000..f7e28159f920
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/avr/dtofx.c
+@@ -0,0 +1,98 @@
++/* { dg-do run { target { ! avr_tiny } } } */
++/* { dg-additional-options { -std=gnu99 -Os -mcall-prologues -Wno-pedantic } } */
++
++#include <stdfix.h>
++
++#if __SIZEOF_LONG_DOUBLE__ == 8
++
++typedef long double D;
++
++volatile D d0 = 0;
++volatile D dm15 = -1.5;
++volatile D dp15 = +1.5;
++volatile D dm05 = -0.5;
++volatile D dp05 = +0.5;
++
++void test0 (void)
++{
++  if (0hk != (short accum) d0)
++    __builtin_exit (__LINE__);
++
++  if (0uhk != (unsigned short accum) d0)
++    __builtin_exit (__LINE__);
++
++  if (0hr != (short fract) d0)
++    __builtin_exit (__LINE__);
++
++  if (0uhr != (unsigned short fract) d0)
++    __builtin_exit (__LINE__);
++
++  if (0k != (accum) d0)
++    __builtin_exit (__LINE__);
++
++  if (0uk != (unsigned accum) d0)
++    __builtin_exit (__LINE__);
++
++  if (0r != (fract) d0)
++    __builtin_exit (__LINE__);
++
++  if (0ur != (unsigned fract) d0)
++    __builtin_exit (__LINE__);
++}
++
++void testp (void)
++{
++  if (0.5hr != (short fract) dp05)
++    __builtin_exit (__LINE__);
++
++  if (0.5uhr != (unsigned short fract) dp05)
++    __builtin_exit (__LINE__);
++
++  if (0.5r != (fract) dp05)
++    __builtin_exit (__LINE__);
++
++  if (0.5ur != (unsigned fract) dp05)
++    __builtin_exit (__LINE__);
++
++  if (1.5hk != (short accum) dp15)
++    __builtin_exit (__LINE__);
++
++  if (1.5uhk != (unsigned short accum) dp15)
++    __builtin_exit (__LINE__);
++
++  if (1.5k != (accum) dp15)
++    __builtin_exit (__LINE__);
++
++  if (1.5uk != (unsigned accum) dp15)
++    __builtin_exit (__LINE__);
++}
++
++void testm (void)
++{
++  if (-0.5hr != (short fract) dm05)
++    __builtin_exit (__LINE__);
++
++  if (-0.5r != (fract) dm05)
++    __builtin_exit (__LINE__);
++
++  if (-1.5hk != (short accum) dm15)
++    __builtin_exit (__LINE__);
++
++  if (-1.5k != (accum) dm15)
++    __builtin_exit (__LINE__);
++}
++
++int main (void)
++{
++  test0 ();
++  testp ();
++  testm ();
++
++  return 0;
++}
++#else
++int main (void)
++{
++  return 0;
++}
++#endif
+diff --git a/libgcc/config/avr/libf7/libf7-asm.sx b/libgcc/config/avr/libf7/libf7-asm.sx
+index 18e676ace0f8..4b42947e2ed6 100644
+--- a/libgcc/config/avr/libf7/libf7-asm.sx
++++ b/libgcc/config/avr/libf7/libf7-asm.sx
+@@ -2321,4 +2321,85 @@ _ENDF __fractqqdf
+ #endif /* F7MOD_qq2D_ */
+ 
+ 
++;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
++;;; Fixed-point -> double conversions.
++
++#ifdef F7MOD_D2qq_
++_DEFUN __fractdfqq
++    ;; Multiply with 2^{24+7} to get a QQ result in r25.
++    subi    r24, dex_lo (-31)
++    sbci    r25, dex_hi (-31)
++    XCALL   __fixdfsi
++    mov     r24, r25
++    ret
++_ENDF __fractdfqq
++#endif /* F7MOD_D2qq_ */
++
++#ifdef F7MOD_D2uqq_
++_DEFUN __fractdfuqq
++    ;; Multiply with 2^{24+8} to get a UQQ result in r25.
++    subi    r25, dex_hi (-32)
++    XCALL   __fixunsdfsi
++    mov     r24, r25
++    ret
++_ENDF __fractdfuqq
++#endif /* F7MOD_D2uqq_ */
++
++#ifdef F7MOD_D2ha_
++_DEFUN __fractdfha
++    ;; Multiply with 2^{16+7} to get a HA result in r25:r24
++    subi    r24, dex_lo (-23)
++    sbci    r25, dex_hi (-23)
++    XJMP    __fixdfsi
++_ENDF __fractdfha
++#endif /* F7MOD_D2ha_ */
++
++#ifdef F7MOD_D2uha_
++_DEFUN __fractdfuha
++    ;; Multiply with 2^24 to get a UHA result in r25:r24.
++    subi    r24, dex_lo (-24)
++    sbci    r25, dex_hi (-24)
++    XJMP    __fixunsdfsi
++_ENDF __fractdfuha
++#endif /* F7MOD_D2uha_ */
++
++#ifdef F7MOD_D2hq_
++_DEFUN __fractdfhq
++    ;; Multiply with 2^{16+15} to get a HQ result in r25:r24
++    ;; resp. with 2^31 to get a SQ result in r25:r22.
++_LABEL __fractdfsq
++    subi    r24, dex_lo (-31)
++    sbci    r25, dex_hi (-31)
++    XJMP    __fixdfsi
++_ENDF __fractdfhq
++#endif /* F7MOD_D2hq_ */
++
++#ifdef F7MOD_D2uhq_
++_DEFUN __fractdfuhq
++    ;; Multiply with 2^{16+16} to get a UHQ result in r25:r24
++    ;; resp. with 2^32 to get a USQ result in r25:r22.
++_LABEL  __fractdfusq
++    subi    r25, dex_hi (-32)
++    XJMP    __fixunsdfsi
++_ENDF __fractdfuhq
++#endif /* F7MOD_D2uhq_ */
++
++#ifdef F7MOD_D2sa_
++_DEFUN __fractdfsa
++    ;; Multiply with 2^15 to get a SA result in r25:r22.
++    subi    r24, dex_lo (-15)
++    sbci    r25, dex_hi (-15)
++    XJMP    __fixdfsi
++_ENDF __fractdfsa
++#endif /* F7MOD_D2sa_ */
++
++#ifdef F7MOD_D2usa_
++_DEFUN __fractdfusa
++    ;; Multiply with 2^16 to get a USA result in r25:r22.
++    subi    r25, dex_hi (-16)
++    XJMP    __fixunsdfsi
++_ENDF __fractdfusa
++#endif /* F7MOD_D2usa_ */
++
++
+ #endif /* !AVR_TINY */
+diff --git a/libgcc/config/avr/libf7/libf7-common.mk b/libgcc/config/avr/libf7/libf7-common.mk
+index 85f835049698..6d35454ee044 100644
+--- a/libgcc/config/avr/libf7/libf7-common.mk
++++ b/libgcc/config/avr/libf7/libf7-common.mk
+@@ -32,6 +32,10 @@ F7_ASM_PARTS += call_dd call_ddd
+ F7_ASM_PARTS += qq2D uqq2D            sq2D usq2D
+ F7_ASM_PARTS +=            ha2D uha2D sa2D usa2D
+ 
++# Double -> fixed-point conversions
++F7_ASM_PARTS += D2qq D2uqq D2hq D2uhq
++F7_ASM_PARTS +=            D2ha D2uha D2sa D2usa
++
+ # Stuff that will be wrapped in f7-wraps.h (included by libf7-asm.sx)
+ # and give f7_asm_D_*.o modules.
+ g_ddd += add sub mul div
+-- 
+2.43.7
+
+

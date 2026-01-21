@@ -1,0 +1,92 @@
+From 5d343a467ba03606ff3f4c27b7b49b2b79015593 Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Sat, 3 Jan 2026 14:27:41 +0100
+Subject: [PATCH] widening_mul: Fix up .SAT_{ADD,SUB,MUL} pattern recognition
+ [PR123372]
+
+The following testcase ICEs since r15-1671, because the match.pd pattern
+now allows a cast and the function checks whether the ifn is supported
+on a wrong type.  .SAT_{ADD,SUB,MUL} are binary ifns, so they care about
+the type of their first operand:
+  #define binary_direct { 0, 0, true }
+where
+  /* optabs can be parameterized by one or two modes.  These fields describe
+     how to select those modes from the types of the return value and
+     arguments.  A value of -1 says that the mode is determined by the
+     return type while a value N >= 0 says that the mode is determined by
+     the type of argument N.  A value of -2 says that this internal
+     function isn't directly mapped to an optab.  */
+but in this function (unlike the function right below it for the
+same ifns) checks the type of the lhs which since that change can be
+actually a different type (expansion performs the operation on the
+argument types and then casts the result to the lhs type).
+So, e.g. on x86_64 -m32, it checks wether ussubsi3 insn can be used
+(which it can), but then actually uses it on DImode arguments and
+ussubdi3 is TARGET_64BIT only.  Similarly for -m64 it checks ussubsi3 too
+instead of ussubti3 (which doesn't exist).
+
+2026-01-03  Jakub Jelinek  <jakub@redhat.com>
+
+	PR tree-optimization/123372
+	* tree-ssa-math-opts.cc
+	(build_saturation_binary_arith_call_and_replace): Pass type of op_0
+	rather than type of lhs as second argument to
+	direct_internal_fn_supported_p.
+
+	* gcc.dg/tree-ssa/pr123372.c: New test.
+
+(cherry picked from commit c7206efa282bdd121ae4bd5227b487d06c3874c2)
+---
+ gcc/testsuite/gcc.dg/tree-ssa/pr123372.c | 25 ++++++++++++++++++++++++
+ gcc/tree-ssa-math-opts.cc                |  2 +-
+ 2 files changed, 26 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/gcc.dg/tree-ssa/pr123372.c
+
+diff --git a/gcc/testsuite/gcc.dg/tree-ssa/pr123372.c b/gcc/testsuite/gcc.dg/tree-ssa/pr123372.c
+new file mode 100644
+index 000000000000..953b2792a5ff
+--- /dev/null
++++ b/gcc/testsuite/gcc.dg/tree-ssa/pr123372.c
+@@ -0,0 +1,25 @@
++/* PR tree-optimization/123372 */
++/* { dg-do compile } */
++/* { dg-options "-O2 -fgimple" } */
++
++#ifdef __SIZEOF_INT128__
++#define T unsigned __int128
++#else
++#define T unsigned long long
++#endif
++
++unsigned int __GIMPLE (ssa,startwith("phiopt4"))
++foo (T a, T b)
++{
++  T _4;
++  unsigned int _1;
++  bool _5;
++  unsigned int _6;
++
++  __BB(2):
++  _5 = a_2(D) >= b_3(D);
++  _4 = a_2(D) - b_3(D);
++  _6 = (unsigned int) _4;
++  _1 = _5 ? _6 : 0U;
++  return _1;
++}
+diff --git a/gcc/tree-ssa-math-opts.cc b/gcc/tree-ssa-math-opts.cc
+index c3b2ac28e46e..87eec0fb0d36 100644
+--- a/gcc/tree-ssa-math-opts.cc
++++ b/gcc/tree-ssa-math-opts.cc
+@@ -4075,7 +4075,7 @@ build_saturation_binary_arith_call_and_replace (gimple_stmt_iterator *gsi,
+ 						internal_fn fn, tree lhs,
+ 						tree op_0, tree op_1)
+ {
+-  if (direct_internal_fn_supported_p (fn, TREE_TYPE (lhs), OPTIMIZE_FOR_BOTH))
++  if (direct_internal_fn_supported_p (fn, TREE_TYPE (op_0), OPTIMIZE_FOR_BOTH))
+     {
+       gcall *call = gimple_build_call_internal (fn, 2, op_0, op_1);
+       gimple_call_set_lhs (call, lhs);
+-- 
+2.43.7
+
+

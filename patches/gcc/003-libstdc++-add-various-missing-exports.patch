@@ -1,0 +1,160 @@
+From a88f4ef1c79a42be8d3c394a1af0f949898b4216 Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Mon, 4 Aug 2025 17:12:55 +0200
+Subject: [PATCH] libstdc++: Add various missing exports [PR121373]
+
+On Sat, Aug 02, 2025 at 09:05:07PM +0200, Jakub Jelinek wrote:
+> Wonder how to automatically discover other missing exports (like in PR121373
+> std::byteswap), maybe one could dig that stuff somehow from the raw
+> dump (look for identifiers in std namespace (and perhaps inlined namespaces
+> thereof at least) which don't start with underscore.
+
+To answer that question, I wrote a simple plugin which just dumps the names
+(which do not start with underscore) in std namespace (and its inlined
+namespaces) and for non-inline namespaces in there which do not start with
+underscore also recurses on those namespaces.
+
+Plugin source in
+https://gcc.gnu.org/pipermail/libstdc++/2025-August/062859.html
+
+I went through it all now, using cppreference as a quick check for stuff
+removed in C++17/C++20 and for everything added verified it is in
+corresponding eel.is/c++-draft/*.syn etc. and looked it up in the libstdc++
+headers for guarding macros.
+
+2025-08-04  Jakub Jelinek  <jakub@redhat.com>
+	    hexne  <printfne@gmail.com>
+
+	PR libstdc++/121373
+	* src/c++23/std.cc.in (std::ranges::shift_left,
+	std::ranges::shift_right): Only export for C++23 and later.
+	(std::ranges::fold_left_first_with_iter_result,
+	std::ranges::fold_left_with_iter_result): Export.
+	(std::byteswap): Export for C++23 and later.
+	(std::ranges::iter_move, std::ranges::iter_swap): Export.
+	(std::projected_value_t): Export for C++26 and later.
+	(std::out_ptr_t, std::inout_ptr_t): Export.
+	(std::ranges::iota_result): Export.
+	(std::regex_constants): Export a lot of constants.
+	(std::is_scoped_enum, std::is_scoped_enum_v): Export.
+
+(cherry picked from commit 490c2c885ee5de1659d8339ea6bedd908acfacea)
+---
+ libstdc++-v3/src/c++23/std.cc.in | 57 +++++++++++++++++++++++++++++++-
+ 1 file changed, 56 insertions(+), 1 deletion(-)
+
+diff --git a/libstdc++-v3/src/c++23/std.cc.in b/libstdc++-v3/src/c++23/std.cc.in
+index de34e649bba9..5df25bb646af 100644
+--- a/libstdc++-v3/src/c++23/std.cc.in
++++ b/libstdc++-v3/src/c++23/std.cc.in
+@@ -496,7 +496,9 @@ export namespace std
+     using ranges::fold_left;
+     using ranges::fold_left_first;
+     using ranges::fold_left_first_with_iter;
++    using ranges::fold_left_first_with_iter_result;
+     using ranges::fold_left_with_iter;
++    using ranges::fold_left_with_iter_result;
+     using ranges::fold_right;
+     using ranges::fold_right_last;
+     using ranges::in_value_result;
+@@ -666,6 +668,9 @@ export namespace std
+   using std::popcount;
+   using std::rotl;
+   using std::rotr;
++#if __cpp_lib_byteswap // >= C++23
++  using std::byteswap;
++#endif
+ }
+ 
+ // 22.9 <bitset>
+@@ -1726,6 +1731,9 @@ export namespace std
+   using std::make_const_iterator;
+   using std::make_const_sentinel;
+ #endif
++#if __glibcxx_algorithm_default_value_type // >= C++26
++  using std::projected_value_t;
++#endif
+ }
+ // FIXME these should be friends of __normal_iterator to avoid exporting
+ // __gnu_cxx.
+@@ -1946,6 +1954,8 @@ export namespace std
+ #if __cpp_lib_out_ptr
+   using std::out_ptr;
+   using std::inout_ptr;
++  using std::out_ptr_t;
++  using std::inout_ptr_t;
+ #endif
+ }
+ 
+@@ -2062,7 +2072,11 @@ export namespace std
+   using std::lcm;
+   using std::midpoint;
+ #if __cpp_lib_ranges_iota
+-  namespace ranges { using ranges::iota; }
++  namespace ranges
++  {
++    using ranges::iota;
++    using ranges::iota_result;
++  }
+ #endif
+ #if __cpp_lib_saturation_arithmetic
+   using std::add_sat;
+@@ -2473,6 +2487,43 @@ export namespace std
+     using std::regex_constants::operator|;
+     using std::regex_constants::operator|=;
+     using std::regex_constants::operator~;
++    using std::regex_constants::awk;
++    using std::regex_constants::basic;
++    using std::regex_constants::collate;
++    using std::regex_constants::ECMAScript;
++    using std::regex_constants::egrep;
++    using std::regex_constants::extended;
++    using std::regex_constants::grep;
++    using std::regex_constants::icase;
++    using std::regex_constants::multiline;
++    using std::regex_constants::nosubs;
++    using std::regex_constants::optimize;
++    using std::regex_constants::format_default;
++    using std::regex_constants::format_first_only;
++    using std::regex_constants::format_no_copy;
++    using std::regex_constants::format_sed;
++    using std::regex_constants::match_any;
++    using std::regex_constants::match_continuous;
++    using std::regex_constants::match_default;
++    using std::regex_constants::match_not_bol;
++    using std::regex_constants::match_not_bow;
++    using std::regex_constants::match_not_eol;
++    using std::regex_constants::match_not_eow;
++    using std::regex_constants::match_not_null;
++    using std::regex_constants::match_prev_avail;
++    using std::regex_constants::error_backref;
++    using std::regex_constants::error_badbrace;
++    using std::regex_constants::error_badrepeat;
++    using std::regex_constants::error_brace;
++    using std::regex_constants::error_brack;
++    using std::regex_constants::error_collate;
++    using std::regex_constants::error_complexity;
++    using std::regex_constants::error_ctype;
++    using std::regex_constants::error_escape;
++    using std::regex_constants::error_paren;
++    using std::regex_constants::error_range;
++    using std::regex_constants::error_space;
++    using std::regex_constants::error_stack;
+   }
+   using std::basic_regex;
+   using std::csub_match;
+@@ -3114,6 +3165,10 @@ export namespace std
+   using std::is_pointer_interconvertible_base_of_v;
+   using std::is_pointer_interconvertible_with_class;
+ #endif
++#if __cpp_lib_is_scoped_enum
++  using std::is_scoped_enum;
++  using std::is_scoped_enum_v;
++#endif
+ }
+ 
+ // <typeindex>
+-- 
+2.43.7
+
+

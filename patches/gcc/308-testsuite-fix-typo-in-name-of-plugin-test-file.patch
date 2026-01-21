@@ -1,0 +1,57 @@
+From 5bb0345ab3b6d0894fa34cbcbe77bef5425b2940 Mon Sep 17 00:00:00 2001
+From: David Malcolm <dmalcolm@redhat.com>
+Date: Fri, 12 Sep 2025 10:24:35 -0400
+Subject: [PATCH] testsuite: fix typo in name of plugin test file
+
+Backported from commit 85a97e1a8ee934f46b89958b8374dd880dd489a4
+
+gcc/testsuite/ChangeLog:
+	* gcc.dg/plugin/crash-test-write-though-null-sarif.c: Rename to...
+	* gcc.dg/plugin/crash-test-write-through-null-sarif.c: ...this.
+	* gcc.dg/plugin/crash-test-write-though-null-stderr.c: Rename to...
+	* gcc.dg/plugin/crash-test-write-through-null-stderr.c: ...this.
+	* gcc.dg/plugin/plugin.exp: Update for above renamings.  Sort the
+	test files for crash_test_plugin.cc alphabetically.
+
+Signed-off-by: David Malcolm <dmalcolm@redhat.com>
+---
+ ...null-sarif.c => crash-test-write-through-null-sarif.c} | 0
+ ...ll-stderr.c => crash-test-write-through-null-stderr.c} | 0
+ gcc/testsuite/gcc.dg/plugin/plugin.exp                    | 8 ++++----
+ 3 files changed, 4 insertions(+), 4 deletions(-)
+ rename gcc/testsuite/gcc.dg/plugin/{crash-test-write-though-null-sarif.c => crash-test-write-through-null-sarif.c} (100%)
+ rename gcc/testsuite/gcc.dg/plugin/{crash-test-write-though-null-stderr.c => crash-test-write-through-null-stderr.c} (100%)
+
+diff --git a/gcc/testsuite/gcc.dg/plugin/crash-test-write-though-null-sarif.c b/gcc/testsuite/gcc.dg/plugin/crash-test-write-through-null-sarif.c
+similarity index 100%
+rename from gcc/testsuite/gcc.dg/plugin/crash-test-write-though-null-sarif.c
+rename to gcc/testsuite/gcc.dg/plugin/crash-test-write-through-null-sarif.c
+diff --git a/gcc/testsuite/gcc.dg/plugin/crash-test-write-though-null-stderr.c b/gcc/testsuite/gcc.dg/plugin/crash-test-write-through-null-stderr.c
+similarity index 100%
+rename from gcc/testsuite/gcc.dg/plugin/crash-test-write-though-null-stderr.c
+rename to gcc/testsuite/gcc.dg/plugin/crash-test-write-through-null-stderr.c
+diff --git a/gcc/testsuite/gcc.dg/plugin/plugin.exp b/gcc/testsuite/gcc.dg/plugin/plugin.exp
+index 4221ae1a63fb..cccfd3baabcb 100644
+--- a/gcc/testsuite/gcc.dg/plugin/plugin.exp
++++ b/gcc/testsuite/gcc.dg/plugin/plugin.exp
+@@ -70,12 +70,12 @@ set plugin_test_list [list \
+     { poly-int-06_plugin.cc poly-int-test-1.c } \
+     { poly-int-07_plugin.cc poly-int-test-1.c } \
+     { crash_test_plugin.cc \
+-	  crash-test-ice-stderr.c \
+-	  crash-test-write-though-null-stderr.c \
+-	  crash-test-ice-sarif.c \
+ 	  crash-test-ice-in-header-sarif-2.1.c \
+ 	  crash-test-ice-in-header-sarif-2.2.c \
+-	  crash-test-write-though-null-sarif.c } \
++	  crash-test-ice-sarif.c \
++	  crash-test-ice-stderr.c \
++	  crash-test-write-through-null-sarif.c \
++	  crash-test-write-through-null-stderr.c } \
+     { diagnostic_plugin_xhtml_format.cc \
+ 	  diagnostic-test-xhtml-1.c } \
+     { diagnostic_group_plugin.cc \
+-- 
+2.43.7
+
+

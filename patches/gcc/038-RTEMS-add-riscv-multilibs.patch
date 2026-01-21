@@ -1,0 +1,50 @@
+From 87950059c65ddf22c814fbbd6e7bfbc1caf365cc Mon Sep 17 00:00:00 2001
+From: Sebastian Huber <sebastian.huber@embedded-brains.de>
+Date: Mon, 30 Jun 2025 09:40:10 +0200
+Subject: [PATCH] RTEMS: Add riscv multilibs
+
+gcc/ChangeLog:
+
+	* config/riscv/t-rtems: Add -mstrict-align multilibs for
+	targets without support for misaligned access in hardware.
+
+(cherry picked from commit 73a2a9d6c2eab34b2a1f83a1c4286c87a9586b84)
+---
+ gcc/config/riscv/t-rtems | 9 +++++++--
+ 1 file changed, 7 insertions(+), 2 deletions(-)
+
+diff --git a/gcc/config/riscv/t-rtems b/gcc/config/riscv/t-rtems
+index f596e764f9d0..a4d2d03f5602 100644
+--- a/gcc/config/riscv/t-rtems
++++ b/gcc/config/riscv/t-rtems
+@@ -1,8 +1,8 @@
+ MULTILIB_OPTIONS	=
+ MULTILIB_DIRNAMES	=
+ 
+-MULTILIB_OPTIONS	+= march=rv32i/march=rv32iac/march=rv32im/march=rv32imf/march=rv32ima/march=rv32imac/march=rv32imaf/march=rv32imafc/march=rv32imafd/march=rv32imafdc/march=rv64ima/march=rv64imac/march=rv64imafd/march=rv64imafdc
+-MULTILIB_DIRNAMES	+= rv32i       rv32iac       rv32im       rv32imf      rv32ima       rv32imac       rv32imaf       rv32imafc       rv32imafd       rv32imafdc       rv64ima       rv64imac       rv64imafd       rv64imafdc
++MULTILIB_OPTIONS	+= march=rv32i/march=rv32iac/march=rv32im/march=rv32imf/march=rv32ima/march=rv32imac/march=rv32imaf/march=rv32imafc/march=rv32imafd/march=rv32imafdc/march=rv64ima/march=rv64imac/march=rv64imafd/march=rv64imafdc/march=rv64imc
++MULTILIB_DIRNAMES	+= rv32i       rv32iac       rv32im       rv32imf       rv32ima       rv32imac       rv32imaf       rv32imafc       rv32imafd       rv32imafdc       rv64ima       rv64imac       rv64imafd       rv64imafdc       rv64imc
+ 
+ MULTILIB_OPTIONS	+= mabi=ilp32/mabi=ilp32f/mabi=ilp32d/mabi=lp64/mabi=lp64d
+ MULTILIB_DIRNAMES	+= ilp32      ilp32f      ilp32d      lp64      lp64d
+@@ -10,6 +10,9 @@ MULTILIB_DIRNAMES	+= ilp32      ilp32f      ilp32d      lp64      lp64d
+ MULTILIB_OPTIONS	+= mcmodel=medany
+ MULTILIB_DIRNAMES	+= medany
+ 
++MULTILIB_OPTIONS	+= mstrict-align
++MULTILIB_DIRNAMES	+= strict-align
++
+ MULTILIB_REQUIRED	=
+ MULTILIB_REQUIRED	+= march=rv32i/mabi=ilp32
+ MULTILIB_REQUIRED	+= march=rv32iac/mabi=ilp32
+@@ -25,3 +28,5 @@ MULTILIB_REQUIRED	+= march=rv64ima/mabi=lp64/mcmodel=medany
+ MULTILIB_REQUIRED	+= march=rv64imac/mabi=lp64/mcmodel=medany
+ MULTILIB_REQUIRED	+= march=rv64imafd/mabi=lp64d/mcmodel=medany
+ MULTILIB_REQUIRED	+= march=rv64imafdc/mabi=lp64d/mcmodel=medany
++MULTILIB_REQUIRED	+= march=rv64imafdc/mabi=lp64d/mcmodel=medany/mstrict-align
++MULTILIB_REQUIRED	+= march=rv64imc/mabi=lp64/mcmodel=medany/mstrict-align
+-- 
+2.43.7
+
+

@@ -1,0 +1,81 @@
+From 1f98995af30ac251c36f326fdc4d24fb519127d9 Mon Sep 17 00:00:00 2001
+From: Yihan Wang <yronglin777@gmail.com>
+Date: Sat, 16 Aug 2025 16:43:05 +0800
+Subject: [PATCH] libstdc++: Implement LWG4222 'expected' constructor from a
+ single value missing a constraint
+
+libstdc++-v3/ChangeLog:
+
+	* include/std/expected (expected(U&&)): Add missing constraint
+	as per LWG 4222.
+	* testsuite/20_util/expected/lwg4222.cc: New test.
+
+Signed-off-by: Yihan Wang <yronglin777@gmail.com>
+(cherry picked from commit 589f3cd1831446485a6c602578177f5d9794d936)
+---
+ libstdc++-v3/include/std/expected             |  1 +
+ .../testsuite/20_util/expected/lwg4222.cc     | 39 +++++++++++++++++++
+ 2 files changed, 40 insertions(+)
+ create mode 100644 libstdc++-v3/testsuite/20_util/expected/lwg4222.cc
+
+diff --git a/libstdc++-v3/include/std/expected b/libstdc++-v3/include/std/expected
+index 60f1565f15b9..4eaaab693e1e 100644
+--- a/libstdc++-v3/include/std/expected
++++ b/libstdc++-v3/include/std/expected
+@@ -474,6 +474,7 @@ namespace __expected
+       template<typename _Up = remove_cv_t<_Tp>>
+ 	requires (!is_same_v<remove_cvref_t<_Up>, expected>)
+ 	  && (!is_same_v<remove_cvref_t<_Up>, in_place_t>)
++	  && (!is_same_v<remove_cvref_t<_Up>, unexpect_t>)
+ 	  && is_constructible_v<_Tp, _Up>
+ 	  && (!__expected::__is_unexpected<remove_cvref_t<_Up>>)
+ 	  && __expected::__not_constructing_bool_from_expected<_Tp, _Up>
+diff --git a/libstdc++-v3/testsuite/20_util/expected/lwg4222.cc b/libstdc++-v3/testsuite/20_util/expected/lwg4222.cc
+new file mode 100644
+index 000000000000..5c107792456b
+--- /dev/null
++++ b/libstdc++-v3/testsuite/20_util/expected/lwg4222.cc
+@@ -0,0 +1,39 @@
++// { dg-do run { target c++23 } }
++
++// LWG 4222. 'expected' constructor from a single value missing a constraint
++
++#include <expected>
++#include <type_traits>
++#include <testsuite_hooks.h>
++
++struct T {
++  explicit T(auto) {}
++};
++struct E {
++  E(int) {}
++};
++
++struct V {
++ explicit constexpr V(std::unexpect_t) {}
++};
++
++static_assert(!std::is_constructible_v<std::expected<T, E>, std::unexpect_t>);
++static_assert(!std::is_constructible_v<std::expected<T, E>, std::unexpect_t &>);
++static_assert(!std::is_constructible_v<std::expected<T, E>, std::unexpect_t &&>);
++static_assert(!std::is_constructible_v<std::expected<T, E>, const std::unexpect_t>);
++static_assert(!std::is_constructible_v<std::expected<T, E>, const std::unexpect_t &>);
++static_assert(!std::is_constructible_v<std::expected<T, E>, const std::unexpect_t &&>);
++
++constexpr bool test() {
++  std::expected<V, int> e1(std::in_place, std::unexpect);
++  VERIFY( e1.has_value() );
++  std::expected<int, V> e2(std::unexpect, std::unexpect);
++  VERIFY( !e2.has_value() );
++  return true;
++}
++
++int main() {
++  test();
++  static_assert(test());
++  return 0;
++}
+-- 
+2.43.7
+
+

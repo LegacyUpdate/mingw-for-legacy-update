@@ -1,0 +1,27 @@
+From 8844375091e3f47785889242982d301475bbc6da Mon Sep 17 00:00:00 2001
+From: Jonathan Wakely <jwakely@redhat.com>
+Date: Mon, 8 Sep 2025 12:55:03 +0100
+Subject: [PATCH] libstdc++: Remove blank line from bits/unique_ptr.h
+
+libstdc++-v3/ChangeLog:
+
+	* include/bits/unique_ptr.h: Remove blank line.
+
+(cherry picked from commit 15327920854653887e8715bb1592121cafec5c3b)
+---
+ libstdc++-v3/include/bits/unique_ptr.h | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/libstdc++-v3/include/bits/unique_ptr.h b/libstdc++-v3/include/bits/unique_ptr.h
+index 6ae46a93800c..cf8ee65b1507 100644
+--- a/libstdc++-v3/include/bits/unique_ptr.h
++++ b/libstdc++-v3/include/bits/unique_ptr.h
+@@ -1,4 +1,3 @@
+-
+ // unique_ptr implementation -*- C++ -*-
+ 
+ // Copyright (C) 2008-2025 Free Software Foundation, Inc.
+-- 
+2.43.7
+
+

@@ -1,0 +1,124 @@
+From 151c3837491c9cb6ccf9ff9f87707cb3f8044b38 Mon Sep 17 00:00:00 2001
+From: Patrick Palka <ppalka@redhat.com>
+Date: Fri, 5 Dec 2025 13:43:29 -0500
+Subject: [PATCH] libstdc++: Implement P2655R3 changes to common_reference
+ bullet 1
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf8
+Content-Transfer-Encoding: 8bit
+
+We implement this paper as a DR against C++20 (as do MSVC and libc++).
+
+	PR libstdc++/120446
+
+libstdc++-v3/ChangeLog:
+
+	* include/bits/version.def (common_reference): New.
+	* include/bits/version.h: Regenerate.
+	* include/std/type_traits (__glibcxx_want_common_reference):
+	Define.
+	(__common_reference_impl<T1, T2, 1>): Add pointer convertibility
+	constraints as per P2655R3.
+	* testsuite/20_util/common_reference/p2655r3.cc: New test.
+
+Reviewed-by: Tomasz KamiÅski <tkaminsk@redhat.com>
+Reviewed-by: Jonathan Wakely <jwakely@redhat.com>
+(cherry picked from commit a9fd651fbb54024548158ee605eb13dce77afe26)
+---
+ libstdc++-v3/include/bits/version.def             |  8 ++++++++
+ libstdc++-v3/include/bits/version.h               | 10 ++++++++++
+ libstdc++-v3/include/std/type_traits              |  7 +++++++
+ .../testsuite/20_util/common_reference/p2655r3.cc | 15 +++++++++++++++
+ 4 files changed, 40 insertions(+)
+ create mode 100644 libstdc++-v3/testsuite/20_util/common_reference/p2655r3.cc
+
+diff --git a/libstdc++-v3/include/bits/version.def b/libstdc++-v3/include/bits/version.def
+index a08b0b990b2b..d8adeed576a2 100644
+--- a/libstdc++-v3/include/bits/version.def
++++ b/libstdc++-v3/include/bits/version.def
+@@ -1693,6 +1693,14 @@ ftms = {
+   };
+ };
+ 
++ftms = {
++  name = common_reference;
++  values = {
++    v = 202302;
++    cxxmin = 20; // We treat P2655R3 as a DR against C++20.
++  };
++};
++
+ ftms = {
+   name = formatters;
+   values = {
+diff --git a/libstdc++-v3/include/bits/version.h b/libstdc++-v3/include/bits/version.h
+index 3f1562cdc73a..000bde9f9757 100644
+--- a/libstdc++-v3/include/bits/version.h
++++ b/libstdc++-v3/include/bits/version.h
+@@ -1890,6 +1890,16 @@
+ #endif /* !defined(__cpp_lib_flat_set) && defined(__glibcxx_want_flat_set) */
+ #undef __glibcxx_want_flat_set
+ 
++#if !defined(__cpp_lib_common_reference)
++# if (__cplusplus >= 202002L)
++#  define __glibcxx_common_reference 202302L
++#  if defined(__glibcxx_want_all) || defined(__glibcxx_want_common_reference)
++#   define __cpp_lib_common_reference 202302L
++#  endif
++# endif
++#endif /* !defined(__cpp_lib_common_reference) && defined(__glibcxx_want_common_reference) */
++#undef __glibcxx_want_common_reference
++
+ #if !defined(__cpp_lib_formatters)
+ # if (__cplusplus >= 202100L) && _GLIBCXX_HOSTED
+ #  define __glibcxx_formatters 202302L
+diff --git a/libstdc++-v3/include/std/type_traits b/libstdc++-v3/include/std/type_traits
+index 0a402617c52d..5340941c31d5 100644
+--- a/libstdc++-v3/include/std/type_traits
++++ b/libstdc++-v3/include/std/type_traits
+@@ -41,6 +41,7 @@
+ 
+ #define __glibcxx_want_bool_constant
+ #define __glibcxx_want_bounded_array_traits
++#define __glibcxx_want_common_reference
+ #define __glibcxx_want_has_unique_object_representations
+ #define __glibcxx_want_integral_constant_callable
+ #define __glibcxx_want_is_aggregate
+@@ -4128,6 +4129,12 @@ template<typename _Ret, typename _Fn, typename... _Args>
+   template<typename _Tp1, typename _Tp2>
+     requires is_reference_v<_Tp1> && is_reference_v<_Tp2>
+       && requires { typename __common_ref<_Tp1, _Tp2>; }
++#if __cpp_lib_common_reference // C++ >= 20
++      && is_convertible_v<add_pointer_t<_Tp1>,
++			  add_pointer_t<__common_ref<_Tp1, _Tp2>>>
++      && is_convertible_v<add_pointer_t<_Tp2>,
++			  add_pointer_t<__common_ref<_Tp1, _Tp2>>>
++#endif
+     struct __common_reference_impl<_Tp1, _Tp2, 1>
+     { using type = __common_ref<_Tp1, _Tp2>; };
+ 
+diff --git a/libstdc++-v3/testsuite/20_util/common_reference/p2655r3.cc b/libstdc++-v3/testsuite/20_util/common_reference/p2655r3.cc
+new file mode 100644
+index 000000000000..4188dd2fb29f
+--- /dev/null
++++ b/libstdc++-v3/testsuite/20_util/common_reference/p2655r3.cc
+@@ -0,0 +1,15 @@
++// P2655R3 - common_reference_t of reference_wrapper Should Be a Reference Type
++// Implemented as a DR against C++20
++// { dg-do compile { target c++20 } }
++
++#include <type_traits>
++
++#if __cpp_lib_common_reference != 202302L
++# error "Feature-test macro __cpp_lib_common_reference has wrong value in <type_traits>"
++#endif
++
++struct A { };
++struct B { operator A&() const; };
++
++static_assert( std::is_same_v<std::common_reference_t<A&, const B&>, A&> );
++static_assert( std::is_same_v<std::common_reference_t<const B&, A&>, A&> );
+-- 
+2.43.7
+
+

@@ -1,0 +1,167 @@
+From e7399b9d4225f54e000c7252f7aedf7580caa113 Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Tue, 25 Nov 2025 11:19:12 +0100
+Subject: [PATCH] gimplify, ubsan: Fix -fopenmp -fsanitize=bounds ICE
+ [PR120052]
+
+The following testcase ICEs, because
+1) -fsanitize=bounds uses TYPE_MAX_VALUE (TYPE_DOMAIN (type)) with
+   1 or 2 added as last argument of .UBSAN_BOUNDS call and that
+   expression at that point is some NOP_EXPR around SAVE_EXPR with
+   testing for negative sizes
+2) during gimplification, gimplify_type_sizes is invoked on the DECL_EXPR
+   outside of an OpenMP region, and forces TYPE_MAX_VALUE into
+   a pseudo instead, with the SAVE_EXPR obviously being evaluated
+   before that
+3) the OpenMP gimplification sees an implicit or explicit data sharing
+   of a VLA and among other things arranges to firstprivatize TYPE_MAX_VALUE
+4) when gimplifying the .UBSAN_BOUNDS call inside of the OpenMP region,
+   it sees a SAVE_EXPR and just gimplifies it to the already initialized
+   s.1 temporary; but nothing marks s.1 for firstprivatization on the
+   containing construct(s).  The problem is that with SAVE_EXPR we never
+   know if the first use is within the same statement (typical use) or
+   somewhere earlier in the same OpenMP construct or in an outer OpenMP
+   construct or its parent etc., the SAVE_EXPR temporary is a function
+   local var, not something that is added to the innermost scope where
+   it is used (and it can't because it perhaps could be used outside of
+   it); so for OpenMP purposes, SAVE_EXPRs better should be used only
+   within the same OpenMP region and not across the whole function
+
+The following patch fixes it by deferring the addition of
+TYPE_MAX_VALUE in the last argument of .UBSAN_BOUNDS until gimplification
+for VLAs, if it sees a VLA, instead of making the first argument
+0 with pointer to the corresponding array type, it sets the first
+argument to 1 with the same type and only sets the last argument to the
+addend (1 or 2).  And then gimplification can detect this case and
+add the TYPE_MAX_VALUE (which in the meantime should have gone through
+gimplify_type_sizes).
+
+2025-11-25  Jakub Jelinek  <jakub@redhat.com>
+
+	PR middle-end/120052
+gcc/
+	* gimplify.cc (gimplify_call_expr): For IFN_UBSAN_BOUNDS
+	call with integer_onep first argument, change that argument
+	to 0 and add TYPE_MAX_VALUE (TYPE_DOMAIN (arr_type)) to
+	3rd argument before gimplification.
+gcc/c-family/
+	* c-ubsan.cc (ubsan_instrument_bounds): For VLAs use
+	1 instead of 0 as first IFN_UBSAN_BOUNDS argument and only
+	use the addend without TYPE_MAX_VALUE (TYPE_DOMAIN (type))
+	in the 3rd argument.
+gcc/testsuite/
+	* c-c++-common/gomp/pr120052.c: New test.
+
+(cherry picked from commit 72ac4625d2a257bcc2ca562ffa360f560d7c1fd9)
+---
+ gcc/c-family/c-ubsan.cc                    | 14 ++++++++--
+ gcc/gimplify.cc                            | 20 ++++++++++++++
+ gcc/testsuite/c-c++-common/gomp/pr120052.c | 32 ++++++++++++++++++++++
+ 3 files changed, 63 insertions(+), 3 deletions(-)
+ create mode 100644 gcc/testsuite/c-c++-common/gomp/pr120052.c
+
+diff --git a/gcc/c-family/c-ubsan.cc b/gcc/c-family/c-ubsan.cc
+index 78b786854699..87576b01d30d 100644
+--- a/gcc/c-family/c-ubsan.cc
++++ b/gcc/c-family/c-ubsan.cc
+@@ -460,7 +460,7 @@ ubsan_instrument_bounds (location_t loc, tree array, tree *index,
+ 
+   bound = fold_build2 (PLUS_EXPR, TREE_TYPE (bound), bound,
+ 		       build_int_cst (TREE_TYPE (bound),
+-		       1 + ignore_off_by_one));
++				      1 + ignore_off_by_one));
+ 
+   /* Detect flexible array members and suchlike, unless
+      -fsanitize=bounds-strict.  */
+@@ -547,8 +547,16 @@ ubsan_instrument_bounds (location_t loc, tree array, tree *index,
+     return NULL_TREE;
+ 
+   *index = save_expr (*index);
+-  /* Create a "(T *) 0" tree node to describe the array type.  */
+-  tree zero_with_type = build_int_cst (build_pointer_type (type), 0);
++  /* If TYPE is a VLA, use 1 instead of 0 as the first argument and
++     use just the addend to TYPE_MAX_VALUE (domain) as the third argument
++     temporarily, so that gimplification can use TYPE_MAX_VALUE (domain)
++     after gimplify_type_sizes.  See PR120052.  */
++  bool is_vla = (TYPE_MAX_VALUE (domain)
++		 && TREE_CODE (TYPE_MAX_VALUE (domain)) != INTEGER_CST);
++  if (is_vla)
++    bound = build_int_cst (TREE_TYPE (bound), 1 + ignore_off_by_one);
++  /* Create a "(T *) 0" (or 1) tree node to describe the array type.  */
++  tree zero_with_type = build_int_cst (build_pointer_type (type), is_vla);
+   return build_call_expr_internal_loc (loc, IFN_UBSAN_BOUNDS,
+ 				       void_type_node, 3, zero_with_type,
+ 				       *index, bound);
+diff --git a/gcc/gimplify.cc b/gcc/gimplify.cc
+index 4f385b1b779b..69c9bedd9957 100644
+--- a/gcc/gimplify.cc
++++ b/gcc/gimplify.cc
+@@ -4618,6 +4618,26 @@ gimplify_call_expr (tree *expr_p, gimple_seq *pre_p, fallback_t fallback)
+ 	      *expr_p = NULL_TREE;
+ 	      return GS_ALL_DONE;
+ 	    }
++	  else if (ifn == IFN_UBSAN_BOUNDS
++		   && nargs == 3
++		   && integer_onep (CALL_EXPR_ARG (*expr_p, 0)))
++	    {
++	      /* If first argument is one, add TYPE_MAX_VALUE (TYPE_DOMAIN (t))
++		 to 3rd argument and change first argument to 0.  This is
++		 done by ubsan_instrument_bounds so that we can use the
++		 max value from gimplify_type_sizes here instead of original
++		 expression for VLAs.  */
++	      tree type = TREE_TYPE (CALL_EXPR_ARG (*expr_p, 0));
++	      CALL_EXPR_ARG (*expr_p, 0) = build_int_cst (type, 0);
++	      gcc_assert (TREE_CODE (type) == POINTER_TYPE);
++	      type = TREE_TYPE (type);
++	      gcc_assert (TREE_CODE (type) == ARRAY_TYPE);
++	      tree maxv = TYPE_MAX_VALUE (TYPE_DOMAIN (type));
++	      gcc_assert (maxv);
++	      tree arg3 = CALL_EXPR_ARG (*expr_p, 2);
++	      CALL_EXPR_ARG (*expr_p, 2)
++		= fold_build2 (PLUS_EXPR, TREE_TYPE (arg3), maxv, arg3);
++	    }
+ 
+ 	  for (i = 0; i < nargs; i++)
+ 	    {
+diff --git a/gcc/testsuite/c-c++-common/gomp/pr120052.c b/gcc/testsuite/c-c++-common/gomp/pr120052.c
+new file mode 100644
+index 000000000000..c379739f2cfc
+--- /dev/null
++++ b/gcc/testsuite/c-c++-common/gomp/pr120052.c
+@@ -0,0 +1,32 @@
++/* PR middle-end/120052 */
++/* { dg-do compile } */
++/* { dg-additional-options "-fsanitize=undefined" } */
++
++void
++foo (unsigned long s, long indx)
++{
++  long counts[2][s];
++  #pragma omp parallel
++  #pragma omp masked
++  for (int i = 0; i < 2; i++)
++    counts[2][indx] = 1;
++}
++
++void
++bar (unsigned long s, long indx)
++{
++  long counts[2][s];
++  #pragma omp parallel shared(counts)
++  #pragma omp masked
++  for (int i = 0; i < 2; i++)
++    counts[2][indx] = 1;
++}
++
++void
++baz (unsigned long s, long indx)
++{
++  long counts[2][s];
++  #pragma omp parallel private(counts)
++  for (int i = 0; i < 2; i++)
++    counts[2][indx] = 1;
++}
+-- 
+2.43.7
+
+

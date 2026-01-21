@@ -1,0 +1,36 @@
+From 76a8b799f9d5451dca85af26cbf33781f2ed39cf Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Tue, 16 Sep 2025 19:25:58 +0200
+Subject: [PATCH] docs: Adjust -Wimplicit-fallthrough= documentation for C23
+
+I've noticed in -Wimplicit-fallthrough= documentation we talk about
+[[fallthrough]]; for C++17 but don't mention that it is also standard
+way to suppress the warning for C23.
+
+2025-09-16  Jakub Jelinek  <jakub@redhat.com>
+
+	* doc/invoke.texi (Wimplicit-fallthrough=): Document that also C23
+	provides a standard way to suppress the warning with [[fallthrough]];.
+
+(cherry picked from commit 5eb86c29d29fa25f8ad81d75730a993bb03fb558)
+---
+ gcc/doc/invoke.texi | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/gcc/doc/invoke.texi b/gcc/doc/invoke.texi
+index 64a3131c1906..6a1ba08ca60a 100644
+--- a/gcc/doc/invoke.texi
++++ b/gcc/doc/invoke.texi
+@@ -7189,7 +7189,7 @@ switch (cond)
+ @end group
+ @end smallexample
+ 
+-C++17 provides a standard way to suppress the @option{-Wimplicit-fallthrough}
++C++17 and C23 provide a standard way to suppress the @option{-Wimplicit-fallthrough}
+ warning using @code{[[fallthrough]];} instead of the GNU attribute.  In C++11
+ or C++14 users can use @code{[[gnu::fallthrough]];}, which is a GNU extension.
+ Instead of these attributes, it is also possible to add a fallthrough comment
+-- 
+2.43.7
+
+

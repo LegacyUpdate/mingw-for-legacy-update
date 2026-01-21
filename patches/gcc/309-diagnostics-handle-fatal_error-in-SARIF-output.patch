@@ -1,0 +1,109 @@
+From 2fdebdd5690c0178582f8f6f6b1888fb7a233d43 Mon Sep 17 00:00:00 2001
+From: David Malcolm <dmalcolm@redhat.com>
+Date: Tue, 13 Jan 2026 17:09:09 -0500
+Subject: [PATCH] diagnostics: handle fatal_error in SARIF output [PR120063]
+
+Backported from r16-3828-g259347de43e965.
+
+gcc/ChangeLog:
+	PR diagnostics/120063
+	* diagnostic-format-sarif.cc (maybe_get_sarif_level): Handle
+	DK_FATAL as SARIF level "error".
+	* diagnostic.cc (diagnostic_context::execution_failed_p): Also
+	treat any DK_FATAL errors as leading to failed execution.
+
+gcc/testsuite/ChangeLog:
+	PR diagnostics/120063
+	* gcc.dg/fatal-error.c: New test.
+	* gcc.dg/fatal-error-sarif.py: New test.
+
+Signed-off-by: David Malcolm <dmalcolm@redhat.com>
+---
+ gcc/diagnostic-format-sarif.cc            |  1 +
+ gcc/diagnostic.cc                         |  3 ++-
+ gcc/testsuite/gcc.dg/fatal-error-sarif.py | 29 +++++++++++++++++++++++
+ gcc/testsuite/gcc.dg/fatal-error.c        |  9 +++++++
+ 4 files changed, 41 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/gcc.dg/fatal-error-sarif.py
+ create mode 100644 gcc/testsuite/gcc.dg/fatal-error.c
+
+diff --git a/gcc/diagnostic-format-sarif.cc b/gcc/diagnostic-format-sarif.cc
+index 8dbc91ee8f32..23f22bc69b73 100644
+--- a/gcc/diagnostic-format-sarif.cc
++++ b/gcc/diagnostic-format-sarif.cc
+@@ -1838,6 +1838,7 @@ maybe_get_sarif_level (diagnostic_t diag_kind)
+     {
+     case DK_WARNING:
+       return "warning";
++    case DK_FATAL:
+     case DK_ERROR:
+       return "error";
+     case DK_NOTE:
+diff --git a/gcc/diagnostic.cc b/gcc/diagnostic.cc
+index f2e7f5b85a3a..0b6acf558a20 100644
+--- a/gcc/diagnostic.cc
++++ b/gcc/diagnostic.cc
+@@ -476,7 +476,8 @@ diagnostic_context::execution_failed_p () const
+ {
+   /* Equivalent to (seen_error () || werrorcount), but on
+      this context, rather than global_dc.  */
+-  return (diagnostic_count (DK_ERROR)
++  return (diagnostic_count (DK_FATAL)
++	  || diagnostic_count (DK_ERROR)
+ 	  || diagnostic_count (DK_SORRY)
+ 	  || diagnostic_count (DK_WERROR));
+ }
+diff --git a/gcc/testsuite/gcc.dg/fatal-error-sarif.py b/gcc/testsuite/gcc.dg/fatal-error-sarif.py
+new file mode 100644
+index 000000000000..4c434ed8dcf1
+--- /dev/null
++++ b/gcc/testsuite/gcc.dg/fatal-error-sarif.py
+@@ -0,0 +1,29 @@
++from sarif import *
++
++import pytest
++
++@pytest.fixture(scope='function', autouse=True)
++def sarif():
++    return sarif_from_env()
++
++def test_execution_unsuccessful(sarif):
++    runs = sarif['runs']
++    run = runs[0]
++
++    invocations = run['invocations']
++    assert len(invocations) == 1
++    invocation = invocations[0]
++
++    # We expect the fatal error to make executionSuccessful be false
++    assert invocation['executionSuccessful'] == False
++
++def test_fatal_error(sarif):
++    runs = sarif['runs']
++    run = runs[0]
++    results = run['results']
++
++    assert len(results) == 1
++    
++    result = results[0]
++    assert result['level'] == 'error'
++    assert result['message']['text'] == "this-does-not-exist.h: No such file or directory"
+diff --git a/gcc/testsuite/gcc.dg/fatal-error.c b/gcc/testsuite/gcc.dg/fatal-error.c
+new file mode 100644
+index 000000000000..b00e803fdf9a
+--- /dev/null
++++ b/gcc/testsuite/gcc.dg/fatal-error.c
+@@ -0,0 +1,9 @@
++/* { dg-do compile } */
++/* { dg-additional-options "-fdiagnostics-add-output=sarif" } */
++
++#include "this-does-not-exist.h"
++
++/* { dg-prune-output "fatal error:" }
++   { dg-prune-output "compilation terminated" }
++   { dg-final { verify-sarif-file } }
++   { dg-final { run-sarif-pytest fatal-error.c "fatal-error-sarif.py" } } */
+-- 
+2.43.7
+
+

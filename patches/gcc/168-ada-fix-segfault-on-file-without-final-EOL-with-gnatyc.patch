@@ -1,0 +1,31 @@
+From e4ee38ae7ad69dd6bea96665a2f7bc6887cd3145 Mon Sep 17 00:00:00 2001
+From: Eric Botcazou <ebotcazou@adacore.com>
+Date: Fri, 24 Oct 2025 17:39:57 +0200
+Subject: [PATCH] Ada: Fix segfault on file without final EOL with -gnatyc
+
+The compiler overruns the source file buffer.
+
+gcc/ada/
+	PR ada/118782
+	* styleg.adb (Is_Box_Comment): Also stop the loop at EOF.
+---
+ gcc/ada/styleg.adb | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/gcc/ada/styleg.adb b/gcc/ada/styleg.adb
+index 20945fbb65f7..46499fff7f1d 100644
+--- a/gcc/ada/styleg.adb
++++ b/gcc/ada/styleg.adb
+@@ -330,7 +330,7 @@ package body Styleg is
+          --  Do we need to worry about UTF_32 line terminators here ???
+ 
+          S := Scan_Ptr + 3;
+-         while Source (S) not in Line_Terminator loop
++         while Source (S) not in EOF | Line_Terminator loop
+             S := S + 1;
+          end loop;
+ 
+-- 
+2.43.7
+
+

@@ -1,0 +1,455 @@
+From 653977c4a31643497655600688ff238b734f7512 Mon Sep 17 00:00:00 2001
+From: "H.J. Lu" <hjl.tools@gmail.com>
+Date: Sun, 19 Oct 2025 09:13:52 +0800
+Subject: [PATCH] x86: Optimize copysign (x, const_double)
+
+After
+
+commit 3f176e1adc6bc9cc2c21222d776b51d9f43cb66b
+Author: Tamar Christina <tamar.christina@arm.com>
+Date:   Thu Nov 9 13:59:39 2023 +0000
+
+    middle-end: optimize fneg (fabs (x)) to copysign (x, -1) [PR109154]
+
+fneg (fabs (x)) is expanded to copysign (x, -1).  Swap constraints for
+operands[1] and operands[2] in copysign<mode>3 pattern to optimize
+
+  y = copysign (x, const_double)
+
+instead of
+
+  y = copysign (const_double, x)
+
+Simplify
+
+  y = copysign (x, positive_const_double)
+
+to
+
+  y = ~signbit_mask & x
+
+and
+
+  y = copysign (x, negative_const_double)
+
+to
+
+  y = signbit_mask | x
+
+gcc/
+
+	PR target/99930
+	PR target/122323
+	* config/i386/i386-expand.cc (ix86_expand_copysign): Swap
+	operands[1] with operands[2].  Optimize copysign (x, const_double)
+	instead of copysign (const_double, x).
+	* config/i386/i386.md (copysign<mode>3): Swap constraints for
+	operands[1] and operands[2].
+
+gcc/testsuite/
+
+	PR target/99930
+	PR target/122323
+	* gcc.target/i386/builtin-copysign-2.c: New test.
+	* gcc.target/i386/builtin-copysign-3.c: Likewise.
+	* gcc.target/i386/builtin-copysign-4.c: Likewise.
+	* gcc.target/i386/builtin-copysign-5.c: Likewise.
+	* gcc.target/i386/builtin-copysign-6.c: Likewise.
+	* gcc.target/i386/builtin-copysign-7.c: Likewise.
+	* gcc.target/i386/builtin-copysign-8a.c: Likewise.
+	* gcc.target/i386/builtin-copysign-8b.c: Likewise.
+	* gcc.target/i386/builtin-fabs-1.c: Likewise.
+	* gcc.target/i386/builtin-fabs-2.c: Likewise.
+
+Signed-off-by: H.J. Lu <hjl.tools@gmail.com>
+(cherry picked from commit c3b0ecf04f8c14360cc02c737446c029038a95f7)
+---
+ gcc/config/i386/i386-expand.cc                | 46 +++++++++++--------
+ gcc/config/i386/i386.md                       |  4 +-
+ .../gcc.target/i386/builtin-copysign-2.c      | 22 +++++++++
+ .../gcc.target/i386/builtin-copysign-3.c      | 22 +++++++++
+ .../gcc.target/i386/builtin-copysign-4.c      | 22 +++++++++
+ .../gcc.target/i386/builtin-copysign-5.c      | 22 +++++++++
+ .../gcc.target/i386/builtin-copysign-6.c      | 22 +++++++++
+ .../gcc.target/i386/builtin-copysign-7.c      | 20 ++++++++
+ .../gcc.target/i386/builtin-copysign-8a.c     | 21 +++++++++
+ .../gcc.target/i386/builtin-copysign-8b.c     | 18 ++++++++
+ .../gcc.target/i386/builtin-fabs-1.c          | 23 ++++++++++
+ .../gcc.target/i386/builtin-fabs-2.c          | 27 +++++++++++
+ 12 files changed, 249 insertions(+), 20 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.target/i386/builtin-copysign-2.c
+ create mode 100644 gcc/testsuite/gcc.target/i386/builtin-copysign-3.c
+ create mode 100644 gcc/testsuite/gcc.target/i386/builtin-copysign-4.c
+ create mode 100644 gcc/testsuite/gcc.target/i386/builtin-copysign-5.c
+ create mode 100644 gcc/testsuite/gcc.target/i386/builtin-copysign-6.c
+ create mode 100644 gcc/testsuite/gcc.target/i386/builtin-copysign-7.c
+ create mode 100644 gcc/testsuite/gcc.target/i386/builtin-copysign-8a.c
+ create mode 100644 gcc/testsuite/gcc.target/i386/builtin-copysign-8b.c
+ create mode 100644 gcc/testsuite/gcc.target/i386/builtin-fabs-1.c
+ create mode 100644 gcc/testsuite/gcc.target/i386/builtin-fabs-2.c
+
+diff --git a/gcc/config/i386/i386-expand.cc b/gcc/config/i386/i386-expand.cc
+index cdfd94d3c73d..77783a56df1a 100644
+--- a/gcc/config/i386/i386-expand.cc
++++ b/gcc/config/i386/i386-expand.cc
+@@ -2361,34 +2361,44 @@ ix86_expand_copysign (rtx operands[])
+     vdest = gen_reg_rtx (vmode);
+   else
+     dest = NULL_RTX;
+-  op1 = lowpart_subreg (vmode, force_reg (mode, operands[2]), mode);
++  op1 = lowpart_subreg (vmode, force_reg (mode, operands[1]), mode);
+   mask = ix86_build_signbit_mask (vmode, TARGET_AVX512F && mode != HFmode, 0);
+ 
+-  if (CONST_DOUBLE_P (operands[1]))
++  if (CONST_DOUBLE_P (operands[2]))
+     {
+-      op0 = simplify_unary_operation (ABS, mode, operands[1], mode);
+-      /* Optimize for 0, simplify b = copy_signf (0.0f, a) to b = mask & a.  */
+-      if (op0 == CONST0_RTX (mode))
++      if (real_isneg (CONST_DOUBLE_REAL_VALUE (operands[2])))
++	/* Simplify b = copysign (a, negative) to b = mask | a.  */
++	op1 = gen_rtx_IOR (vmode, mask, op1);
++      else
+ 	{
+-	  emit_move_insn (vdest, gen_rtx_AND (vmode, mask, op1));
+-	  if (dest)
+-	    emit_move_insn (dest, lowpart_subreg (mode, vdest, vmode));
+-	  return;
++	  /* Simplify b = copysign (a, positive) to b = invert_mask & a.  */
++	  rtx invert_mask
++	    = ix86_build_signbit_mask (vmode,
++				       TARGET_AVX512F && mode != HFmode,
++				       true);
++	  op1 = gen_rtx_AND (vmode, invert_mask, op1);
+ 	}
+-
+-      if (GET_MODE_SIZE (mode) < 16)
+-	op0 = ix86_build_const_vector (vmode, false, op0);
+-      op0 = force_reg (vmode, op0);
++      emit_move_insn (vdest, op1);
++      if (dest)
++	emit_move_insn (dest, lowpart_subreg (mode, vdest, vmode));
++      return;
+     }
+   else
+-    op0 = lowpart_subreg (vmode, force_reg (mode, operands[1]), mode);
++    op0 = lowpart_subreg (vmode, force_reg (mode, operands[2]), mode);
+ 
+   op2 = gen_reg_rtx (vmode);
+   op3 = gen_reg_rtx (vmode);
+-  emit_move_insn (op2, gen_rtx_AND (vmode,
+-				    gen_rtx_NOT (vmode, mask),
+-				    op0));
+-  emit_move_insn (op3, gen_rtx_AND (vmode, mask, op1));
++  rtx invert_mask;
++  /* NB: Generate vmovdqa, vpandn, vpand, vpor for AVX and generate pand,
++     pand, por for SSE.  */
++  if (TARGET_AVX)
++    invert_mask = gen_rtx_NOT (vmode, mask);
++  else
++    invert_mask = ix86_build_signbit_mask (vmode,
++					   TARGET_AVX512F && mode != HFmode,
++					   true);
++  emit_move_insn (op2, gen_rtx_AND (vmode, invert_mask, op1));
++  emit_move_insn (op3, gen_rtx_AND (vmode, mask, op0));
+   emit_move_insn (vdest, gen_rtx_IOR (vmode, op2, op3));
+   if (dest)
+     emit_move_insn (dest, lowpart_subreg (mode, vdest, vmode));
+diff --git a/gcc/config/i386/i386.md b/gcc/config/i386/i386.md
+index 8416c045b50c..6ba7e4bdbee3 100644
+--- a/gcc/config/i386/i386.md
++++ b/gcc/config/i386/i386.md
+@@ -14952,8 +14952,8 @@
+ 
+ (define_expand "copysign<mode>3"
+   [(match_operand:SSEMODEF 0 "register_operand")
+-   (match_operand:SSEMODEF 1 "nonmemory_operand")
+-   (match_operand:SSEMODEF 2 "register_operand")]
++   (match_operand:SSEMODEF 1 "register_operand")
++   (match_operand:SSEMODEF 2 "nonmemory_operand")]
+   "(SSE_FLOAT_MODE_P (<MODE>mode) && TARGET_SSE_MATH)
+    || (TARGET_SSE && (<MODE>mode == TFmode))
+    || (TARGET_AVX512FP16 && (<MODE>mode ==HFmode))"
+diff --git a/gcc/testsuite/gcc.target/i386/builtin-copysign-2.c b/gcc/testsuite/gcc.target/i386/builtin-copysign-2.c
+new file mode 100644
+index 000000000000..d90c5a49a3a7
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/i386/builtin-copysign-2.c
+@@ -0,0 +1,22 @@
++/* { dg-do compile } */
++/* { dg-options "-O2 -mno-avx -msse2" } */
++/* Keep labels and directives ('.cfi_startproc', '.cfi_endproc').  */
++/* { dg-final { check-function-bodies "**" "" "" { target { ! ia32 } } {^\t?\.} } } */
++
++/*
++**foo:
++**.LFB[0-9]+:
++**	.cfi_startproc
++**	andps	.LC[0-9]+\(%rip\), %xmm0
++**	ret
++**...
++*/
++
++float
++foo (float x)
++{
++  return __builtin_copysignf (x, 0.0);
++}
++
++/* { dg-final { scan-assembler-times ".long	0" 3 { target { ! ia32 } } } } */
++/* { dg-final { scan-assembler-times ".long	2147483647" 1 { target { ! ia32 } } } } */
+diff --git a/gcc/testsuite/gcc.target/i386/builtin-copysign-3.c b/gcc/testsuite/gcc.target/i386/builtin-copysign-3.c
+new file mode 100644
+index 000000000000..d3b4dd5a4af0
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/i386/builtin-copysign-3.c
+@@ -0,0 +1,22 @@
++/* { dg-do compile } */
++/* { dg-options "-O2 -mno-avx -msse2" } */
++/* Keep labels and directives ('.cfi_startproc', '.cfi_endproc').  */
++/* { dg-final { check-function-bodies "**" "" "" { target { ! ia32 } } {^\t?\.} } } */
++
++/*
++**foo:
++**.LFB[0-9]+:
++**	.cfi_startproc
++**	orps	.LC[0-9]+\(%rip\), %xmm0
++**	ret
++**...
++*/
++
++float
++foo (float x)
++{
++  return __builtin_copysignf (x, -3.0);
++}
++
++/* { dg-final { scan-assembler-times ".long	0" 3 { target { ! ia32 } } } } */
++/* { dg-final { scan-assembler-times ".long	-2147483648" 1 { target { ! ia32 } } } } */
+diff --git a/gcc/testsuite/gcc.target/i386/builtin-copysign-4.c b/gcc/testsuite/gcc.target/i386/builtin-copysign-4.c
+new file mode 100644
+index 000000000000..9886fdcc9aee
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/i386/builtin-copysign-4.c
+@@ -0,0 +1,22 @@
++/* { dg-do compile } */
++/* { dg-options "-O2 -mno-avx -msse2" } */
++/* Keep labels and directives ('.cfi_startproc', '.cfi_endproc').  */
++/* { dg-final { check-function-bodies "**" "" "" { target { ! ia32 } } {^\t?\.} } } */
++
++/*
++**foo:
++**.LFB[0-9]+:
++**	.cfi_startproc
++**	pand	.LC[0-9]+\(%rip\), %xmm0
++**	ret
++**...
++*/
++
++__float128
++foo (__float128 x)
++{
++  return __builtin_copysignq (x, 0.0);
++}
++
++/* { dg-final { scan-assembler-times ".long	-1" 3 { target { ! ia32 } } } } */
++/* { dg-final { scan-assembler-times ".long	2147483647" 1 { target { ! ia32 } } } } */
+diff --git a/gcc/testsuite/gcc.target/i386/builtin-copysign-5.c b/gcc/testsuite/gcc.target/i386/builtin-copysign-5.c
+new file mode 100644
+index 000000000000..3f4df5f779b0
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/i386/builtin-copysign-5.c
+@@ -0,0 +1,22 @@
++/* { dg-do compile } */
++/* { dg-options "-O2 -mno-avx -msse2" } */
++/* Keep labels and directives ('.cfi_startproc', '.cfi_endproc').  */
++/* { dg-final { check-function-bodies "**" "" "" { target { ! ia32 } } {^\t?\.} } } */
++
++/*
++**foo:
++**.LFB[0-9]+:
++**	.cfi_startproc
++**	pand	.LC[0-9]+\(%rip\), %xmm0
++**	ret
++**...
++*/
++
++__float128
++foo (__float128 x)
++{
++  return __builtin_copysignq (0.0, x);
++}
++
++/* { dg-final { scan-assembler-times ".long	0" 3 { target { ! ia32 } } } } */
++/* { dg-final { scan-assembler-times ".long	-2147483648" 1 { target { ! ia32 } } } } */
+diff --git a/gcc/testsuite/gcc.target/i386/builtin-copysign-6.c b/gcc/testsuite/gcc.target/i386/builtin-copysign-6.c
+new file mode 100644
+index 000000000000..5b6eb517f823
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/i386/builtin-copysign-6.c
+@@ -0,0 +1,22 @@
++/* { dg-do compile } */
++/* { dg-options "-O2 -mno-avx -msse2" } */
++/* Keep labels and directives ('.cfi_startproc', '.cfi_endproc').  */
++/* { dg-final { check-function-bodies "**" "" "" { target { ! ia32 } } {^\t?\.} } } */
++
++/*
++**foo:
++**.LFB[0-9]+:
++**	.cfi_startproc
++**	pand	.LC[0-9]+\(%rip\), %xmm0
++**	ret
++**...
++*/
++
++__float128
++foo (__float128 x)
++{
++  return __builtin_copysignq (x, 3.4);
++}
++
++/* { dg-final { scan-assembler-times ".long	-1" 3 { target { ! ia32 } } } } */
++/* { dg-final { scan-assembler-times ".long	2147483647" 1 { target { ! ia32 } } } } */
+diff --git a/gcc/testsuite/gcc.target/i386/builtin-copysign-7.c b/gcc/testsuite/gcc.target/i386/builtin-copysign-7.c
+new file mode 100644
+index 000000000000..012fb14a85e3
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/i386/builtin-copysign-7.c
+@@ -0,0 +1,20 @@
++/* { dg-do compile } */
++/* { dg-options "-O2 -mno-avx -msse2" } */
++/* Keep labels and directives ('.cfi_startproc', '.cfi_endproc').  */
++/* { dg-final { check-function-bodies "**" "" "" { target { ! ia32 } } {^\t?\.} } } */
++
++/*
++**foo:
++**.LFB[0-9]+:
++**	.cfi_startproc
++**	pand	.LC[0-9]+\(%rip\), %xmm0
++**	por	.LC[0-9]+\(%rip\), %xmm0
++**	ret
++**...
++*/
++
++__float128
++foo (__float128 x)
++{
++  return __builtin_copysignq (3.4, x);
++}
+diff --git a/gcc/testsuite/gcc.target/i386/builtin-copysign-8a.c b/gcc/testsuite/gcc.target/i386/builtin-copysign-8a.c
+new file mode 100644
+index 000000000000..e390ee27aa3c
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/i386/builtin-copysign-8a.c
+@@ -0,0 +1,21 @@
++/* { dg-do compile } */
++/* { dg-options "-O2 -mno-avx -msse2" } */
++/* Keep labels and directives ('.cfi_startproc', '.cfi_endproc').  */
++/* { dg-final { check-function-bodies "**" "" "" { target { ! ia32 } } {^\t?\.} } } */
++
++/*
++**foo:
++**.LFB[0-9]+:
++**	.cfi_startproc
++**	pand	.LC[0-9]+\(%rip\), %xmm0
++**	pand	.LC[0-9]+\(%rip\), %xmm1
++**	por	%xmm1, %xmm0
++**	ret
++**...
++*/
++
++__float128
++foo (__float128 x, __float128 y)
++{
++  return __builtin_copysignq (x, y);
++}
+diff --git a/gcc/testsuite/gcc.target/i386/builtin-copysign-8b.c b/gcc/testsuite/gcc.target/i386/builtin-copysign-8b.c
+new file mode 100644
+index 000000000000..8f0cb27a2464
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/i386/builtin-copysign-8b.c
+@@ -0,0 +1,18 @@
++/* { dg-do compile } */
++/* { dg-options "-O2 -mno-avx512f -mavx" } */
++/* Keep labels and directives ('.cfi_startproc', '.cfi_endproc').  */
++/* { dg-final { check-function-bodies "**" "" "" { target { ! ia32 } } {^\t?\.} } } */
++
++/*
++**foo:
++**.LFB[0-9]+:
++**	.cfi_startproc
++**	vmovdqa	.LC[0-9]+\(%rip\), %xmm2
++**	vpandn	%xmm0, %xmm2, %xmm0
++**	vpand	%xmm2, %xmm1, %xmm1
++**	vpor	%xmm1, %xmm0, %xmm0
++**	ret
++**...
++*/
++
++#include "builtin-copysign-8a.c"
+diff --git a/gcc/testsuite/gcc.target/i386/builtin-fabs-1.c b/gcc/testsuite/gcc.target/i386/builtin-fabs-1.c
+new file mode 100644
+index 000000000000..a9a25f6bd4be
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/i386/builtin-fabs-1.c
+@@ -0,0 +1,23 @@
++/* PR target/122323 */
++/* { dg-do compile } */
++/* { dg-options "-O2 -mno-avx -msse2" } */
++/* Keep labels and directives ('.cfi_startproc', '.cfi_endproc').  */
++/* { dg-final { check-function-bodies "**" "" "" { target { ! ia32 } } {^\t?\.} } } */
++
++/*
++**foo:
++**.LFB[0-9]+:
++**	.cfi_startproc
++**	orps	.LC[0-9]+\(%rip\), %xmm0
++**	ret
++**...
++*/
++
++float
++foo (float x)
++{
++  return -__builtin_fabsf (x);
++}
++
++/* { dg-final { scan-assembler-times ".long	0" 3 { target { ! ia32 } } } } */
++/* { dg-final { scan-assembler-times ".long	-2147483648" 1 { target { ! ia32 } } } } */
+diff --git a/gcc/testsuite/gcc.target/i386/builtin-fabs-2.c b/gcc/testsuite/gcc.target/i386/builtin-fabs-2.c
+new file mode 100644
+index 000000000000..093fd2ef8b91
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/i386/builtin-fabs-2.c
+@@ -0,0 +1,27 @@
++/* PR target/99930 */
++/* { dg-do compile } */
++/* { dg-options "-O2 -mno-avx -msse2" } */
++/* Keep labels and directives ('.cfi_startproc', '.cfi_endproc').  */
++/* { dg-final { check-function-bodies "**" "" "" { target { ! ia32 } } {^\t?\.} } } */
++
++/*
++**foo:
++**...
++**	ja	.L[0-9]+
++**	movss	4\(%rdi\), %xmm1
++**	orps	%xmm1, %xmm0
++**	comiss	%xmm0, %xmm2
++**	seta	%al
++**	ret
++**...
++*/
++
++
++bool
++foo (float n[2], float m)
++{
++  for (int i = 0; i < 2; i++)
++    if (m > -__builtin_fabsf (n[i]))
++      return true;
++  return false;
++}
+-- 
+2.43.7
+
+

@@ -1,0 +1,156 @@
+From 9c92b2ba08e85aa835c439f93902f80e0b48cb83 Mon Sep 17 00:00:00 2001
+From: Xi Ruoyao <xry111@xry111.site>
+Date: Sun, 16 Nov 2025 00:30:43 +0800
+Subject: [PATCH] LoongArch: Fix wrong code from loongarch_expand_vec_perm_1
+ [PR 122695]
+
+	PR target/122695
+
+gcc/
+
+	* config/loongarch/loongarch.cc (loongarch_expand_vec_perm_1):
+	Simplify and fix the logic preventing the xvshuf.* unpredictable
+	behavior.
+
+gcc/testsuite/
+
+	* gcc.target/loongarch/pr122695-1.c: New test.
+	* gcc.target/loongarch/pr122695-2.c: New test.
+
+(cherry picked from commit f168d62bc552176572832bf129c9b392aeff46ad)
+---
+ gcc/config/loongarch/loongarch.cc             | 56 ++-----------------
+ .../gcc.target/loongarch/pr122695-1.c         | 22 ++++++++
+ .../gcc.target/loongarch/pr122695-2.c         | 22 ++++++++
+ 3 files changed, 50 insertions(+), 50 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.target/loongarch/pr122695-1.c
+ create mode 100644 gcc/testsuite/gcc.target/loongarch/pr122695-2.c
+
+diff --git a/gcc/config/loongarch/loongarch.cc b/gcc/config/loongarch/loongarch.cc
+index 3c3f2c66397b..3bbd14208612 100644
+--- a/gcc/config/loongarch/loongarch.cc
++++ b/gcc/config/loongarch/loongarch.cc
+@@ -8988,57 +8988,13 @@ loongarch_expand_vec_perm_1 (rtx operands[])
+   /* Number of elements in the vector.  */
+   w = GET_MODE_NUNITS (mode);
+ 
+-  rtx round_data[MAX_VECT_LEN];
+-  rtx round_reg, round_data_rtx;
+-
+-  if (mode != E_V32QImode)
++  /* If we are using xvshuf.*, clamp the selector to avoid unpredictable
++     output.  */
++  if (maskmode != V8SImode && maskmode != V4DImode)
+     {
+-      for (int i = 0; i < w; i += 1)
+-	{
+-	  round_data[i] = GEN_INT (0x1f);
+-	}
+-
+-      if (mode == E_V4DFmode)
+-	{
+-	  round_data_rtx = gen_rtx_CONST_VECTOR (E_V4DImode,
+-						 gen_rtvec_v (w, round_data));
+-	  round_reg = gen_reg_rtx (E_V4DImode);
+-	}
+-      else if (mode == E_V8SFmode)
+-	{
+-
+-	  round_data_rtx = gen_rtx_CONST_VECTOR (E_V8SImode,
+-						 gen_rtvec_v (w, round_data));
+-	  round_reg = gen_reg_rtx (E_V8SImode);
+-	}
+-      else
+-	{
+-	  round_data_rtx = gen_rtx_CONST_VECTOR (mode,
+-						 gen_rtvec_v (w, round_data));
+-	  round_reg = gen_reg_rtx (mode);
+-	}
+-
+-      emit_move_insn (round_reg, round_data_rtx);
+-      switch (mode)
+-	{
+-	case E_V32QImode:
+-	  emit_insn (gen_andv32qi3 (mask, mask, round_reg));
+-	  break;
+-	case E_V16HImode:
+-	  emit_insn (gen_andv16hi3 (mask, mask, round_reg));
+-	  break;
+-	case E_V8SImode:
+-	case E_V8SFmode:
+-	  emit_insn (gen_andv8si3 (mask, mask, round_reg));
+-	  break;
+-	case E_V4DImode:
+-	case E_V4DFmode:
+-	  emit_insn (gen_andv4di3 (mask, mask, round_reg));
+-	  break;
+-	default:
+-	  gcc_unreachable ();
+-	  break;
+-	}
++      rtx t = gen_const_vec_duplicate (maskmode, GEN_INT (0x1f));
++      mask = expand_binop (maskmode, and_optab, mask, t, NULL_RTX, false,
++			   OPTAB_DIRECT);
+     }
+ 
+   if (mode == V4DImode || mode == V4DFmode)
+diff --git a/gcc/testsuite/gcc.target/loongarch/pr122695-1.c b/gcc/testsuite/gcc.target/loongarch/pr122695-1.c
+new file mode 100644
+index 000000000000..d7c906cc0aef
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/loongarch/pr122695-1.c
+@@ -0,0 +1,22 @@
++/* { dg-do run } */
++/* { dg-options "-O2 -mlasx" } */
++/* { dg-require-effective-target loongarch_asx_hw } */
++
++[[gnu::vector_size (32)]] char a, b, c;
++
++[[gnu::noipa]] void
++test (void)
++{
++  a = __builtin_shuffle (a, b, c);
++}
++
++int
++main (void)
++{
++  a = (typeof (a)){} + 5;
++  b = (typeof (a)){} + 6;
++  c = (typeof (a)){} + 64;
++  test ();
++  if (a[0] != 5)
++    __builtin_trap ();
++}
+diff --git a/gcc/testsuite/gcc.target/loongarch/pr122695-2.c b/gcc/testsuite/gcc.target/loongarch/pr122695-2.c
+new file mode 100644
+index 000000000000..79fc139b55f5
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/loongarch/pr122695-2.c
+@@ -0,0 +1,22 @@
++/* { dg-do run } */
++/* { dg-options "-O2 -mlasx" } */
++/* { dg-require-effective-target loongarch_asx_hw } */
++
++[[gnu::vector_size(32)]] short a, b, c;
++
++[[gnu::noipa]] void
++test (void)
++{
++  a = __builtin_shuffle(a, b, c) + c;
++}
++
++int
++main (void)
++{
++  a = (typeof (a)){} + 1;
++  b = (typeof (b)){} + 2;
++  c = (typeof (c)){} + 128;
++  test ();
++  if (a[0] != 129)
++    __builtin_trap ();
++}
+-- 
+2.43.7
+
+

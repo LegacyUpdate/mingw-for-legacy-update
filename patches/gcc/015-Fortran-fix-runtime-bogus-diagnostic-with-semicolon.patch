@@ -1,0 +1,129 @@
+From b078015d94152e0e6d19de67717371e79f05b18d Mon Sep 17 00:00:00 2001
+From: Jerry DeLisle <jvdelisle@gcc.gnu.org>
+Date: Tue, 5 Aug 2025 12:10:24 -0700
+Subject: [PATCH] Fortran: Fix runtime bogus diagnostic with ';'
+
+	PR libfortran/121234
+
+libgfortran/ChangeLog:
+
+	* io/list_read.c (read_character): Add checks to bypass eating
+	semicolons when reading strings with decimal mode 'point'
+	(list_formatted_read_scalar): Likewise.
+
+gcc/testsuite/ChangeLog:
+
+	* gfortran.dg/pr121234.f90: New test.
+
+(cherry picked from commit 3d496ed9a5821ae9188e5242c1e26eea80c4039f)
+---
+ gcc/testsuite/gfortran.dg/pr121234.f90 | 28 ++++++++++++++++++++++++++
+ libgfortran/io/list_read.c             | 28 ++++++++++++++++++++++++++
+ 2 files changed, 56 insertions(+)
+ create mode 100644 gcc/testsuite/gfortran.dg/pr121234.f90
+
+diff --git a/gcc/testsuite/gfortran.dg/pr121234.f90 b/gcc/testsuite/gfortran.dg/pr121234.f90
+new file mode 100644
+index 000000000000..8eb1af534cb9
+--- /dev/null
++++ b/gcc/testsuite/gfortran.dg/pr121234.f90
+@@ -0,0 +1,28 @@
++! { dg-do run }
++! PR121234 Bogus diagnostic on READ of string with semicolon.
++  character(12) buffer,a
++  a = 'xxxxxxxxxx'
++  buffer="33;44"
++  read(buffer,*) a
++  if (a .ne. "33;44") stop 1
++  a = 'xxxxxxxxxx'
++  buffer="  ;;33 ,44 "
++  read(buffer,*,decimal="comma") a
++  if (a .ne. 'xxxxxxxxxx') stop 2 ! A null read
++  a = 'xxxxxxxxxx'
++  buffer="  ;;33 ,44 "
++  read(buffer,*,decimal="point") a
++  if (a .ne. ';;33') stop 3 ! Spaces are delimiting
++  a = 'xxxxxxxxxx'
++  buffer=";;33;,44 "
++  read(buffer,*) a
++  if (a .ne. ';;33;') stop 4 ! Comma is delimiting
++  a = 'xxxxxxxxxx'
++  buffer=";;33;44;; "
++  read(buffer,*) a
++  if (a .ne. ';;33;44;;') stop 5 ! Space is delimiting
++  a = 'xxxxxxxxxx'
++  buffer=";;33;44;;;.7"
++  read(buffer,*) a
++  if (a .ne. ';;33;44;;;.7') stop 6 ! Space is delimiting
++end
+diff --git a/libgfortran/io/list_read.c b/libgfortran/io/list_read.c
+index 83124b507566..7c22f61e5a70 100644
+--- a/libgfortran/io/list_read.c
++++ b/libgfortran/io/list_read.c
+@@ -1262,6 +1262,11 @@ read_character (st_parameter_dt *dtp, int length __attribute__ ((unused)))
+ 
+   if ((c = next_char (dtp)) == EOF)
+     goto eof;
++  if (c == ';')
++    {
++      push_char (dtp, c);
++      goto get_string;
++    }
+   switch (c)
+     {
+     CASE_DIGITS:
+@@ -1294,6 +1299,13 @@ read_character (st_parameter_dt *dtp, int length __attribute__ ((unused)))
+   for (;;)
+     {
+       c = next_char (dtp);
++
++      if (c == ';')
++	{
++	  push_char (dtp, c);
++	  goto get_string;
++	}
++
+       switch (c)
+ 	{
+ 	CASE_DIGITS:
+@@ -1323,6 +1335,13 @@ read_character (st_parameter_dt *dtp, int length __attribute__ ((unused)))
+ 
+   if ((c = next_char (dtp)) == EOF)
+     goto eof;
++
++  if (c == ';')
++    {
++      push_char (dtp, c);
++      goto get_string;
++    }
++
+   switch (c)
+     {
+     CASE_SEPARATORS:
+@@ -1346,6 +1365,13 @@ read_character (st_parameter_dt *dtp, int length __attribute__ ((unused)))
+     {
+       if ((c = next_char (dtp)) == EOF)
+ 	goto done_eof;
++
++      if (c == ';')
++	{
++	  push_char (dtp, c);
++	  continue;
++	}
++
+       switch (c)
+ 	{
+ 	case '"':
+@@ -2275,6 +2301,8 @@ list_formatted_read_scalar (st_parameter_dt *dtp, bt type, void *p,
+ 	}
+       if (c == ',' && dtp->u.p.current_unit->decimal_status == DECIMAL_COMMA)
+ 	c = '.';
++      if (c == ';' && dtp->u.p.current_unit->decimal_status == DECIMAL_POINT)
++	unget_char (dtp, c);
+       else if (is_separator (c))
+ 	{
+ 	  /* Found a null value.  */
+-- 
+2.43.7
+
+

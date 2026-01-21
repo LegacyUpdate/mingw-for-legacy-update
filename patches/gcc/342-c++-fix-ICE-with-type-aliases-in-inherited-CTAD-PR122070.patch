@@ -1,0 +1,111 @@
+From d549413f11d42872ad751c77afaa81b36a67639a Mon Sep 17 00:00:00 2001
+From: Egas Ribeiro <egas.g.ribeiro@gmail.com>
+Date: Sat, 13 Dec 2025 13:14:47 +0000
+Subject: [PATCH] c++: Fix ICE with type aliases in inherited CTAD [PR122070]
+
+When processing inherited CTAD in C++23, type_targs_deducible_from can
+be called with a synthetic alias template whose TREE_VALUE is a type
+alias.  Since TYPE_TEMPLATE_INFO_MAYBE_ALIAS can return NULL for type
+aliases, we need to fall back to TYPE_TEMPLATE_INFO to get the template
+info of the underlying type before calling TI_TEMPLATE, which should
+always be non-NULL when called from inherited_ctad_tweaks.
+
+	PR c++/122070
+
+gcc/cp/ChangeLog:
+
+	* pt.cc (type_targs_deducible_from): Fall back to
+	TYPE_TEMPLATE_INFO when TYPE_TEMPLATE_INFO_MAYBE_ALIAS is NULL.
+
+gcc/testsuite/ChangeLog:
+
+	* g++.dg/cpp23/class-deduction-inherited10.C: New test.
+	* g++.dg/cpp23/class-deduction-inherited9.C: New test.
+
+Signed-off-by: Egas Ribeiro <egas.g.ribeiro@gmail.com>
+Co-authored-by: Patrick Palka <ppalka@redhat.com>
+Reviewed-by: Patrick Palka <ppalka@redhat.com>
+(cherry picked from commit a0908b6723128799a68c9fdab65f65761f657488)
+---
+ gcc/cp/pt.cc                                  |  6 +++-
+ .../cpp23/class-deduction-inherited10.C       | 11 +++++++
+ .../g++.dg/cpp23/class-deduction-inherited9.C | 31 +++++++++++++++++++
+ 3 files changed, 47 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/g++.dg/cpp23/class-deduction-inherited10.C
+ create mode 100644 gcc/testsuite/g++.dg/cpp23/class-deduction-inherited9.C
+
+diff --git a/gcc/cp/pt.cc b/gcc/cp/pt.cc
+index e8755a2637d8..5823e9bf7cd5 100644
+--- a/gcc/cp/pt.cc
++++ b/gcc/cp/pt.cc
+@@ -31296,7 +31296,11 @@ type_targs_deducible_from (tree tmpl, tree type)
+ 	 per alias_ctad_tweaks.  */
+       tparms = INNERMOST_TEMPLATE_PARMS (TREE_PURPOSE (tmpl));
+       ttype = TREE_VALUE (tmpl);
+-      tmpl = TI_TEMPLATE (TYPE_TEMPLATE_INFO_MAYBE_ALIAS (ttype));
++      tree ti = TYPE_TEMPLATE_INFO_MAYBE_ALIAS (ttype);
++      if (!ti)
++	/* TTYPE is a typedef to a template-id.  */
++	ti = TYPE_TEMPLATE_INFO (ttype);
++      tmpl = TI_TEMPLATE (ti);
+     }
+ 
+   int len = TREE_VEC_LENGTH (tparms);
+diff --git a/gcc/testsuite/g++.dg/cpp23/class-deduction-inherited10.C b/gcc/testsuite/g++.dg/cpp23/class-deduction-inherited10.C
+new file mode 100644
+index 000000000000..d3b1b18077d9
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/cpp23/class-deduction-inherited10.C
+@@ -0,0 +1,11 @@
++// PR c++/122070
++// { dg-do compile { target c++23 } }
++
++template<class T> struct A { A(T) {}; };
++
++using B = A<int>;
++
++template<class T=void>
++struct C : B { using B::B; };
++
++C c = 0;
+diff --git a/gcc/testsuite/g++.dg/cpp23/class-deduction-inherited9.C b/gcc/testsuite/g++.dg/cpp23/class-deduction-inherited9.C
+new file mode 100644
+index 000000000000..c7d27202ccca
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/cpp23/class-deduction-inherited9.C
+@@ -0,0 +1,31 @@
++// PR c++/122070
++// { dg-do compile { target c++23 } }
++
++namespace std {
++    using size_t = decltype(sizeof(0));
++    template<typename CharT>
++    struct basic_string_view {
++        const CharT* ptr;
++        size_t len;
++        constexpr basic_string_view(const CharT* p) : ptr(p), len(0) { while (p && p[len]) ++len; }
++    };
++    using string_view = basic_string_view<char>;
++}
++
++template<std::size_t N>
++struct sized_string_view: std::string_view {
++    using std::string_view::string_view;
++};
++template<std::size_t N>
++sized_string_view(const char (&str)[N]) -> sized_string_view<N - 1>;
++
++constexpr auto string_builder(auto first, auto second, auto... trailing) {
++    constexpr auto is_last = sizeof...(trailing) == 0;
++    auto buffer = 1;
++    if constexpr (is_last) {
++        return buffer;
++    } else
++        return string_builder(buffer, trailing...);
++}
++
++constexpr auto copyright = string_builder(sized_string_view("a"), sized_string_view("b"), sized_string_view("c"));
+-- 
+2.43.7
+
+

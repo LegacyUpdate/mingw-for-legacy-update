@@ -1,0 +1,100 @@
+From 43f60f5755293dfb829f9cca54ba531488be062c Mon Sep 17 00:00:00 2001
+From: Daniele Sahebi <daniele@mkryss.me>
+Date: Wed, 19 Nov 2025 17:03:05 +0100
+Subject: [PATCH] c++: fix ICE with consteval functions in template decls
+ [PR122658]
+
+Currently, build_over_call calls build_cplus_new in template decls, generating
+a TARGET_EXPR that it then passes to fold_non_dependent_expr, which ends up
+calling tsubst_expr, and since tsubst_expr doesn't handle TARGET_EXPRs, it ICEs.
+
+Since there is no way for this code path to be executed without causing an
+ICE, I believe it can be removed.
+
+	PR c++/122658
+
+gcc/cp/ChangeLog:
+
+	* call.cc (build_over_call): Don't call build_cplus_new in
+	template declarations.
+
+gcc/testsuite/ChangeLog:
+
+	* g++.dg/cpp2a/consteval42.C: New test.
+
+Co-authored-by: Jakub Jelinek <jakub@redhat.com>
+Signed-off-by: Daniele Sahebi <daniele@mkryss.me>
+Reviewed-by: Marek Polacek <polacek@redhat.com>
+Reviewed-by: Patrick Palka <ppalka@redhat.com>
+(cherry picked from commit 9badb670e28dae8c5a98ac3217eb16dfac20d38c)
+---
+ gcc/cp/call.cc                           | 13 +++----------
+ gcc/testsuite/g++.dg/cpp2a/consteval42.C | 21 +++++++++++++++++++++
+ 2 files changed, 24 insertions(+), 10 deletions(-)
+ create mode 100644 gcc/testsuite/g++.dg/cpp2a/consteval42.C
+
+diff --git a/gcc/cp/call.cc b/gcc/cp/call.cc
+index 0044e0da7186..70002c02d393 100644
+--- a/gcc/cp/call.cc
++++ b/gcc/cp/call.cc
+@@ -10276,18 +10276,11 @@ build_over_call (struct z_candidate *cand, int flags, tsubst_flags_t complain)
+ 	TREE_NO_WARNING (expr) = true;
+       if (immediate_invocation_p (fn))
+ 	{
+-	  tree obj_arg = NULL_TREE, exprimm = expr;
++	  tree obj_arg = NULL_TREE;
+ 	  if (DECL_CONSTRUCTOR_P (fn))
+ 	    obj_arg = first_arg;
+-	  if (obj_arg
+-	      && is_dummy_object (obj_arg)
+-	      && !type_dependent_expression_p (obj_arg))
+-	    {
+-	      exprimm = build_cplus_new (DECL_CONTEXT (fn), expr, complain);
+-	      obj_arg = NULL_TREE;
+-	    }
+ 	  /* Look through *(const T *)&obj.  */
+-	  else if (obj_arg && INDIRECT_REF_P (obj_arg))
++	  if (obj_arg && INDIRECT_REF_P (obj_arg))
+ 	    {
+ 	      tree addr = TREE_OPERAND (obj_arg, 0);
+ 	      STRIP_NOPS (addr);
+@@ -10299,7 +10292,7 @@ build_over_call (struct z_candidate *cand, int flags, tsubst_flags_t complain)
+ 		    obj_arg = TREE_OPERAND (addr, 0);
+ 		}
+ 	    }
+-	  fold_non_dependent_expr (exprimm, complain,
++	  fold_non_dependent_expr (expr, complain,
+ 				   /*manifestly_const_eval=*/true,
+ 				   obj_arg);
+ 	}
+diff --git a/gcc/testsuite/g++.dg/cpp2a/consteval42.C b/gcc/testsuite/g++.dg/cpp2a/consteval42.C
+new file mode 100644
+index 000000000000..c75bb49f11e7
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/cpp2a/consteval42.C
+@@ -0,0 +1,21 @@
++// PR c++/122658
++// { dg-do compile { target c++20 } }
++
++struct S {
++  consteval S () noexcept { }
++  consteval S (const S &) = default;
++};
++
++template <typename T>
++S
++foo ()
++{
++  constexpr auto s = S();
++  return s;
++}
++
++S
++bar ()
++{
++  return foo <int> ();
++}
+-- 
+2.43.7
+
+

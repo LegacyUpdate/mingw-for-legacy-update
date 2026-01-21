@@ -1,0 +1,100 @@
+From 10c9209c1c1b17c3087bd14d383aca71e527aa5c Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Wed, 14 Jan 2026 15:53:44 +0100
+Subject: [PATCH] combine: Partially revert the r12-4475 changes [PR120250]
+
+The r12-4475 change added extra code to recog_for_combine to attempt to
+force some constants into the constant pool.
+Unfortunately, as this (UB at runtime) testcase shows, such changes are
+harmful for computed_jump_p jumps.  The computed_jump_p returns false
+for loads from constant pool MEMs:
+    case MEM:
+      return ! (GET_CODE (XEXP (x, 0)) == SYMBOL_REF
+                && CONSTANT_POOL_ADDRESS_P (XEXP (x, 0)));
+and so if we try to optimize a computed jump that way, it becomes
+a non-computed jump which doesn't match any other jump category
+(simplejump_p, tablejump_p, condjump_p, returnjump_p, eh_returnjump_p,
+asm goto) and doesn't have any label recorded in JUMP_LABEL (because,
+it doesn't really jump to any LABEL), so some passes like dwarf2cfi
+can get confused about it and ICE.
+
+The following patch just prevents that, by only doing the r12-4475
+changes if it is not a jump.
+
+2026-01-14  Jakub Jelinek  <jakub@redhat.com>
+
+	PR target/120250
+	* combine.cc (recog_for_combine): Don't try to put SET_SRC
+	into a constant pool if SET_DEST is pc_rtx.
+
+	* gcc.c-torture/compile/pr120250.c: New test.
+
+(cherry picked from commit fc2ee2f20c7f0b4439094435966a12eeead7197b)
+---
+ gcc/combine.cc                                |  3 +-
+ .../gcc.c-torture/compile/pr120250.c          | 38 +++++++++++++++++++
+ 2 files changed, 40 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/gcc.c-torture/compile/pr120250.c
+
+diff --git a/gcc/combine.cc b/gcc/combine.cc
+index 98ee8300f98e..9794f98b946a 100644
+--- a/gcc/combine.cc
++++ b/gcc/combine.cc
+@@ -11752,7 +11752,8 @@ recog_for_combine (rtx *pnewpat, rtx_insn *insn, rtx *pnotes,
+       rtx src = SET_SRC (pat);
+       if (CONSTANT_P (src)
+ 	  && !CONST_INT_P (src)
+-	  && crtl->uses_const_pool)
++	  && crtl->uses_const_pool
++	  && SET_DEST (pat) != pc_rtx)
+ 	{
+ 	  machine_mode mode = GET_MODE (src);
+ 	  if (mode == VOIDmode)
+diff --git a/gcc/testsuite/gcc.c-torture/compile/pr120250.c b/gcc/testsuite/gcc.c-torture/compile/pr120250.c
+new file mode 100644
+index 000000000000..2e8f6f906b49
+--- /dev/null
++++ b/gcc/testsuite/gcc.c-torture/compile/pr120250.c
+@@ -0,0 +1,38 @@
++/* PR target/120250 */
++
++int a = 5, b = 7, c, *d;
++void *l;
++void foo (const char *s);
++void bar (void);
++void qux (const char *, int);
++
++int
++baz (int *d, int a, int b)
++{
++  int c = 0;
++  for (int i = 0; i < a; ++i)
++    for (int j = 0; j < b; ++j)
++      c += d[i * b + j];
++  return c;
++}
++
++int
++main ()
++{
++  d = __builtin_malloc (a * b * sizeof (int));
++  if (!d)
++    {
++      foo ("foo");
++      __builtin_exit (1);
++    }
++  for (int i = 0; i < a; ++i)
++    for (int j = 0; j < b; ++j)
++      d[i * b + j] = i * b + j;
++  l = (void *) &bar;
++  goto *l;
++bar:
++  c = baz (d, a, b);
++  qux ("bar", c);
++  __builtin_free (d);
++  return 0;
++}
+-- 
+2.43.7
+
+

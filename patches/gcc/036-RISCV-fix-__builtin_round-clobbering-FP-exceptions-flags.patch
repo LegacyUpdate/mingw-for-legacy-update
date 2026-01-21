@@ -1,0 +1,197 @@
+From f12a272169523823ff27d69f187f73c4211222ae Mon Sep 17 00:00:00 2001
+From: Vineet Gupta <vineetg@rivosinc.com>
+Date: Wed, 13 Aug 2025 20:20:34 -0700
+Subject: [PATCH] RISC-V: fix __builtin_round clobbering FP exceptions flags
+ [PR121534]
+
+__builtin_round() fails to save/restore FP exception flags around the FP
+compare insn which can potentially clobber the same.
+
+Worth noting that the fflags restore bracketing is slightly different
+than the glibc implementation. Both FLT and FCVT can potentially clobber
+fflags. gcc generates below where even if branch is not taken and FCVT
+is not executed, FLT still executed. Thus FSFLAGS is placed AFTER the
+label 'L3'. glibc implementation FLT can't clobber due to early NaN check,
+so FSFLAGS can be moved under the branch, before the label.
+
+| convert_float_to_float_round
+| ...
+|   frflags	a5
+|   fabs.s	fa5,fa0
+|   flt.s	a4,fa5,fa4    <--- can clobber fflags
+|   beq	a4,zero,.L3
+|     fcvt.w.s a4,fa0,rmm     <--- also
+|     fcvt.s.w	fa5,a4
+|     fsgnj.s	fa0,fa5,fa0
+| .L3:
+|    fsflags	a5            <-- both code paths
+
+Fixes: f652a35877e3 ("This is almost exclusively Jivan's work....")
+
+	PR target/121534
+
+gcc/ChangeLog:
+
+	* config/riscv/riscv.md (round_pattern): save/restore fflags.
+
+gcc/testsuite/ChangeLog:
+
+	* gcc.target/riscv/rvv/autovec/vls/math-nearbyint-1.c: Adjust
+	scan pattern for additional instances of frflags/fsrflags.
+
+Signed-off-by: Vineet Gupta <vineetg@rivosinc.com>
+---
+ gcc/config/riscv/riscv.md                            | 12 ++++++++++++
+ .../riscv/rvv/autovec/vls/math-nearbyint-1.c         |  4 ++--
+ 2 files changed, 14 insertions(+), 2 deletions(-)
+
+diff --git a/gcc/config/riscv/riscv.md b/gcc/config/riscv/riscv.md
+index 3b779e2c060f..a02f3d2c279d 100644
+--- a/gcc/config/riscv/riscv.md
++++ b/gcc/config/riscv/riscv.md
+@@ -2286,12 +2286,16 @@
+       rtx abs_reg = gen_reg_rtx (<ANYF:MODE>mode);
+       rtx coeff_reg = gen_reg_rtx (<ANYF:MODE>mode);
+       rtx tmp_reg = gen_reg_rtx (<ANYF:MODE>mode);
++      rtx fflags = gen_reg_rtx (SImode);
+ 
+       riscv_emit_move (tmp_reg, operands[1]);
+       riscv_emit_move (coeff_reg,
+ 		       riscv_vector::get_fp_rounding_coefficient (<ANYF:MODE>mode));
+       emit_insn (gen_abs<ANYF:mode>2 (abs_reg, operands[1]));
+ 
++      /* fp compare can set invalid flag for NaN, so backup fflags.  */
++      if (flag_trapping_math)
++        emit_insn (gen_riscv_frflags (fflags));
+       riscv_expand_conditional_branch (label, LT, abs_reg, coeff_reg);
+ 
+       emit_jump_insn (gen_jump (end_label));
+@@ -2317,6 +2321,14 @@
+       emit_insn (gen_copysign<ANYF:mode>3 (tmp_reg, abs_reg, operands[1]));
+ 
+       emit_label (end_label);
++
++      /* Restore fflags, but after label.  This is slightly different
++         than glibc implementation which only needs to restore under
++         the label, since it checks for NaN first, meaning following fp
++         compare can't raise fp exceptons and thus not clobber fflags.  */
++      if (flag_trapping_math)
++        emit_insn (gen_riscv_fsflags (fflags));
++
+       riscv_emit_move (operands[0], tmp_reg);
+     }
+ 
+diff --git a/gcc/testsuite/gcc.target/riscv/rvv/autovec/vls/math-nearbyint-1.c b/gcc/testsuite/gcc.target/riscv/rvv/autovec/vls/math-nearbyint-1.c
+index bb62ce2ef8a8..89af160112c9 100644
+--- a/gcc/testsuite/gcc.target/riscv/rvv/autovec/vls/math-nearbyint-1.c
++++ b/gcc/testsuite/gcc.target/riscv/rvv/autovec/vls/math-nearbyint-1.c
+@@ -54,5 +54,5 @@ DEF_OP_V (nearbyint, 512, double, __builtin_nearbyint)
+ /* { dg-final { scan-tree-dump-not "4096,4096" "optimized" } } */
+ /* { dg-final { scan-assembler-times {vfcvt\.x\.f\.v\s+v[0-9]+,\s*v[0-9]+,\s*v0\.t} 30 } } */
+ /* { dg-final { scan-assembler-times {vfcvt\.f\.x\.v\s+v[0-9]+,\s*v[0-9]+,\s*v0\.t} 30 } } */
+-/* { dg-final { scan-assembler-times {frflags\s+[atx][0-9]+} 30 } } */
+-/* { dg-final { scan-assembler-times {fsflags\s+[atx][0-9]+} 30 } } */
++/* { dg-final { scan-assembler-times {frflags\s+[atx][0-9]+} 32 } } */
++/* { dg-final { scan-assembler-times {fsflags\s+[atx][0-9]+} 32 } } */
+-- 
+2.43.7
+
+From f12a272169523823ff27d69f187f73c4211222ae Mon Sep 17 00:00:00 2001
+From: Vineet Gupta <vineetg@rivosinc.com>
+Date: Wed, 13 Aug 2025 20:20:34 -0700
+Subject: [PATCH] RISC-V: fix __builtin_round clobbering FP exceptions flags
+ [PR121534]
+
+__builtin_round() fails to save/restore FP exception flags around the FP
+compare insn which can potentially clobber the same.
+
+Worth noting that the fflags restore bracketing is slightly different
+than the glibc implementation. Both FLT and FCVT can potentially clobber
+fflags. gcc generates below where even if branch is not taken and FCVT
+is not executed, FLT still executed. Thus FSFLAGS is placed AFTER the
+label 'L3'. glibc implementation FLT can't clobber due to early NaN check,
+so FSFLAGS can be moved under the branch, before the label.
+
+| convert_float_to_float_round
+| ...
+|   frflags	a5
+|   fabs.s	fa5,fa0
+|   flt.s	a4,fa5,fa4    <--- can clobber fflags
+|   beq	a4,zero,.L3
+|     fcvt.w.s a4,fa0,rmm     <--- also
+|     fcvt.s.w	fa5,a4
+|     fsgnj.s	fa0,fa5,fa0
+| .L3:
+|    fsflags	a5            <-- both code paths
+
+Fixes: f652a35877e3 ("This is almost exclusively Jivan's work....")
+
+	PR target/121534
+
+gcc/ChangeLog:
+
+	* config/riscv/riscv.md (round_pattern): save/restore fflags.
+
+gcc/testsuite/ChangeLog:
+
+	* gcc.target/riscv/rvv/autovec/vls/math-nearbyint-1.c: Adjust
+	scan pattern for additional instances of frflags/fsrflags.
+
+Signed-off-by: Vineet Gupta <vineetg@rivosinc.com>
+---
+ gcc/config/riscv/riscv.md                            | 12 ++++++++++++
+ .../riscv/rvv/autovec/vls/math-nearbyint-1.c         |  4 ++--
+ 2 files changed, 14 insertions(+), 2 deletions(-)
+
+diff --git a/gcc/config/riscv/riscv.md b/gcc/config/riscv/riscv.md
+index 3b779e2c060f..a02f3d2c279d 100644
+--- a/gcc/config/riscv/riscv.md
++++ b/gcc/config/riscv/riscv.md
+@@ -2286,12 +2286,16 @@
+       rtx abs_reg = gen_reg_rtx (<ANYF:MODE>mode);
+       rtx coeff_reg = gen_reg_rtx (<ANYF:MODE>mode);
+       rtx tmp_reg = gen_reg_rtx (<ANYF:MODE>mode);
++      rtx fflags = gen_reg_rtx (SImode);
+ 
+       riscv_emit_move (tmp_reg, operands[1]);
+       riscv_emit_move (coeff_reg,
+ 		       riscv_vector::get_fp_rounding_coefficient (<ANYF:MODE>mode));
+       emit_insn (gen_abs<ANYF:mode>2 (abs_reg, operands[1]));
+ 
++      /* fp compare can set invalid flag for NaN, so backup fflags.  */
++      if (flag_trapping_math)
++        emit_insn (gen_riscv_frflags (fflags));
+       riscv_expand_conditional_branch (label, LT, abs_reg, coeff_reg);
+ 
+       emit_jump_insn (gen_jump (end_label));
+@@ -2317,6 +2321,14 @@
+       emit_insn (gen_copysign<ANYF:mode>3 (tmp_reg, abs_reg, operands[1]));
+ 
+       emit_label (end_label);
++
++      /* Restore fflags, but after label.  This is slightly different
++         than glibc implementation which only needs to restore under
++         the label, since it checks for NaN first, meaning following fp
++         compare can't raise fp exceptons and thus not clobber fflags.  */
++      if (flag_trapping_math)
++        emit_insn (gen_riscv_fsflags (fflags));
++
+       riscv_emit_move (operands[0], tmp_reg);
+     }
+ 
+diff --git a/gcc/testsuite/gcc.target/riscv/rvv/autovec/vls/math-nearbyint-1.c b/gcc/testsuite/gcc.target/riscv/rvv/autovec/vls/math-nearbyint-1.c
+index bb62ce2ef8a8..89af160112c9 100644
+--- a/gcc/testsuite/gcc.target/riscv/rvv/autovec/vls/math-nearbyint-1.c
++++ b/gcc/testsuite/gcc.target/riscv/rvv/autovec/vls/math-nearbyint-1.c
+@@ -54,5 +54,5 @@ DEF_OP_V (nearbyint, 512, double, __builtin_nearbyint)
+ /* { dg-final { scan-tree-dump-not "4096,4096" "optimized" } } */
+ /* { dg-final { scan-assembler-times {vfcvt\.x\.f\.v\s+v[0-9]+,\s*v[0-9]+,\s*v0\.t} 30 } } */
+ /* { dg-final { scan-assembler-times {vfcvt\.f\.x\.v\s+v[0-9]+,\s*v[0-9]+,\s*v0\.t} 30 } } */
+-/* { dg-final { scan-assembler-times {frflags\s+[atx][0-9]+} 30 } } */
+-/* { dg-final { scan-assembler-times {fsflags\s+[atx][0-9]+} 30 } } */
++/* { dg-final { scan-assembler-times {frflags\s+[atx][0-9]+} 32 } } */
++/* { dg-final { scan-assembler-times {fsflags\s+[atx][0-9]+} 32 } } */
+-- 
+2.43.7
+
+

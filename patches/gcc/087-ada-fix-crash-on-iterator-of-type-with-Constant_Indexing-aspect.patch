@@ -1,0 +1,51 @@
+From 6e1f5f7800194a2c9d66b7fb1736bfcb2edd8c8b Mon Sep 17 00:00:00 2001
+From: Eric Botcazou <ebotcazou@adacore.com>
+Date: Fri, 29 Aug 2025 09:24:33 +0200
+Subject: [PATCH] ada: Fix crash on iterator of type with Constant_Indexing
+ aspect
+
+This happens when the type returned by the indexing function is a private
+type whose completion is derived from another private type, because the
+Finalize_Address routine cannot correctly fetch the actual root type.
+
+gcc/ada/ChangeLog:
+
+	* exp_util.adb (Finalize_Address): In an untagged derivation, call
+	Root_Type on the full view of the base type if the partial view is
+	itself not a derived type.
+	(Is_Untagged_Derivation): Minor formatting tweak.
+---
+ gcc/ada/exp_util.adb | 9 +++++++--
+ 1 file changed, 7 insertions(+), 2 deletions(-)
+
+diff --git a/gcc/ada/exp_util.adb b/gcc/ada/exp_util.adb
+index 5f644ef2503c..bfbbab78602e 100644
+--- a/gcc/ada/exp_util.adb
++++ b/gcc/ada/exp_util.adb
+@@ -6080,7 +6080,11 @@ package body Exp_Util is
+             Utyp := Corresponding_Record_Type (Root_Type (Btyp));
+ 
+          elsif Is_Implicit_Full_View (Utyp) then
+-            Utyp := Underlying_Type (Root_Type (Btyp));
++            if Is_Derived_Type (Btyp) then
++               Utyp := Underlying_Type (Root_Type (Btyp));
++            else
++               Utyp := Underlying_Type (Root_Type (Full_View (Btyp)));
++            end if;
+ 
+             if Is_Protected_Type (Utyp) then
+                Utyp := Corresponding_Record_Type (Utyp);
+@@ -9907,7 +9911,8 @@ package body Exp_Util is
+    begin
+       return (not Is_Tagged_Type (T) and then Is_Derived_Type (T))
+                or else
+-                 (Is_Private_Type (T) and then Present (Full_View (T))
++                 (Is_Private_Type (T)
++                   and then Present (Full_View (T))
+                    and then not Is_Tagged_Type (Full_View (T))
+                    and then Is_Derived_Type (Full_View (T))
+                    and then Etype (Full_View (T)) /= T);
+-- 
+2.43.7
+
+

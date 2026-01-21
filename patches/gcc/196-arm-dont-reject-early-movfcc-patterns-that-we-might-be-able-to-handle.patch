@@ -1,0 +1,60 @@
+From 22dd50dbc44cc25deacb0357216209039ea45904 Mon Sep 17 00:00:00 2001
+From: Richard Earnshaw <rearnsha@arm.com>
+Date: Fri, 7 Nov 2025 10:03:43 +0000
+Subject: [PATCH] arm: Don't reject early mov?fcc patterns that we might be
+ able to handle
+
+The define_expand patterns for movdfcc, movsfcc and movhfcc had overly
+tight contstraints that could cause the compiler to reject these
+patterns when re-ordering the operands could lead to a successful
+match.  Relax the initial predicate test and rely on the test after
+arm_validize_comparison has run to determine whether this is something
+we can support.  This fixes some test failures which were introduced
+in the fix for PR118460
+
+gcc/ChangeLog:
+
+	PR target/118460
+	* config/arm/arm.md (movhfcc): Use expandable_comparison_operator.
+	(movsfcc, movdfcc): Likewise.
+
+(cherry picked from commit dbc9d1dade3fa53be7bbef3b90691ab6a84323a3)
+---
+ gcc/config/arm/arm.md | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/gcc/config/arm/arm.md b/gcc/config/arm/arm.md
+index 2880442626fc..c99d2942a1c8 100644
+--- a/gcc/config/arm/arm.md
++++ b/gcc/config/arm/arm.md
+@@ -8369,7 +8369,7 @@
+ 
+ (define_expand "movhfcc"
+   [(set (match_operand:HF 0 "s_register_operand")
+-	(if_then_else:HF (match_operand 1 "arm_cond_move_operator")
++	(if_then_else:HF (match_operand 1 "expandable_comparison_operator")
+ 			 (match_operand:HF 2 "s_register_operand")
+ 			 (match_operand:HF 3 "s_register_operand")))]
+   "TARGET_VFP_FP16INST"
+@@ -8391,7 +8391,7 @@
+ 
+ (define_expand "movsfcc"
+   [(set (match_operand:SF 0 "s_register_operand")
+-	(if_then_else:SF (match_operand 1 "arm_cond_move_operator")
++	(if_then_else:SF (match_operand 1 "expandable_comparison_operator")
+ 			 (match_operand:SF 2 "s_register_operand")
+ 			 (match_operand:SF 3 "s_register_operand")))]
+   "TARGET_32BIT && TARGET_HARD_FLOAT"
+@@ -8413,7 +8413,7 @@
+ 
+ (define_expand "movdfcc"
+   [(set (match_operand:DF 0 "s_register_operand")
+-	(if_then_else:DF (match_operand 1 "arm_cond_move_operator")
++	(if_then_else:DF (match_operand 1 "expandable_comparison_operator")
+ 			 (match_operand:DF 2 "s_register_operand")
+ 			 (match_operand:DF 3 "s_register_operand")))]
+   "TARGET_32BIT && TARGET_HARD_FLOAT && TARGET_VFP_DOUBLE"
+-- 
+2.43.7
+
+

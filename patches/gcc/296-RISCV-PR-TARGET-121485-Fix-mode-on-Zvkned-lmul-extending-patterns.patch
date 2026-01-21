@@ -1,0 +1,93 @@
+From a75d15db70bf5f37cdbfa7e5fc61adb35c702bd6 Mon Sep 17 00:00:00 2001
+From: Jeff Law <jeffrey.law@oss.qualcomm.com>
+Date: Tue, 30 Dec 2025 22:52:03 -0700
+Subject: [PATCH] [RISC-V][PR target/121485] Fix mode on Zvkned lmul extending
+ patterns
+
+This fixes the mode on the lmul-extending variants of various Zvkned patterns.
+
+Essentially vsetvl insertion depends on the mode of each insn and for lmul
+extending patterns, we need the larger mode, not the smaller one to get the
+correct vsetvls.
+
+Tested on riscv{32,64}-elf on the simple testcase in the PR.  I also verified
+the larger testcase in godbolt appears to work correctly.
+
+Waiting on upstream CI before committing.
+
+	PR target/121485
+gcc/
+	* config/riscv/vector-crypto.md: Fix mode attribute for the
+	lmul extending Zvkned patterns.
+
+gcc/testsuite/
+	* gcc.target/riscv/rvv/vsetvl/pr121485.c: New test.
+---
+ gcc/config/riscv/vector-crypto.md                   |  8 ++++----
+ .../gcc.target/riscv/rvv/vsetvl/pr121485.c          | 13 +++++++++++++
+ 2 files changed, 17 insertions(+), 4 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.target/riscv/rvv/vsetvl/pr121485.c
+
+diff --git a/gcc/config/riscv/vector-crypto.md b/gcc/config/riscv/vector-crypto.md
+index ca3ad4412fe3..9c29e2140bae 100644
+--- a/gcc/config/riscv/vector-crypto.md
++++ b/gcc/config/riscv/vector-crypto.md
+@@ -538,7 +538,7 @@
+   "TARGET_ZVKNED || TARGET_ZVKSED"
+   "v<vv_ins_name>.<ins_type>\t%0,%2"
+   [(set_attr "type" "v<vv_ins_name>")
+-   (set_attr "mode" "<MODE>")])
++   (set_attr "mode" "<VSIX2>")])
+ 
+ (define_insn "@pred_crypto_vv<vv_ins_name><ins_type>x4<mode>_scalar"
+  [(set (match_operand:<VSIX4> 0 "register_operand"      "=&vr")
+@@ -556,7 +556,7 @@
+  "TARGET_ZVKNED || TARGET_ZVKSED"
+  "v<vv_ins_name>.<ins_type>\t%0,%2"
+  [(set_attr "type" "v<vv_ins_name>")
+-  (set_attr "mode" "<MODE>")])
++  (set_attr "mode" "<VSIX4>")])
+ 
+ (define_insn "@pred_crypto_vv<vv_ins_name><ins_type>x8<mode>_scalar"
+  [(set (match_operand:<VSIX8> 0 "register_operand"      "=&vr")
+@@ -574,7 +574,7 @@
+  "TARGET_ZVKNED || TARGET_ZVKSED"
+  "v<vv_ins_name>.<ins_type>\t%0,%2"
+  [(set_attr "type" "v<vv_ins_name>")
+-  (set_attr "mode" "<MODE>")])
++  (set_attr "mode" "<VSIX8>")])
+ 
+ (define_insn "@pred_crypto_vv<vv_ins_name><ins_type>x16<mode>_scalar"
+  [(set (match_operand:<VSIX16> 0 "register_operand"      "=&vr")
+@@ -592,7 +592,7 @@
+  "TARGET_ZVKNED || TARGET_ZVKSED"
+  "v<vv_ins_name>.<ins_type>\t%0,%2"
+  [(set_attr "type" "v<vv_ins_name>")
+-  (set_attr "mode" "<MODE>")])
++  (set_attr "mode" "<VSIX16>")])
+ 
+ ;; vaeskf1.vi vsm4k.vi
+ (define_insn "@pred_crypto_vi<vi_ins_name><mode>_scalar"
+diff --git a/gcc/testsuite/gcc.target/riscv/rvv/vsetvl/pr121485.c b/gcc/testsuite/gcc.target/riscv/rvv/vsetvl/pr121485.c
+new file mode 100644
+index 000000000000..2e0667652113
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/riscv/rvv/vsetvl/pr121485.c
+@@ -0,0 +1,13 @@
++/* { dg-do compile } */
++/* { dg-options "-march=rv64gcv_zvkned -mabi=lp64d" { target rv64 } } */
++/* { dg-options "-march=rv32gcv_zvkned -mabi=ilp32" { target rv32 } } */
++
++#include <riscv_vector.h>
++
++vuint32m4_t test_riscv_vaesz_vs_u32m1_u32m4(vuint32m4_t a, vuint32m1_t b, int vl)
++{
++  return __riscv_vaesz_vs_u32m1_u32m4(a, b, vl);
++}
++
++
++/* { dg-final { scan-assembler {vsetvli\szero,[a-x0-9]+,e32,m4,ta,ma} } } */
+-- 
+2.43.7
+
+

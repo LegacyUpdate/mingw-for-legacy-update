@@ -1,0 +1,86 @@
+From e9b9bc448a461b61afc6dc44ecbd572525718635 Mon Sep 17 00:00:00 2001
+From: Georg-Johann Lay <avr@gjlay.de>
+Date: Thu, 6 Nov 2025 19:59:48 +0100
+Subject: [PATCH] AVR: AVR-SD: Put a valid opcode prior to gs() table in
+ .subsection 1.
+
+On functional safety devices (AVR-SD), each executed instruction must
+be followed by a valid opcode.  This is because instruction fetch and
+decode for the next instruction runs while the 2-stage pipeline is
+executing the current instruction.
+
+There is only one case where avr-gcc generates code interspersed with
+data, which is when a switch/case table is generated for a function
+with a "section" attribute and AVR_HAVE_JMP_CALL.  In that case, the
+table with the gs() code label addresses is put in .subsection 1 so
+that it belongs to the section as specified by the "section" attribute.
+
+gcc/
+	* config/avr/avr.cc (avr_output_addr_vec): Output
+	a valid opcode prior to the first gs() label provided:
+	- The code is compiled for an arch that has AVR-SD mcus, and
+	- the function has a "section" attribute, and
+	- the function has a gs() label addresses switch/case table.
+
+(cherry picked from commit d79d12d3faea6c4472ede35e4b66a68cf1f85f77)
+---
+ gcc/config/avr/avr.cc | 26 ++++++++++++++++++++++++--
+ 1 file changed, 24 insertions(+), 2 deletions(-)
+
+diff --git a/gcc/config/avr/avr.cc b/gcc/config/avr/avr.cc
+index 2b625e637170..16da67325c56 100644
+--- a/gcc/config/avr/avr.cc
++++ b/gcc/config/avr/avr.cc
+@@ -14447,6 +14447,16 @@ avr_output_addr_vec (rtx_insn *labl, rtx table)
+ {
+   FILE *stream = asm_out_file;
+ 
++  // AVR-SD: On functional safety devices, each executed instruction must
++  // be followed by a valid opcode.  This is because instruction validation
++  // runs at fetch and decode for the next instruction and while the 2-stage
++  // pipeline is executing the current one.  There is no multilib option for
++  // these devices, so take all multilib variants that contain AVR-SD.
++  const bool maybe_sd = (AVR_HAVE_JMP_CALL
++			 && (avr_arch_index == ARCH_AVRXMEGA2
++			     || avr_arch_index == ARCH_AVRXMEGA3));
++  bool uses_subsection = false;
++
+   app_disable ();
+ 
+   // Switch to appropriate (sub)section.
+@@ -14460,6 +14470,7 @@ avr_output_addr_vec (rtx_insn *labl, rtx table)
+ 
+       switch_to_section (current_function_section ());
+       fprintf (stream, "\t.subsection\t1\n");
++      uses_subsection = true;
+     }
+   else
+     {
+@@ -14482,10 +14493,21 @@ avr_output_addr_vec (rtx_insn *labl, rtx table)
+ 	       AVR_HAVE_JMP_CALL ? "a" : "ax");
+     }
+ 
+-  // Output the label that precedes the table.
+-
+   ASM_OUTPUT_ALIGN (stream, 1);
+ 
++  if (maybe_sd && uses_subsection)
++    {
++      // Insert a valid opcode prior to the first gs() label.
++      // Any valid opcode will do.  Use CLH since it disassembles
++      // more nicely than NOP = 0x0000.  This is all GCC can do.
++      // Other cases, like inserting CLH after the vector table and
++      // after the last instruction, are handled by other parts of
++      // the toolchain.
++      fprintf (stream, "\tclh\n");
++    }
++
++  // Output the label that precedes the table.
++
+   char s_labl[40];
+   targetm.asm_out.generate_internal_label (s_labl, "L",
+ 					   CODE_LABEL_NUMBER (labl));
+-- 
+2.43.7
+
+

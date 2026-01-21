@@ -1,0 +1,75 @@
+From 1b6bc907fe80f50ae6858dc55d679abcf23f028e Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Tue, 9 Dec 2025 10:22:26 +0100
+Subject: [PATCH] c: Reject vector type bit-fields [PR123018]
+
+The following testcase ICEs since checking has been added to TYPE_PRECISION
+macro.  check_bitfield_type_and_width is called when attributes haven't
+been applied to the bit-field decl yet and so it still has INTEGER_TYPE
+type, while at finish_struct time it already has VECTOR_TYPE.
+
+The following patch just repeats the check_bitfield_type_and_width
+in there.
+
+Another option would be let handle_vector_size_attribute check for
+bit-fields and error out there.
+
+2025-12-09  Jakub Jelinek  <jakub@redhat.com>
+
+	PR c/123018
+	* c-decl.cc (finish_struct): Diagnose bit-fields with vector type.
+
+	* gcc.dg/pr123018.c: New test.
+
+(cherry picked from commit 64b22d699e16302724f51347db557dd5195e92ad)
+---
+ gcc/c/c-decl.cc                 |  7 +++++++
+ gcc/testsuite/gcc.dg/pr123018.c | 17 +++++++++++++++++
+ 2 files changed, 24 insertions(+)
+ create mode 100644 gcc/testsuite/gcc.dg/pr123018.c
+
+diff --git a/gcc/c/c-decl.cc b/gcc/c/c-decl.cc
+index 5032ba137799..045f03998f63 100644
+--- a/gcc/c/c-decl.cc
++++ b/gcc/c/c-decl.cc
+@@ -9724,6 +9724,13 @@ finish_struct (location_t loc, tree t, tree fieldlist, tree attributes,
+ 	  unsigned HOST_WIDE_INT width
+ 	    = tree_to_uhwi (DECL_INITIAL (field));
+ 	  tree type = TREE_TYPE (field);
++	  if (VECTOR_TYPE_P (type))
++	    {
++	      error_at (DECL_SOURCE_LOCATION (field),
++			"bit-field %qD has invalid type", field);
++	      type = TREE_TYPE (type);
++	      TREE_TYPE (field) = type;
++	    }
+ 	  if (width != TYPE_PRECISION (type))
+ 	    {
+ 	      if (TREE_CODE (type) == BITINT_TYPE
+diff --git a/gcc/testsuite/gcc.dg/pr123018.c b/gcc/testsuite/gcc.dg/pr123018.c
+new file mode 100644
+index 000000000000..f1f701b5675e
+--- /dev/null
++++ b/gcc/testsuite/gcc.dg/pr123018.c
+@@ -0,0 +1,17 @@
++/* PR c/123018 */
++/* { dg-do compile } */
++
++struct A {
++  int x : 8 __attribute__ ((vector_size (8)));	/* { dg-error "bit-field 'x' has invalid type" } */
++};
++struct B {
++  float x : 8;					/* { dg-error "bit-field 'x' has invalid type" } */
++};
++struct C {
++  int : 8 __attribute__ ((vector_size (8)));	/* { dg-error "bit-field '\[^\n\r]*anonymous\[^\n\r]*' has invalid type" } */
++  int x;
++};
++struct D {
++  float : 8;					/* { dg-error "bit-field '\[^\n\r]*anonymous\[^\n\r]*' has invalid type" } */
++  int x;
++};
+-- 
+2.43.7
+
+

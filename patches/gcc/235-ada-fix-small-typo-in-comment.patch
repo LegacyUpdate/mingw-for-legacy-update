@@ -1,0 +1,29 @@
+From d4a8b3d53cd8cd73e6b2a3b610cf3e49f0384c29 Mon Sep 17 00:00:00 2001
+From: Eric Botcazou <ebotcazou@adacore.com>
+Date: Fri, 7 Nov 2025 12:31:10 +0100
+Subject: [PATCH] ada: Fix small typo in comment
+
+gcc/ada/ChangeLog:
+
+	* sem_type.adb (Last_Overloaded): Fix typo.
+---
+ gcc/ada/sem_type.adb | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/gcc/ada/sem_type.adb b/gcc/ada/sem_type.adb
+index 32d0833f3a82..d070230893d7 100644
+--- a/gcc/ada/sem_type.adb
++++ b/gcc/ada/sem_type.adb
+@@ -109,7 +109,7 @@ package body Sem_Type is
+       Equal      => "=");
+ 
+    Last_Overloaded : Node_Id := Empty;
+-   --  Overloaded node after initializing a new collection of intepretation
++   --  Overloaded node after initializing a new collection of interpretations
+ 
+    -------------------------------------
+    -- Handling of Overload Resolution --
+-- 
+2.43.7
+
+

@@ -1,0 +1,73 @@
+From eccd6fb47835be219625cbf825fc3fdeb4b10dab Mon Sep 17 00:00:00 2001
+From: Christophe Lyon <christophe.lyon@linaro.org>
+Date: Thu, 9 Oct 2025 14:09:26 +0000
+Subject: [PATCH] arm: [MVE] Fix operands order in vbicq_f [PR122223]
+
+The operands of the floating-point version of vbicq were swapped, this
+patch fixes this.
+
+gcc/ChangeLog:
+	PR target/122223
+	* config/arm/mve.md (@mve_vbicq_f<mode>): Fix operands order.
+
+gcc/testsuite/ChangeLog:
+	PR target/122223
+	* gcc.target/arm/mve/intrinsics/pr122223.c: New test.
+
+(cherry picked from commit 81e226440381cc3e033df7e58cc7793c9b4b4e25)
+---
+ gcc/config/arm/mve.md                         |  4 +--
+ .../gcc.target/arm/mve/intrinsics/pr122223.c  | 25 +++++++++++++++++++
+ 2 files changed, 27 insertions(+), 2 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.target/arm/mve/intrinsics/pr122223.c
+
+diff --git a/gcc/config/arm/mve.md b/gcc/config/arm/mve.md
+index 8527bd753e30..cc266f89cdf2 100644
+--- a/gcc/config/arm/mve.md
++++ b/gcc/config/arm/mve.md
+@@ -1186,8 +1186,8 @@
+ (define_insn "@mve_vbicq_f<mode>"
+   [
+    (set (match_operand:MVE_0 0 "s_register_operand" "=w")
+-	(and:MVE_0 (not:MVE_0 (match_operand:MVE_0 1 "s_register_operand" "w"))
+-			      (match_operand:MVE_0 2 "s_register_operand" "w")))
++	(and:MVE_0 (not:MVE_0 (match_operand:MVE_0 2 "s_register_operand" "w"))
++			      (match_operand:MVE_0 1 "s_register_operand" "w")))
+   ]
+   "TARGET_HAVE_MVE && TARGET_HAVE_MVE_FLOAT"
+   "vbic\t%q0, %q1, %q2"
+diff --git a/gcc/testsuite/gcc.target/arm/mve/intrinsics/pr122223.c b/gcc/testsuite/gcc.target/arm/mve/intrinsics/pr122223.c
+new file mode 100644
+index 000000000000..59e757a1ab7a
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/arm/mve/intrinsics/pr122223.c
+@@ -0,0 +1,25 @@
++/* { dg-require-effective-target arm_v8_1m_mve_fp_ok } */
++/* { dg-add-options arm_v8_1m_mve_fp } */
++/* { dg-additional-options "-O2" } */
++
++/* PR target/122223.  */
++
++#include <arm_mve.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++float32x4_t foo() {
++  float32x4_t a = vdupq_n_f32(1.0f); /* 0x3f800000 */
++  float32x4_t b = vbicq_f32(a, a);   /* 0x3f800000 & ~0x3f800000 => 0x00000000 */
++  float32x4_t c = vbicq_f32(a, b);   /* 0x3f800000 & ~0x00000000 => 0x3f800000 */
++  return c;
++}
++
++#ifdef __cplusplus
++}
++#endif
++
++/* { dg-final { scan-assembler-not "vmov.f32\tq0, #0.0" } } */
++/* { dg-final { scan-assembler "vmov.f32\tq0, #1.0" } } */
+-- 
+2.43.7
+
+

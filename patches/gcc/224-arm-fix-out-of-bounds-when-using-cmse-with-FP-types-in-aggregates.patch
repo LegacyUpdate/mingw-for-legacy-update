@@ -1,0 +1,369 @@
+From 24f252c917089486e1f0d6c0b98962091b6b21d2 Mon Sep 17 00:00:00 2001
+From: Andre Vieira <andre.simoesdiasvieira@arm.com>
+Date: Wed, 12 Nov 2025 10:33:09 +0000
+Subject: [PATCH] arm: Fix out of bounds when using cmse with FP types in
+ aggregates [PR122539]
+
+Skip partial register clearing logic when dealing with FP_REGS in aggregates as
+these are always fully cleared and the logic assumes a mask for each of the 4
+argument GPR_REGS.
+
+gcc/ChangeLog:
+
+	PR target/122539
+	* config/arm/arm.cc (comp_not_to_clear_mask_str_un): Skip partial
+	register clearing logic for FP_REGS.
+	(compute_not_to_clear_mask): Likewise.
+
+gcc/testsuite/ChangeLog:
+
+	* gcc.target/arm/cmse/mainline/8m/hard/union-fp.c: New.
+	* gcc.target/arm/cmse/baseline/union-4.c: New.
+	* gcc.target/arm/cmse/mainline/8m/hard/union-4.c: New.
+	* gcc.target/arm/cmse/mainline/8m/soft/union-4.c: New.
+	* gcc.target/arm/cmse/mainline/8m/softfp/union-4.c: New.
+	* gcc.target/arm/cmse/union-4.x: New.
+
+(cherry picked from commit 13b58ca5d1a56517932f80ce07bd947d7f4f917e)
+---
+ gcc/config/arm/arm.cc                         | 60 ++++++++++-------
+ .../gcc.target/arm/cmse/baseline/union-4.c    | 20 ++++++
+ .../arm/cmse/mainline/8m/hard/union-4.c       | 27 ++++++++
+ .../arm/cmse/mainline/8m/hard/union-fp.c      | 66 +++++++++++++++++++
+ .../arm/cmse/mainline/8m/soft/union-4.c       | 18 +++++
+ .../arm/cmse/mainline/8m/softfp/union-4.c     | 19 ++++++
+ gcc/testsuite/gcc.target/arm/cmse/union-4.x   | 41 ++++++++++++
+ 7 files changed, 229 insertions(+), 22 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.target/arm/cmse/baseline/union-4.c
+ create mode 100644 gcc/testsuite/gcc.target/arm/cmse/mainline/8m/hard/union-4.c
+ create mode 100644 gcc/testsuite/gcc.target/arm/cmse/mainline/8m/hard/union-fp.c
+ create mode 100644 gcc/testsuite/gcc.target/arm/cmse/mainline/8m/soft/union-4.c
+ create mode 100644 gcc/testsuite/gcc.target/arm/cmse/mainline/8m/softfp/union-4.c
+ create mode 100644 gcc/testsuite/gcc.target/arm/cmse/union-4.x
+
+diff --git a/gcc/config/arm/arm.cc b/gcc/config/arm/arm.cc
+index 29680fe09076..0e87a93bb9e6 100644
+--- a/gcc/config/arm/arm.cc
++++ b/gcc/config/arm/arm.cc
+@@ -18609,6 +18609,9 @@ comp_not_to_clear_mask_str_un (tree arg_type, int * regno,
+ 
+ 	  if (*last_used_bit != offset)
+ 	    {
++	      /* We never clear padding bits in any other registers than the
++		 first 4 GPRs.  */
++	      gcc_assert (*regno < 4);
+ 	      if (offset < *last_used_bit)
+ 		{
+ 		  /* This field's offset is before the 'last_used_bit', that
+@@ -18701,19 +18704,25 @@ comp_not_to_clear_mask_str_un (tree arg_type, int * regno,
+ 	      last_used_bit_t = (starting_bit + field_size) % 32;
+ 	    }
+ 
+-	  for (i = *regno; i < regno_t; i++)
++	  /* We only clear padding bits in the first 4 GPRs.  No need to check
++	     regno_t, since there is no way where this field would have been
++	     put into part GPR part FP reg.  */
++	  if (*regno < 4)
+ 	    {
+-	      /* For all but the last register used by this field only keep the
+-		 padding bits that were padding bits in this field.  */
+-	      padding_bits_to_clear_res[i] &= padding_bits_to_clear_t[i];
+-	    }
++	      for (i = *regno; i < regno_t; i++)
++		{
++		  /* For all but the last register used by this field only keep
++		     the padding bits that were padding bits in this field.  */
++		  padding_bits_to_clear_res[i] &= padding_bits_to_clear_t[i];
++		}
+ 
+-	    /* For the last register, keep all padding bits that were padding
+-	       bits in this field and any padding bits that are still valid
+-	       as padding bits but fall outside of this field's size.  */
+-	    mask = (((uint32_t) -1) - ((uint32_t) 1 << last_used_bit_t)) + 1;
+-	    padding_bits_to_clear_res[regno_t]
+-	      &= padding_bits_to_clear_t[regno_t] | mask;
++	      /* For the last register, keep all padding bits that were padding
++		 bits in this field and any padding bits that are still valid
++		 as padding bits but fall outside of this field's size.  */
++	      mask = (((uint32_t) -1) - ((uint32_t) 1 << last_used_bit_t)) + 1;
++	      padding_bits_to_clear_res[regno_t]
++		&= padding_bits_to_clear_t[regno_t] | mask;
++	    }
+ 
+ 	  /* Update the maximum size of the fields in terms of registers used
+ 	     ('max_reg') and the 'last_used_bit' in said register.  */
+@@ -18728,16 +18737,22 @@ comp_not_to_clear_mask_str_un (tree arg_type, int * regno,
+ 	  field = TREE_CHAIN (field);
+ 	}
+ 
+-      /* Update the current padding_bits_to_clear using the intersection of the
+-	 padding bits of all the fields.  */
+-      for (i=*regno; i < max_reg; i++)
+-	padding_bits_to_clear[i] |= padding_bits_to_clear_res[i];
++      /* We only clear padding bits in the first 4 GPRs.  No need to check
++	 regno_t, since there is no way where this field would have been
++	 put into part GPR part FP reg.  */
++      if (*regno < 4)
++	{
++	  /* Update the current padding_bits_to_clear using the intersection of the
++	     padding bits of all the fields.  */
++	  for (i=*regno; i < max_reg; i++)
++	    padding_bits_to_clear[i] |= padding_bits_to_clear_res[i];
+ 
+-      /* Do not keep trailing padding bits, we do not know yet whether this
+-	 is the end of the argument.  */
+-      mask = ((uint32_t) 1 << max_bit) - 1;
+-      padding_bits_to_clear[max_reg]
+-	|= padding_bits_to_clear_res[max_reg] & mask;
++	  /* Do not keep trailing padding bits, we do not know yet whether this
++	     is the end of the argument.  */
++	  mask = ((uint32_t) 1 << max_bit) - 1;
++	  padding_bits_to_clear[max_reg]
++	    |= padding_bits_to_clear_res[max_reg] & mask;
++	}
+ 
+       for (int i = *regno; i < max_reg; ++i)
+ 	not_to_clear_reg_mask |= HOST_WIDE_INT_1U << i;
+@@ -18782,8 +18797,9 @@ compute_not_to_clear_mask (tree arg_type, rtx arg_rtx, int regno,
+       /* If the 'last_used_bit' is not zero, that means we are still using a
+ 	 part of the last 'regno'.  In such cases we must clear the trailing
+ 	 bits.  Otherwise we are not using regno and we should mark it as to
+-	 clear.  */
+-      if (last_used_bit != 0)
++	 clear.  We only clear padding bits for scalar values that are passed
++	 in registers, so regno is never 4 or higher.  */
++      if (regno < 4 && last_used_bit != 0)
+ 	padding_bits_to_clear[regno]
+ 	  |= ((uint32_t)-1) - ((uint32_t) 1 << last_used_bit) + 1;
+       else
+diff --git a/gcc/testsuite/gcc.target/arm/cmse/baseline/union-4.c b/gcc/testsuite/gcc.target/arm/cmse/baseline/union-4.c
+new file mode 100644
+index 000000000000..58c06ceddda2
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/arm/cmse/baseline/union-4.c
+@@ -0,0 +1,20 @@
++/* { dg-do compile } */
++/* { dg-options "-mcmse" } */
++/* { dg-final { check-function-bodies "**" "" } } */
++
++#include "../union-4.x"
++
++/*
++** fn:
++** ...
++**	lsrs	r4, r4, #1
++**	lsls	r4, r4, #1
++**	mov	ip, r4
++**	movw	r4, #7939
++**	ands	r0, r4
++**	mov	r4, ip
++**	movs	r2, r4
++**	movs	r3, r4
++**	bl	__gnu_cmse_nonsecure_call
++** ...
++*/
+diff --git a/gcc/testsuite/gcc.target/arm/cmse/mainline/8m/hard/union-4.c b/gcc/testsuite/gcc.target/arm/cmse/mainline/8m/hard/union-4.c
+new file mode 100644
+index 000000000000..671a4e830783
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/arm/cmse/mainline/8m/hard/union-4.c
+@@ -0,0 +1,27 @@
++/* { dg-do compile } */
++/* { dg-options "-mcmse -mfloat-abi=hard -mfpu=fpv5-d16" }  */
++/* { dg-skip-if "Incompatible float ABI" { *-*-* } { "-mfloat-abi=*" } { "-mfloat-abi=hard" } } */
++/* { dg-final { check-function-bodies "**" "" } } */
++
++#include "../../../union-4.x"
++
++/*
++** fn:
++** ...
++**	lsrs	r4, r4, #1
++**	lsls	r4, r4, #1
++**	movw	ip, #7939
++**	and	r0, r0, ip
++**	mov	r2, r4
++**	mov	r3, r4
++**	vmov.f64	d0, #1.0e\+0
++**	vmov.f64	d1, #1.0e\+0
++**	vmov.f64	d2, #1.0e\+0
++**	vmov.f64	d3, #1.0e\+0
++**	vmov.f64	d4, #1.0e\+0
++**	vmov.f64	d5, #1.0e\+0
++**	vmov.f64	d6, #1.0e\+0
++**	vmov.f64	d7, #1.0e\+0
++**	bl	__gnu_cmse_nonsecure_call
++** ...
++*/
+diff --git a/gcc/testsuite/gcc.target/arm/cmse/mainline/8m/hard/union-fp.c b/gcc/testsuite/gcc.target/arm/cmse/mainline/8m/hard/union-fp.c
+new file mode 100644
+index 000000000000..3d45ec6bf77e
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/arm/cmse/mainline/8m/hard/union-fp.c
+@@ -0,0 +1,66 @@
++/* { dg-do compile } */
++/* { dg-options "-mcmse -mfloat-abi=hard -mfpu=fpv5-d16" }  */
++/* { dg-skip-if "Incompatible float ABI" { *-*-* } { "-mfloat-abi=*" } { "-mfloat-abi=hard" } } */
++/* { dg-skip-if "Skip these if testing single precision" {*-*-*} {"-mfpu=*-sp-*"} {""} } */
++/* { dg-final { check-function-bodies "**" "" } } */
++
++union u_t_0 {
++    float f;
++};
++union u_t_1 {
++    double d;
++};
++
++typedef void (__attribute__ ((cmse_nonsecure_call)) fn_t_0)(union u_t_0);
++typedef void (__attribute__ ((cmse_nonsecure_call)) fn_t_1)(union u_t_1);
++
++void fn_caller_0 (fn_t_0 *f_ptr) {
++    union u_t_0 x = {0.0f};
++    f_ptr (x);
++}
++
++/*
++** fn_caller_0:
++** ...
++**	lsrs	r4, r4, #1
++**	lsls	r4, r4, #1
++**	mov	r0, r4
++**	mov	r1, r4
++**	mov	r2, r4
++**	mov	r3, r4
++**	vmov.f32	s1, #1.0e\+0
++**	vmov.f64	d1, #1.0e\+0
++**	vmov.f64	d2, #1.0e\+0
++**	vmov.f64	d3, #1.0e\+0
++**	vmov.f64	d4, #1.0e\+0
++**	vmov.f64	d5, #1.0e\+0
++**	vmov.f64	d6, #1.0e\+0
++**	vmov.f64	d7, #1.0e\+0
++**	bl	__gnu_cmse_nonsecure_call
++** ...
++*/
++
++void fn_caller_1 (fn_t_1 *f_ptr) {
++    union u_t_1 x = {0.0};
++    f_ptr (x);
++}
++
++/*
++** fn_caller_1:
++** ...
++**	lsrs	r4, r4, #1
++**	lsls	r4, r4, #1
++**	mov	r0, r4
++**	mov	r1, r4
++**	mov	r2, r4
++**	mov	r3, r4
++**	vmov.f64	d1, #1.0e\+0
++**	vmov.f64	d2, #1.0e\+0
++**	vmov.f64	d3, #1.0e\+0
++**	vmov.f64	d4, #1.0e\+0
++**	vmov.f64	d5, #1.0e\+0
++**	vmov.f64	d6, #1.0e\+0
++**	vmov.f64	d7, #1.0e\+0
++**	bl	__gnu_cmse_nonsecure_call
++** ...
++*/
+diff --git a/gcc/testsuite/gcc.target/arm/cmse/mainline/8m/soft/union-4.c b/gcc/testsuite/gcc.target/arm/cmse/mainline/8m/soft/union-4.c
+new file mode 100644
+index 000000000000..b0a83db05bf6
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/arm/cmse/mainline/8m/soft/union-4.c
+@@ -0,0 +1,18 @@
++/* { dg-do compile } */
++/* { dg-options "-mcmse" } */
++/* { dg-final { check-function-bodies "**" "" } } */
++
++#include "../../../union-4.x"
++
++/*
++** fn:
++** ...
++**	lsrs	r4, r4, #1
++**	lsls	r4, r4, #1
++**	movw	ip, #7939
++**	and	r0, r0, ip
++**	mov	r2, r4
++**	mov	r3, r4
++**	bl	__gnu_cmse_nonsecure_call
++** ...
++*/
+diff --git a/gcc/testsuite/gcc.target/arm/cmse/mainline/8m/softfp/union-4.c b/gcc/testsuite/gcc.target/arm/cmse/mainline/8m/softfp/union-4.c
+new file mode 100644
+index 000000000000..9842a0fee001
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/arm/cmse/mainline/8m/softfp/union-4.c
+@@ -0,0 +1,19 @@
++/* { dg-do compile } */
++/* { dg-options "-mcmse -mfloat-abi=softfp -mfpu=fpv5-d16" }  */
++/* { dg-skip-if "Incompatible float ABI" { *-*-* } { "-mfloat-abi=*" } { "-mfloat-abi=softfp" } } */
++/* { dg-final { check-function-bodies "**" "" } } */
++
++#include "../../../union-4.x"
++
++/*
++** fn:
++** ...
++**	lsrs	r4, r4, #1
++**	lsls	r4, r4, #1
++**	movw	ip, #7939
++**	and	r0, r0, ip
++**	mov	r2, r4
++**	mov	r3, r4
++**	bl	__gnu_cmse_nonsecure_call
++** ...
++*/
+diff --git a/gcc/testsuite/gcc.target/arm/cmse/union-4.x b/gcc/testsuite/gcc.target/arm/cmse/union-4.x
+new file mode 100644
+index 000000000000..20678296157b
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/arm/cmse/union-4.x
+@@ -0,0 +1,41 @@
++typedef struct
++{
++  unsigned char	  a :2;
++  unsigned char	    :0;
++  unsigned short  b :5;
++  float		  f;
++} test_st_1;
++
++typedef union
++{
++  test_st_1 st_1;
++}test_un;
++
++typedef union
++{
++  test_un un;
++  struct
++    {
++      unsigned int v1;
++      unsigned int v2;
++      unsigned int v3;
++      unsigned int v4;
++    }values;
++} read_un;
++
++
++typedef void __attribute__ ((cmse_nonsecure_call)) (*foo_ns) (test_un);
++
++int
++fn (foo_ns fptr)
++{
++  read_un r;
++
++  r.values.v1 = 0xFFFFFFFF;
++  r.values.v2 = 0xFFFFFFFF;
++  r.values.v3 = 0xFFFFFFFF;
++  r.values.v4 = 0xFFFFFFFF;
++
++  fptr (r.un);
++  return 0;
++}
+-- 
+2.43.7
+
+

@@ -1,0 +1,382 @@
+From 5c099ee38347b3eb0ce70f08ccbef8bab6435ee6 Mon Sep 17 00:00:00 2001
+From: Richard Sandiford <richard.sandiford@arm.com>
+Date: Tue, 17 Jun 2025 15:20:25 +0100
+Subject: [PATCH] aarch64: Adapt unwinder to linux's SME signal behaviour
+
+SME uses a lazy save system to manage ZA.  The idea is that,
+if a function with ZA state wants to call a "normal" function,
+it can leave its state in ZA and instead set up a lazy save buffer.
+If, unexpectedly, that normal function contains a nested use of ZA,
+that nested use of ZA must commit the lazy save first.
+
+This lazy save system uses a special system register called TPIDR2_EL0.
+See:
+
+  https://github.com/ARM-software/abi-aa/blob/main/aapcs64/aapcs64.rst#66the-za-lazy-saving-scheme
+
+for details.
+
+The ABI specifies that, on entry to an exception handler, the following
+things must be true:
+
+* PSTATE.SM must be 0 (the processor must be in non-streaming mode)
+
+* PSTATE.ZA must be 0 (ZA must be off)
+
+* TPIDR2_EL0 must be 0 (there must be no uncommitted lazy save)
+
+This is normally done by making _Unwind_RaiseException & friends
+commit any lazy save before they unwind.  This also has the side
+effect of ensuring that TPIDR2_EL0 is never left pointing to a
+lazy save buffer that has been unwound.
+
+However, things get more complicated with signals.  If:
+
+(a) a signal is raised while ZA is dormant (that is, while there is an
+    uncommitted lazy save);
+
+(b) the signal handler throws an exception; and
+
+(c) that exception is caught outside the signal handler
+
+something must ensure that the lazy save from (a) is committed.
+
+This would be simple if the signal handler was entered with ZA and
+TPIDR2_EL0 intact.  However, for various good reasons that are out
+of scope here, this is not done.  Instead, Linux now clears both
+TPIDR2_EL0 and PSTATE.ZA before entering a signal handler, see:
+
+  https://lore.kernel.org/all/20250417190113.3778111-1-mark.rutland@arm.com/
+
+for details.
+
+Therefore, it is the unwinder that must simulate a commit of the lazy
+save from (a).  It can do this by reading the previous values of
+TPIDR2_EL0 and ZA from the sigcontext.
+
+The SME-related sigcontext structures were only added to linux's
+asm/sigcontext.h relatively recently and we can't rely on GCC being
+built against such recent kernel header files.  The patch therefore uses
+defines relevant macros if they are not defined and provide types that
+comply with ABI layout of the corresponding linux types.
+
+The patch includes some ugly casting in an attempt to support big-endian
+ILP32, even though SME on big-endian ILP32 linux should never be a thing.
+We can remove it if we also remove ILP32 support from GCC.
+
+Co-authored-by: Yury Khrustalev <yury.khrustalev@arm.com>
+Reviewed-by: Tamar Christina <tamar.christina@arm.com>
+
+gcc/
+	* doc/sourcebuild.texi (aarch64_sme_hw): Document.
+
+gcc/testsuite/
+	* lib/target-supports.exp (add_options_for_aarch64_sme)
+	(check_effective_target_aarch64_sme_hw): New procedures.
+	* g++.target/aarch64/sme/sme_throw_1.C: New test.
+	* g++.target/aarch64/sme/sme_throw_2.C: Likewise.
+
+libgcc/
+	* config/aarch64/linux-unwind.h (aarch64_fallback_frame_state):
+	If a signal was raised while there was an uncommitted lazy save,
+	commit the save as part of the unwind process.
+
+(cherry picked from commit b5ffc8e75a81bab7ee7554483447c27be438464e)
+---
+ gcc/doc/sourcebuild.texi                      |   3 +
+ .../g++.target/aarch64/sme/sme_throw_1.C      |  55 +++++++++
+ .../g++.target/aarch64/sme/sme_throw_2.C      |   4 +
+ gcc/testsuite/lib/target-supports.exp         |  23 ++++
+ libgcc/config/aarch64/linux-unwind.h          | 108 +++++++++++++++++-
+ 5 files changed, 192 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/g++.target/aarch64/sme/sme_throw_1.C
+ create mode 100644 gcc/testsuite/g++.target/aarch64/sme/sme_throw_2.C
+
+diff --git a/gcc/doc/sourcebuild.texi b/gcc/doc/sourcebuild.texi
+index 2e3159011d6d..b509d49cb722 100644
+--- a/gcc/doc/sourcebuild.texi
++++ b/gcc/doc/sourcebuild.texi
+@@ -2379,6 +2379,9 @@ whether it does so by default).
+ @item aarch64_sve2p1_hw
+ AArch64 target that is able to generate and execute SVE2.1 code (regardless of
+ whether it does so by default).
++@item aarch64_sme_hw
++AArch64 target that is able to generate and execute SME code (regardless of
++whether it does so by default).
+ 
+ @item aarch64_fjcvtzs_hw
+ AArch64 target that is able to generate and execute armv8.3-a FJCVTZS
+diff --git a/gcc/testsuite/g++.target/aarch64/sme/sme_throw_1.C b/gcc/testsuite/g++.target/aarch64/sme/sme_throw_1.C
+new file mode 100644
+index 000000000000..76f1e8b8ee7d
+--- /dev/null
++++ b/gcc/testsuite/g++.target/aarch64/sme/sme_throw_1.C
+@@ -0,0 +1,55 @@
++/* { dg-do run { target { aarch64*-linux-gnu* && aarch64_sme_hw } } } */
++
++#include <signal.h>
++#include <arm_sme.h>
++
++static bool caught;
++
++[[gnu::noipa]] void thrower(int)
++{
++  throw 1;
++}
++
++[[gnu::noipa]] void bar()
++{
++  *(volatile int *)0 = 0;
++}
++
++[[gnu::noipa]] void foo()
++{
++  try
++    {
++      bar();
++    }
++  catch (int)
++    {
++      caught = true;
++    }
++}
++
++__arm_new("za") __arm_locally_streaming void sme_user()
++{
++  svbool_t all = svptrue_b8();
++  for (unsigned int i = 0; i < svcntb(); ++i)
++    {
++      svint8_t expected = svindex_s8(i + 1, i);
++      svwrite_hor_za8_m(0, i, all, expected);
++    }
++  foo();
++  for (unsigned int i = 0; i < svcntb(); ++i)
++    {
++      svint8_t expected = svindex_s8(i + 1, i);
++      svint8_t actual = svread_hor_za8_m(svdup_s8(0), all, 0, i);
++      if (svptest_any(all, svcmpne(all, expected, actual)))
++	__builtin_abort();
++    }
++  if (!caught)
++    __builtin_abort();
++}
++
++int main()
++{
++  signal(SIGSEGV, thrower);
++  sme_user();
++  return 0;
++}
+diff --git a/gcc/testsuite/g++.target/aarch64/sme/sme_throw_2.C b/gcc/testsuite/g++.target/aarch64/sme/sme_throw_2.C
+new file mode 100644
+index 000000000000..db3197c7c075
+--- /dev/null
++++ b/gcc/testsuite/g++.target/aarch64/sme/sme_throw_2.C
+@@ -0,0 +1,4 @@
++/* { dg-do run { target { aarch64*-linux-gnu* && aarch64_sme_hw } } } */
++/* { dg-options "-O2" } */
++
++#include "sme_throw_1.C"
+diff --git a/gcc/testsuite/lib/target-supports.exp b/gcc/testsuite/lib/target-supports.exp
+index c0376b04551e..c5191bedc049 100644
+--- a/gcc/testsuite/lib/target-supports.exp
++++ b/gcc/testsuite/lib/target-supports.exp
+@@ -5726,6 +5726,13 @@ proc add_options_for_aarch64_sve { flags } {
+     return "$flags -march=armv8.2-a+sve"
+ }
+ 
++proc add_options_for_aarch64_sme { flags } {
++    if { ![istarget aarch64*-*-*] || [check_effective_target_aarch64_sme] } {
++	return "$flags"
++    }
++    return "$flags -march=armv9-a+sme"
++}
++
+ # Return 1 if this is an ARM target supporting the FP16 alternative
+ # format.  Some multilibs may be incompatible with the options needed.  Also
+ # set et_arm_fp16_alternative_flags to the best options to add.
+@@ -6465,6 +6472,22 @@ foreach N { 128 256 512 1024 2048 } {
+     }]
+ }
+ 
++# Return true if this is an AArch64 target that can run SME code.
++
++proc check_effective_target_aarch64_sme_hw { } {
++    if { ![istarget aarch64*-*-*] } {
++	return 0
++    }
++    return [check_runtime aarch64_sme_hw_available {
++	int
++	main (void)
++	{
++	  asm volatile ("rdsvl x0, #1");
++	  return 0;
++	}
++    } [add_options_for_aarch64_sme ""]]
++}
++
+ proc check_effective_target_arm_neonv2_hw { } {
+     return [check_runtime arm_neon_hwv2_available {
+ 	#include "arm_neon.h"
+diff --git a/libgcc/config/aarch64/linux-unwind.h b/libgcc/config/aarch64/linux-unwind.h
+index e41ca6a6a6e6..f5b73a0777f6 100644
+--- a/libgcc/config/aarch64/linux-unwind.h
++++ b/libgcc/config/aarch64/linux-unwind.h
+@@ -27,7 +27,7 @@
+ 
+ #include <signal.h>
+ #include <sys/ucontext.h>
+-
++#include <stdint.h>
+ 
+ /* Since insns are always stored LE, on a BE system the opcodes will
+    be loaded byte-reversed.  Therefore, define two sets of opcodes,
+@@ -43,6 +43,22 @@
+ 
+ #define MD_FALLBACK_FRAME_STATE_FOR aarch64_fallback_frame_state
+ 
++#ifndef FPSIMD_MAGIC
++#define FPSIMD_MAGIC 0x46508001
++#endif
++
++#ifndef TPIDR2_MAGIC
++#define TPIDR2_MAGIC 0x54504902
++#endif
++
++#ifndef ZA_MAGIC
++#define ZA_MAGIC 0x54366345
++#endif
++
++#ifndef EXTRA_MAGIC
++#define EXTRA_MAGIC 0x45585401
++#endif
++
+ static _Unwind_Reason_Code
+ aarch64_fallback_frame_state (struct _Unwind_Context *context,
+ 			      _Unwind_FrameState * fs)
+@@ -58,6 +74,21 @@ aarch64_fallback_frame_state (struct _Unwind_Context *context,
+     ucontext_t uc;
+   };
+ 
++  struct tpidr2_block
++  {
++    uint64_t za_save_buffer;
++    uint16_t num_za_save_slices;
++    uint8_t reserved[6];
++  };
++
++  struct za_block
++  {
++    struct _aarch64_ctx head;
++    uint16_t vl;
++    uint16_t reserved[3];
++    uint64_t data;
++  };
++
+   struct rt_sigframe *rt_;
+   _Unwind_Ptr new_cfa;
+   unsigned *pc = context->ra;
+@@ -103,11 +134,15 @@ aarch64_fallback_frame_state (struct _Unwind_Context *context,
+      field can be used to skip over unrecognized context extensions.
+      The end of the context sequence is marked by a context with magic
+      0 or size 0.  */
++  struct tpidr2_block *tpidr2 = 0;
++  struct za_block *za_ctx = 0;
++
+   for (extension_marker = (struct _aarch64_ctx *) &sc->__reserved;
+        extension_marker->magic;
+        extension_marker = (struct _aarch64_ctx *)
+        ((unsigned char *) extension_marker + extension_marker->size))
+     {
++    restart:
+       if (extension_marker->magic == FPSIMD_MAGIC)
+ 	{
+ 	  struct fpsimd_context *ctx =
+@@ -139,12 +174,83 @@ aarch64_fallback_frame_state (struct _Unwind_Context *context,
+ 	      fs->regs.reg[AARCH64_DWARF_V0 + i].loc.offset = offset;
+ 	    }
+ 	}
++      else if (extension_marker->magic == TPIDR2_MAGIC)
++	{
++	  /* A TPIDR2 context.
++
++	     All the casting is to support big-endian ILP32.  We could read
++	     directly into TPIDR2 otherwise.  */
++	  struct { struct _aarch64_ctx h; uint64_t tpidr2; } *ctx
++		  = (void *)extension_marker;
++#if defined (__ILP32__)
++	  tpidr2 = (struct tpidr2_block *) (uintptr_t) ctx->tpidr2;
++#else
++	  tpidr2 = (struct tpidr2_block *) ctx->tpidr2;
++#endif
++	}
++      else if (extension_marker->magic == ZA_MAGIC)
++	/* A ZA context.  We interpret this later.  */
++	za_ctx = (void *)extension_marker;
++      else if (extension_marker->magic == EXTRA_MAGIC)
++	{
++	  /* Extra context.  The ABI guarantees that the next _aarch64_ctx
++	     in the current list will be the zero terminator, so we can simply
++	     switch to the new list and continue from there.  The new list is
++	     also zero-terminated.
++
++	     As above, the casting is to support big-endian ILP32.  */
++	  struct { struct _aarch64_ctx h; uint64_t next; } *ctx
++		  = (void *)extension_marker;
++#if defined (__ILP32__)
++	  extension_marker = (struct _aarch64_ctx *) (uintptr_t) ctx->next;
++#else
++	  extension_marker = (struct _aarch64_ctx *) ctx->next;
++#endif
++	  goto restart;
++	}
+       else
+ 	{
+ 	  /* There is context provided that we do not recognize!  */
+ 	}
+     }
+ 
++  /* Signal handlers are entered with ZA in the off state (TPIDR2_ELO==0 and
++     PSTATE.ZA==0).  The normal process when transitioning from ZA being
++     dormant to ZA being off is to commit the lazy save; see the AAPCS64
++     for details.  However, this is not done when entering a signal handler.
++     Instead, linux saves the old contents of ZA and TPIDR2_EL0 to the
++     sigcontext without interpreting them further.
++
++     Therefore, if a signal handler throws an exception to code outside the
++     signal handler, the unwinder must commit the lazy save after the fact.
++     Committing a lazy save means:
++
++     (1) Storing the contents of ZA into the buffer provided by TPIDR2_EL0.
++     (2) Setting TPIDR2_EL0 to zero.
++     (3) Turning ZA off.
++
++     (2) and (3) have already been done by the call to __libgcc_arm_za_disable.
++     (1) involves copying data from the ZA sigcontext entry to the
++     corresponding lazy save buffer.  */
++  if (tpidr2 && za_ctx && tpidr2->za_save_buffer)
++    {
++      /* There is a 16-bit vector length (measured in bytes) at ZA_CTX + 8.
++	 The data itself starts at ZA_CTX + 16.
++	 As above, the casting is to support big-endian ILP32.  */
++      uint16_t vl = za_ctx->vl;
++#if defined (__ILP32__)
++      void *save_buffer = (void *) (uintptr_t) tpidr2->za_save_buffer;
++      const void *za_buffer = (void *) (uintptr_t) &za_ctx->data;
++#else
++      void *save_buffer = (void *) tpidr2->za_save_buffer;
++      const void *za_buffer = (void *) &za_ctx->data;
++#endif
++      uint64_t num_slices = tpidr2->num_za_save_slices;
++      if (num_slices > vl)
++	num_slices = vl;
++      memcpy (save_buffer, za_buffer, num_slices * vl);
++    }
++
+   fs->regs.how[31] = REG_SAVED_OFFSET;
+   fs->regs.reg[31].loc.offset = (_Unwind_Ptr) & (sc->sp) - new_cfa;
+ 
+-- 
+2.43.7
+
+

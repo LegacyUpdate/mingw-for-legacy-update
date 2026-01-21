@@ -1,0 +1,73 @@
+From f95c1df5f88f6b9862b89ba66755594fc0094080 Mon Sep 17 00:00:00 2001
+From: Matthias Klose <doko@ubuntu.com>
+Date: Sun, 7 Sep 2025 10:49:14 +0200
+Subject: [PATCH] libphobos: enable for powerpc64le-linux-gnu
+
+libphobos/ChangeLog:
+
+	* configure.tgt: Add powerpc64le--linux-gnu as a supported target
+	when configured with --with-long-double-format=ieee.
+---
+ libphobos/configure.tgt | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/libphobos/configure.tgt b/libphobos/configure.tgt
+index b32300b52a18..ae3b2c20ea7c 100644
+--- a/libphobos/configure.tgt
++++ b/libphobos/configure.tgt
+@@ -48,6 +48,15 @@ case "${target}" in
+   power*-*-freebsd*)
+ 	LIBPHOBOS_SUPPORTED=yes
+ 	;;
++  powerpc64le-*linux*)
++	LIBPHOBOS_SUPPORTED=yes
++	case "$ac_configure_args" in
++	  *--with-long-double-format=ieee*)
++	    ;;
++	  *)
++	    LIBDRUNTIME_ONLY=yes
++	esac
++	;;
+   power*-*-linux*)
+ 	LIBPHOBOS_SUPPORTED=yes
+ 	LIBDRUNTIME_ONLY=yes
+-- 
+2.43.7
+
+From f95c1df5f88f6b9862b89ba66755594fc0094080 Mon Sep 17 00:00:00 2001
+From: Matthias Klose <doko@ubuntu.com>
+Date: Sun, 7 Sep 2025 10:49:14 +0200
+Subject: [PATCH] libphobos: enable for powerpc64le-linux-gnu
+
+libphobos/ChangeLog:
+
+	* configure.tgt: Add powerpc64le--linux-gnu as a supported target
+	when configured with --with-long-double-format=ieee.
+---
+ libphobos/configure.tgt | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/libphobos/configure.tgt b/libphobos/configure.tgt
+index b32300b52a18..ae3b2c20ea7c 100644
+--- a/libphobos/configure.tgt
++++ b/libphobos/configure.tgt
+@@ -48,6 +48,15 @@ case "${target}" in
+   power*-*-freebsd*)
+ 	LIBPHOBOS_SUPPORTED=yes
+ 	;;
++  powerpc64le-*linux*)
++	LIBPHOBOS_SUPPORTED=yes
++	case "$ac_configure_args" in
++	  *--with-long-double-format=ieee*)
++	    ;;
++	  *)
++	    LIBDRUNTIME_ONLY=yes
++	esac
++	;;
+   power*-*-linux*)
+ 	LIBPHOBOS_SUPPORTED=yes
+ 	LIBDRUNTIME_ONLY=yes
+-- 
+2.43.7
+
+

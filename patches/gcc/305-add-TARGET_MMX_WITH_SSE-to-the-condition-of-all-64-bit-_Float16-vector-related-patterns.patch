@@ -1,0 +1,108 @@
+From 90c718dec540095c4eab0bfbde60d3d09d7e2012 Mon Sep 17 00:00:00 2001
+From: liuhongt <hongtao.liu@intel.com>
+Date: Thu, 8 Jan 2026 17:46:38 -0800
+Subject: [PATCH] Add TARGET_MMX_WITH_SSE to the condition of all 64-bit
+ _Float16 vector related patterns.
+
+gcc/ChangeLog:
+
+	PR target/123484
+	* config/i386/mmx.md (divv4hf3): Add TARGET_MMX_WITH_SSE to
+	the condition.
+	(cmlav4hf4): Ditto.
+	(cmla_conjv4hf4): Ditto.
+	(cmulv4hf3): Ditto.
+	(cmul_conjv4hf3): Ditto.
+
+gcc/testsuite/ChangeLog:
+
+	* gcc.target/i386/pr123484.c: New test.
+
+(cherry picked from commit 808fc71d15a458cc627f187449fac4f2b6d6cb3f)
+---
+ gcc/config/i386/mmx.md                   | 15 ++++++++++-----
+ gcc/testsuite/gcc.target/i386/pr123484.c | 17 +++++++++++++++++
+ 2 files changed, 27 insertions(+), 5 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.target/i386/pr123484.c
+
+diff --git a/gcc/config/i386/mmx.md b/gcc/config/i386/mmx.md
+index 79202323e534..9851f3b133ab 100644
+--- a/gcc/config/i386/mmx.md
++++ b/gcc/config/i386/mmx.md
+@@ -2038,7 +2038,8 @@
+ 	(div:V4HF
+ 	  (match_operand:V4HF 1 "nonimmediate_operand")
+ 	  (match_operand:V4HF 2 "register_operand")))]
+-  "TARGET_AVX512FP16 && TARGET_AVX512VL && ix86_partial_vec_fp_math"
++  "TARGET_AVX512FP16 && TARGET_AVX512VL && ix86_partial_vec_fp_math
++  && TARGET_MMX_WITH_SSE"
+ {
+   rtx op2 = gen_reg_rtx (V8HFmode);
+   rtx op1 = gen_reg_rtx (V8HFmode);
+@@ -2873,7 +2874,8 @@
+    (match_operand:V4HF 1 "vector_operand")
+    (match_operand:V4HF 2 "vector_operand")
+    (match_operand:V4HF 3 "vector_operand")]
+-  "TARGET_AVX512FP16 && TARGET_AVX512VL"
++  "TARGET_AVX512FP16 && TARGET_AVX512VL
++  && TARGET_MMX_WITH_SSE"
+ {
+   rtx op3 = gen_reg_rtx (V8HFmode);
+   rtx op2 = gen_reg_rtx (V8HFmode);
+@@ -2895,7 +2897,8 @@
+    (match_operand:V4HF 1 "vector_operand")
+    (match_operand:V4HF 2 "vector_operand")
+    (match_operand:V4HF 3 "vector_operand")]
+-  "TARGET_AVX512FP16 && TARGET_AVX512VL"
++  "TARGET_AVX512FP16 && TARGET_AVX512VL
++  && TARGET_MMX_WITH_SSE"
+ {
+   rtx op3 = gen_reg_rtx (V8HFmode);
+   rtx op2 = gen_reg_rtx (V8HFmode);
+@@ -2916,7 +2919,8 @@
+   [(match_operand:V4HF 0 "register_operand")
+    (match_operand:V4HF 1 "vector_operand")
+    (match_operand:V4HF 2 "vector_operand")]
+-  "TARGET_AVX512FP16 && TARGET_AVX512VL"
++  "TARGET_AVX512FP16 && TARGET_AVX512VL
++  && TARGET_MMX_WITH_SSE"
+ {
+   rtx op2 = gen_reg_rtx (V8HFmode);
+   rtx op1 = gen_reg_rtx (V8HFmode);
+@@ -2934,7 +2938,8 @@
+   [(match_operand:V4HF 0 "register_operand")
+    (match_operand:V4HF 1 "vector_operand")
+    (match_operand:V4HF 2 "vector_operand")]
+-  "TARGET_AVX512FP16 && TARGET_AVX512VL"
++  "TARGET_AVX512FP16 && TARGET_AVX512VL
++  && TARGET_MMX_WITH_SSE"
+ {
+   rtx op2 = gen_reg_rtx (V8HFmode);
+   rtx op1 = gen_reg_rtx (V8HFmode);
+diff --git a/gcc/testsuite/gcc.target/i386/pr123484.c b/gcc/testsuite/gcc.target/i386/pr123484.c
+new file mode 100644
+index 000000000000..258da40793aa
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/i386/pr123484.c
+@@ -0,0 +1,17 @@
++/* { dg-do compile } */
++/* { dg-options "-O2 -mavx512vl -mavx512fp16 " }*/
++typedef __attribute__((__vector_size__ (8))) _Float16 F;
++int a, b;
++F f, *p;
++
++void
++foo ()
++{
++  do
++    {
++      f /= b ? *p : (F) {40};
++l:
++    }
++  while (a);
++  goto l;
++}
+-- 
+2.43.7
+
+

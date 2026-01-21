@@ -1,0 +1,75 @@
+From a65420e1b57c13aae1bb3474535139732095e8c7 Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Wed, 8 Oct 2025 09:58:41 +0200
+Subject: [PATCH] gimplify: Fix up __builtin_c[lt]zg gimplification [PR122188]
+
+The following testcase ICEs during gimplification.
+The problem is that save_expr sometimes doesn't create a SAVE_EXPR but
+returns the original complex tree (COND_EXPR) and the code then uses that
+tree in 2 different spots without unsharing.  As this is done during
+gimplification it wasn't unshared when whole body is unshared and because
+gimplification is destructive, the first time we gimplify it we destruct it
+and second time we try to gimplify it we ICE on it.
+Now, we could replace one a use with unshare_expr (a), but because this
+is a gimplification hook, I think easier than trying to create a save_expr
+is just gimplify the argument, then we know it is is_gimple_val and so
+something without side-effects and can safely use it twice.  That argument
+would be the first thing to gimplify after return GS_OK anyway, so it
+doesn't change argument sequencing etc.
+
+2025-10-08  Jakub Jelinek  <jakub@redhat.com>
+
+	PR c/122188
+	* c-gimplify.cc (c_gimplify_expr): Gimplify CALL_EXPR_ARG (*expr_p, 0)
+	instead of calling save_expr on it.
+
+	* c-c++-common/pr122188.c: New test.
+
+(cherry picked from commit bb22f7d4d63446c9095db32ca013a9b2182df7d9)
+---
+ gcc/c-family/c-gimplify.cc            |  5 ++++-
+ gcc/testsuite/c-c++-common/pr122188.c | 15 +++++++++++++++
+ 2 files changed, 19 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/c-c++-common/pr122188.c
+
+diff --git a/gcc/c-family/c-gimplify.cc b/gcc/c-family/c-gimplify.cc
+index c6fb7646567e..0aad93e618cb 100644
+--- a/gcc/c-family/c-gimplify.cc
++++ b/gcc/c-family/c-gimplify.cc
+@@ -1009,7 +1009,10 @@ c_gimplify_expr (tree *expr_p, gimple_seq *pre_p ATTRIBUTE_UNUSED,
+ 	    && call_expr_nargs (*expr_p) == 2
+ 	    && TREE_CODE (CALL_EXPR_ARG (*expr_p, 1)) != INTEGER_CST)
+ 	  {
+-	    tree a = save_expr (CALL_EXPR_ARG (*expr_p, 0));
++	    tree a = CALL_EXPR_ARG (*expr_p, 0);
++	    if (gimplify_expr (&a, pre_p, post_p, is_gimple_val, fb_rvalue)
++		== GS_ERROR)
++	      return GS_ERROR;
+ 	    tree c = build_call_expr_loc (EXPR_LOCATION (*expr_p),
+ 					  fndecl, 1, a);
+ 	    *expr_p = build3_loc (EXPR_LOCATION (*expr_p), COND_EXPR,
+diff --git a/gcc/testsuite/c-c++-common/pr122188.c b/gcc/testsuite/c-c++-common/pr122188.c
+new file mode 100644
+index 000000000000..8c3fa1c30e55
+--- /dev/null
++++ b/gcc/testsuite/c-c++-common/pr122188.c
+@@ -0,0 +1,15 @@
++/* PR c/122188 */
++/* { dg-do compile } */
++/* { dg-options "-O2" } */
++
++int
++foo (const unsigned x, int y)
++{
++  return __builtin_ctzg (x ? x : 4081577U, y);
++}
++
++int
++bar (const unsigned x, int y)
++{
++  return __builtin_clzg (x ? x : 4081577U, y);
++}
+-- 
+2.43.7
+
+

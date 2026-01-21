@@ -1,0 +1,33 @@
+From 150859c3b186a011f30f9bc73862f5a9ea525869 Mon Sep 17 00:00:00 2001
+From: Kyrylo Tkachov <ktkachov@nvidia.com>
+Date: Wed, 3 Sep 2025 08:43:40 -0700
+Subject: [PATCH] aarch64: PR target/121749: Use dg-assemble in testcase
+
+Committing as obvious.
+
+Signed-off-by: Kyrylo Tkachov <ktkachov@nvidia.com>
+
+gcc/testsuite/
+
+	PR target/121749
+	* gcc.target/aarch64/simd/pr121749.c: Use dg-assemble directive.
+
+(cherry picked from commit 2b8256d0ce18ed4d00868c78f5128d32884ccfa1)
+---
+ gcc/testsuite/gcc.target/aarch64/simd/pr121749.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/gcc/testsuite/gcc.target/aarch64/simd/pr121749.c b/gcc/testsuite/gcc.target/aarch64/simd/pr121749.c
+index c4e1a2d76cfb..b33245395b54 100644
+--- a/gcc/testsuite/gcc.target/aarch64/simd/pr121749.c
++++ b/gcc/testsuite/gcc.target/aarch64/simd/pr121749.c
+@@ -1,4 +1,4 @@
+-/* { dg-do compile } */
++/* { dg-do assemble } */
+ /* { dg-options "-O2" } */
+ 
+ #include <arm_neon.h>
+-- 
+2.43.7
+
+

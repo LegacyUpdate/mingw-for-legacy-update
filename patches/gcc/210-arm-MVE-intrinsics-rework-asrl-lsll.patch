@@ -1,0 +1,152 @@
+From 6cd6125361566349998613bbfe0445ed61e6917f Mon Sep 17 00:00:00 2001
+From: Christophe Lyon <christophe.lyon@linaro.org>
+Date: Fri, 19 Sep 2025 13:04:55 +0000
+Subject: [PATCH] arm: [MVE intrinsics] rework asrl lsll [PR122216]
+
+Implement asrl and lsll using the new MVE builtins framework.
+
+gcc/ChangeLog:
+
+	PR target/122216
+	* config/arm/arm-mve-builtins-base.cc (enum which_scalar_shift): New.
+	(mve_function_scalar_shift): New.
+	(asrl, lsll): New.
+	* config/arm/arm-mve-builtins-base.def (asrl, lsll): New.
+	* config/arm/arm-mve-builtins-base.h (asrl, lsll): New.
+	* config/arm/arm_mve.h (asrl): Delete.
+	(lsll): Delete.
+	(__arm_asrl): Delete.
+	(__arm_lsll): Delete.
+---
+ gcc/config/arm/arm-mve-builtins-base.cc  | 44 ++++++++++++++++++++++++
+ gcc/config/arm/arm-mve-builtins-base.def |  2 ++
+ gcc/config/arm/arm-mve-builtins-base.h   |  2 ++
+ gcc/config/arm/arm_mve.h                 | 16 ---------
+ 4 files changed, 48 insertions(+), 16 deletions(-)
+
+diff --git a/gcc/config/arm/arm-mve-builtins-base.cc b/gcc/config/arm/arm-mve-builtins-base.cc
+index fd0be2cbcd87..4e0055ec4d4c 100644
+--- a/gcc/config/arm/arm-mve-builtins-base.cc
++++ b/gcc/config/arm/arm-mve-builtins-base.cc
+@@ -1167,6 +1167,48 @@ public:
+   }
+ };
+ 
++
++/* Map the function directly to the appropriate scalar shift builtin.  */
++enum which_scalar_shift {
++  ss_ASRL,
++  ss_LSLL,
++};
++
++class mve_function_scalar_shift : public function_base
++{
++public:
++  CONSTEXPR mve_function_scalar_shift (enum which_scalar_shift shl)
++    : m_scalar_shift (shl)
++  {}
++
++  /* Which scalar_shift builtin to map.  */
++  enum which_scalar_shift m_scalar_shift;
++
++  rtx
++  expand (function_expander &e) const override
++  {
++    insn_code code;
++
++    switch (m_scalar_shift)
++      {
++      case ss_ASRL:
++	e.args[1] = simplify_gen_subreg (QImode, e.args[1], SImode, 0);
++	code = CODE_FOR_mve_asrl;
++	break;
++
++      case ss_LSLL:
++	e.args[1] = simplify_gen_subreg (QImode, e.args[1], SImode, 0);
++	code = CODE_FOR_mve_lsll;
++	break;
++
++      default:
++	gcc_unreachable ();
++      }
++
++    return e.use_unpred_insn (code);
++  }
++};
++
+ } /* end anonymous namespace */
+ 
+ namespace arm_mve {
+@@ -1334,6 +1376,8 @@ namespace arm_mve {
+    (-1, -1, UNSPEC##_F,							\
+     -1, -1, UNSPEC##_P_F))
+ 
++FUNCTION (asrl, mve_function_scalar_shift, (ss_ASRL))
++FUNCTION (lsll, mve_function_scalar_shift, (ss_LSLL))
+ FUNCTION_PRED_P_S_U (vabavq, VABAVQ)
+ FUNCTION_WITHOUT_N (vabdq, VABDQ)
+ FUNCTION (vabsq, unspec_based_mve_function_exact_insn, (ABS, ABS, ABS, -1, -1, -1, VABSQ_M_S, -1, VABSQ_M_F, -1, -1, -1))
+diff --git a/gcc/config/arm/arm-mve-builtins-base.def b/gcc/config/arm/arm-mve-builtins-base.def
+index 0400c3c540ea..5992ddb50491 100644
+--- a/gcc/config/arm/arm-mve-builtins-base.def
++++ b/gcc/config/arm/arm-mve-builtins-base.def
+@@ -18,6 +18,8 @@
+    <http://www.gnu.org/licenses/>.  */
+ 
+ #define REQUIRES_FLOAT false
++DEF_MVE_FUNCTION (asrl, scalar_s64_shift, none, none)
++DEF_MVE_FUNCTION (lsll, scalar_u64_shift, none, none)
+ DEF_MVE_FUNCTION (vabavq, binary_acca_int32, all_integer, p_or_none)
+ DEF_MVE_FUNCTION (vabdq, binary, all_integer, mx_or_none)
+ DEF_MVE_FUNCTION (vabsq, unary, all_signed, mx_or_none)
+diff --git a/gcc/config/arm/arm-mve-builtins-base.h b/gcc/config/arm/arm-mve-builtins-base.h
+index 6ff3195e888e..54d3dd7cd041 100644
+--- a/gcc/config/arm/arm-mve-builtins-base.h
++++ b/gcc/config/arm/arm-mve-builtins-base.h
+@@ -23,6 +23,8 @@
+ namespace arm_mve {
+ namespace functions {
+ 
++extern const function_base *const asrl;
++extern const function_base *const lsll;
+ extern const function_base *const vabavq;
+ extern const function_base *const vabdq;
+ extern const function_base *const vabsq;
+diff --git a/gcc/config/arm/arm_mve.h b/gcc/config/arm/arm_mve.h
+index ee18a4714fb1..50b3a52d34d0 100644
+--- a/gcc/config/arm/arm_mve.h
++++ b/gcc/config/arm/arm_mve.h
+@@ -95,8 +95,6 @@
+ #define uqshll(__p0, __p1) __arm_uqshll(__p0, __p1)
+ #define urshr(__p0, __p1) __arm_urshr(__p0, __p1)
+ #define urshrl(__p0, __p1) __arm_urshrl(__p0, __p1)
+-#define lsll(__p0, __p1) __arm_lsll(__p0, __p1)
+-#define asrl(__p0, __p1) __arm_asrl(__p0, __p1)
+ #endif
+ 
+ /* For big-endian, GCC's vector indices are reversed within each 64 bits
+@@ -254,20 +252,6 @@ __arm_vgetq_lane_u64 (uint64x2_t __a, const int __idx)
+   return __a[__ARM_LANEQ(__a,__idx)];
+ }
+ 
+-__extension__ extern __inline  uint64_t
+-__attribute__ ((__always_inline__, __gnu_inline__, __artificial__))
+-__arm_lsll (uint64_t value, int32_t shift)
+-{
+-  return (value << shift);
+-}
+-
+-__extension__ extern __inline int64_t
+-__attribute__ ((__always_inline__, __gnu_inline__, __artificial__))
+-__arm_asrl (int64_t value, int32_t shift)
+-{
+-  return (value >> shift);
+-}
+-
+ __extension__ extern __inline uint64_t
+ __attribute__ ((__always_inline__, __gnu_inline__, __artificial__))
+ __arm_uqrshll (uint64_t value, int32_t shift)
+-- 
+2.43.7
+
+

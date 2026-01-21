@@ -1,0 +1,88 @@
+From 1788588589a534dd9b732f1ddec10aefd5d689db Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Thu, 20 Nov 2025 08:19:32 +0100
+Subject: [PATCH] c++: Fix error recovery ICE in tsubst_baselink [PR120876]
+
+The following testcase ICEs since r12-6080.  The problem is that
+lookup_fnfields can return NULL_TREE on failure, but the maybe_incomplete
+handling was added before the if (!baselink) handling and assumes that
+baselink is non-NULL (and BASELINK).
+
+The following patch reorders the if (maybe_incomplete) handling with
+if (!baselink).
+
+2025-11-20  Jakub Jelinek  <jakub@redhat.com>
+
+	PR c++/120876
+	* pt.cc (tsubst_baselink): Move maybe_incomplete handling after
+	!baselink handling.
+
+	* g++.dg/parse/crash81.C: New test.
+
+(cherry picked from commit 6bace0ed49aea613ccd6c4f3c21a9ef0473fe62b)
+---
+ gcc/cp/pt.cc                         | 18 +++++++++---------
+ gcc/testsuite/g++.dg/parse/crash81.C | 14 ++++++++++++++
+ 2 files changed, 23 insertions(+), 9 deletions(-)
+ create mode 100644 gcc/testsuite/g++.dg/parse/crash81.C
+
+diff --git a/gcc/cp/pt.cc b/gcc/cp/pt.cc
+index a245b6ef7490..79195d5b78d8 100644
+--- a/gcc/cp/pt.cc
++++ b/gcc/cp/pt.cc
+@@ -17500,6 +17500,15 @@ tsubst_baselink (tree baselink, tree object_type,
+       bool maybe_incomplete = BASELINK_FUNCTIONS_MAYBE_INCOMPLETE_P (baselink);
+       baselink = lookup_fnfields (qualifying_scope, name, /*protect=*/1,
+ 				  complain);
++      if (!baselink)
++	{
++	  if ((complain & tf_error)
++	      && constructor_name_p (name, qualifying_scope))
++	    error ("cannot call constructor %<%T::%D%> directly",
++		   qualifying_scope, name);
++	  return error_mark_node;
++	}
++
+       if (maybe_incomplete)
+ 	{
+ 	  /* Filter out from the new lookup set those functions which didn't
+@@ -17513,15 +17522,6 @@ tsubst_baselink (tree baselink, tree object_type,
+ 	  BASELINK_FUNCTIONS_MAYBE_INCOMPLETE_P (baselink) = true;
+ 	}
+ 
+-      if (!baselink)
+-	{
+-	  if ((complain & tf_error)
+-	      && constructor_name_p (name, qualifying_scope))
+-	    error ("cannot call constructor %<%T::%D%> directly",
+-		   qualifying_scope, name);
+-	  return error_mark_node;
+-	}
+-
+       fns = BASELINK_FUNCTIONS (baselink);
+     }
+   else
+diff --git a/gcc/testsuite/g++.dg/parse/crash81.C b/gcc/testsuite/g++.dg/parse/crash81.C
+new file mode 100644
+index 000000000000..632ab042810a
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/parse/crash81.C
+@@ -0,0 +1,14 @@
++// PR c++/120876
++// { dg-do compile { target c++11 } }
++
++template <typename T>
++struct S {
++  static bool foo (decltype (bar (T {})));	// { dg-error "'bar' was not declared in this scope; did you mean 'baz'\\\?" }
++  static constexpr bool s = foo (0);
++};
++
++void
++baz ()
++{
++  S <int>::s;
++}
+-- 
+2.43.7
+
+

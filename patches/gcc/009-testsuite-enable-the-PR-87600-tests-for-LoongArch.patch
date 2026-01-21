@@ -1,0 +1,64 @@
+From 06f43dfbbf314bbe6d0b905fc8780e525ef6e72a Mon Sep 17 00:00:00 2001
+From: Xi Ruoyao <xry111@xry111.site>
+Date: Tue, 8 Jul 2025 14:07:21 +0800
+Subject: [PATCH] testsuite: Enable the PR 87600 tests for LoongArch
+
+I'm going to refine a part of the PR 87600 fix which seems triggering
+PR 120983 that LoongArch is particularly suffering.  Enable the PR 87600
+tests so I'll not regress PR 87600.
+
+gcc/testsuite/ChangeLog:
+
+	PR rtl-optimization/87600
+	PR rtl-optimization/120983
+	* gcc.dg/pr87600.h [__loongarch__]: Define REG0 and REG1.
+	* gcc.dg/pr87600-1.c (dg-do): Add loongarch.
+	* gcc.dg/pr87600-2.c (dg-do): Likewise.
+
+(cherry picked from commit 651845ceaae26a1b2c03f215e16e7e711dcea2cc)
+---
+ gcc/testsuite/gcc.dg/pr87600-1.c | 2 +-
+ gcc/testsuite/gcc.dg/pr87600-2.c | 2 +-
+ gcc/testsuite/gcc.dg/pr87600.h   | 3 +++
+ 3 files changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/gcc/testsuite/gcc.dg/pr87600-1.c b/gcc/testsuite/gcc.dg/pr87600-1.c
+index 351795756a31..9d74cadb0110 100644
+--- a/gcc/testsuite/gcc.dg/pr87600-1.c
++++ b/gcc/testsuite/gcc.dg/pr87600-1.c
+@@ -1,5 +1,5 @@
+ /* PR rtl-optimization/87600  */
+-/* { dg-do compile { target aarch64*-*-* arm*-*-* i?86-*-* powerpc*-*-* s390*-*-* x86_64-*-* } } */
++/* { dg-do compile { target aarch64*-*-* arm*-*-* i?86-*-* loongarch*-*-* powerpc*-*-* s390*-*-* x86_64-*-* } } */
+ /* { dg-options "-O2" } */
+ 
+ #include "pr87600.h"
+diff --git a/gcc/testsuite/gcc.dg/pr87600-2.c b/gcc/testsuite/gcc.dg/pr87600-2.c
+index e8a9f194b733..808ebe185075 100644
+--- a/gcc/testsuite/gcc.dg/pr87600-2.c
++++ b/gcc/testsuite/gcc.dg/pr87600-2.c
+@@ -1,5 +1,5 @@
+ /* PR rtl-optimization/87600  */
+-/* { dg-do compile { target aarch64*-*-* arm*-*-* i?86-*-* powerpc*-*-* s390*-*-* x86_64-*-* } } */
++/* { dg-do compile { target aarch64*-*-* arm*-*-* i?86-*-* loongarch*-*-* powerpc*-*-* s390*-*-* x86_64-*-* } } */
+ /* { dg-options "-O2" } */
+ 
+ #include "pr87600.h"
+diff --git a/gcc/testsuite/gcc.dg/pr87600.h b/gcc/testsuite/gcc.dg/pr87600.h
+index af91f6345cd4..9c0b383947ab 100644
+--- a/gcc/testsuite/gcc.dg/pr87600.h
++++ b/gcc/testsuite/gcc.dg/pr87600.h
+@@ -7,6 +7,9 @@
+ #elif defined (__i386__)
+ # define REG1 "%eax"
+ # define REG2 "%edx"
++#elif defined (__loongarch__)
++# define REG1 "$t0"
++# define REG2 "$t1"
+ #elif defined (__powerpc__) || defined (__POWERPC__)
+ # define REG1 "r3"
+ # define REG2 "r4"
+-- 
+2.43.7
+
+

@@ -1,0 +1,321 @@
+From 42a9b437de7273d366cc00d7504de36a3f4ea73e Mon Sep 17 00:00:00 2001
+From: Christophe Lyon <christophe.lyon@linaro.org>
+Date: Wed, 12 Nov 2025 19:47:13 +0000
+Subject: [PATCH] testsuite: arm: mve: Adjust testcases [PR122175]
+
+The fix for PR122175 slightly changed the output for 16-bit constants
+(no # prefix), and I forgot to add the updated tests with the fix.
+
+gcc/testsuite/ChangeLog:
+
+	PR target/122175
+	* gcc.target/arm/mve/intrinsics/vbicq_m_n_s16.c: Adjust expected
+	output.
+	* gcc.target/arm/mve/intrinsics/vbicq_m_n_u16.c: Likewise.
+	* gcc.target/arm/mve/intrinsics/vbicq_n_s16.c: Likewise.
+	* gcc.target/arm/mve/intrinsics/vbicq_n_u16.c: Likewise.
+	* gcc.target/arm/mve/intrinsics/vmvnq_m_n_s16.c: Likewise.
+	* gcc.target/arm/mve/intrinsics/vmvnq_m_n_u16.c: Likewise.
+	* gcc.target/arm/mve/intrinsics/vmvnq_n_s16.c: Likewise.
+	* gcc.target/arm/mve/intrinsics/vmvnq_n_u16.c: Likewise.
+	* gcc.target/arm/mve/intrinsics/vmvnq_x_n_s16.c: Likewise.
+	* gcc.target/arm/mve/intrinsics/vmvnq_x_n_u16.c: Likewise.
+	* gcc.target/arm/mve/intrinsics/vorrq_m_n_s16.c: Likewise.
+	* gcc.target/arm/mve/intrinsics/vorrq_m_n_u16.c: Likewise.
+	* gcc.target/arm/mve/intrinsics/vorrq_n_s16.c: Likewise.
+	* gcc.target/arm/mve/intrinsics/vorrq_n_u16.c: Likewise.
+
+(cherry picked from commit bf7f6bc7ec2b0bbac062cc19c88458e68ffd5a85)
+---
+ gcc/testsuite/gcc.target/arm/mve/intrinsics/vbicq_m_n_s16.c | 4 ++--
+ gcc/testsuite/gcc.target/arm/mve/intrinsics/vbicq_m_n_u16.c | 4 ++--
+ gcc/testsuite/gcc.target/arm/mve/intrinsics/vbicq_n_s16.c   | 4 ++--
+ gcc/testsuite/gcc.target/arm/mve/intrinsics/vbicq_n_u16.c   | 4 ++--
+ gcc/testsuite/gcc.target/arm/mve/intrinsics/vmvnq_m_n_s16.c | 4 ++--
+ gcc/testsuite/gcc.target/arm/mve/intrinsics/vmvnq_m_n_u16.c | 4 ++--
+ gcc/testsuite/gcc.target/arm/mve/intrinsics/vmvnq_n_s16.c   | 2 +-
+ gcc/testsuite/gcc.target/arm/mve/intrinsics/vmvnq_n_u16.c   | 2 +-
+ gcc/testsuite/gcc.target/arm/mve/intrinsics/vmvnq_x_n_s16.c | 2 +-
+ gcc/testsuite/gcc.target/arm/mve/intrinsics/vmvnq_x_n_u16.c | 2 +-
+ gcc/testsuite/gcc.target/arm/mve/intrinsics/vorrq_m_n_s16.c | 4 ++--
+ gcc/testsuite/gcc.target/arm/mve/intrinsics/vorrq_m_n_u16.c | 4 ++--
+ gcc/testsuite/gcc.target/arm/mve/intrinsics/vorrq_n_s16.c   | 4 ++--
+ gcc/testsuite/gcc.target/arm/mve/intrinsics/vorrq_n_u16.c   | 4 ++--
+ 14 files changed, 24 insertions(+), 24 deletions(-)
+
+diff --git a/gcc/testsuite/gcc.target/arm/mve/intrinsics/vbicq_m_n_s16.c b/gcc/testsuite/gcc.target/arm/mve/intrinsics/vbicq_m_n_s16.c
+index 4e2be3e4516a..804b89046f58 100644
+--- a/gcc/testsuite/gcc.target/arm/mve/intrinsics/vbicq_m_n_s16.c
++++ b/gcc/testsuite/gcc.target/arm/mve/intrinsics/vbicq_m_n_s16.c
+@@ -16,7 +16,7 @@ extern "C" {
+ **	...
+ **	vpst(?:	@.*|)
+ **	...
+-**	vbict.i16	q[0-9]+, #[0-9]+(?:	@.*|)
++**	vbict.i16	q[0-9]+, [0-9]+(?:	@.*|)
+ **	...
+ */
+ int16x8_t
+@@ -33,7 +33,7 @@ foo (int16x8_t a, mve_pred16_t p)
+ **	...
+ **	vpst(?:	@.*|)
+ **	...
+-**	vbict.i16	q[0-9]+, #[0-9]+(?:	@.*|)
++**	vbict.i16	q[0-9]+, [0-9]+(?:	@.*|)
+ **	...
+ */
+ int16x8_t
+diff --git a/gcc/testsuite/gcc.target/arm/mve/intrinsics/vbicq_m_n_u16.c b/gcc/testsuite/gcc.target/arm/mve/intrinsics/vbicq_m_n_u16.c
+index 34b62aa557fb..197c711a33cd 100644
+--- a/gcc/testsuite/gcc.target/arm/mve/intrinsics/vbicq_m_n_u16.c
++++ b/gcc/testsuite/gcc.target/arm/mve/intrinsics/vbicq_m_n_u16.c
+@@ -16,7 +16,7 @@ extern "C" {
+ **	...
+ **	vpst(?:	@.*|)
+ **	...
+-**	vbict.i16	q[0-9]+, #[0-9]+(?:	@.*|)
++**	vbict.i16	q[0-9]+, [0-9]+(?:	@.*|)
+ **	...
+ */
+ uint16x8_t
+@@ -33,7 +33,7 @@ foo (uint16x8_t a, mve_pred16_t p)
+ **	...
+ **	vpst(?:	@.*|)
+ **	...
+-**	vbict.i16	q[0-9]+, #[0-9]+(?:	@.*|)
++**	vbict.i16	q[0-9]+, [0-9]+(?:	@.*|)
+ **	...
+ */
+ uint16x8_t
+diff --git a/gcc/testsuite/gcc.target/arm/mve/intrinsics/vbicq_n_s16.c b/gcc/testsuite/gcc.target/arm/mve/intrinsics/vbicq_n_s16.c
+index 8726b2c57a40..939fffd7f723 100644
+--- a/gcc/testsuite/gcc.target/arm/mve/intrinsics/vbicq_n_s16.c
++++ b/gcc/testsuite/gcc.target/arm/mve/intrinsics/vbicq_n_s16.c
+@@ -12,7 +12,7 @@ extern "C" {
+ /*
+ **foo:
+ **	...
+-**	vbic.i16	q[0-9]+, #[0-9]+(?:	@.*|)
++**	vbic.i16	q[0-9]+, [0-9]+(?:	@.*|)
+ **	...
+ */
+ int16x8_t
+@@ -25,7 +25,7 @@ foo (int16x8_t a)
+ /*
+ **foo1:
+ **	...
+-**	vbic.i16	q[0-9]+, #[0-9]+(?:	@.*|)
++**	vbic.i16	q[0-9]+, [0-9]+(?:	@.*|)
+ **	...
+ */
+ int16x8_t
+diff --git a/gcc/testsuite/gcc.target/arm/mve/intrinsics/vbicq_n_u16.c b/gcc/testsuite/gcc.target/arm/mve/intrinsics/vbicq_n_u16.c
+index 1ad03b9d17f9..a33c813ae1dd 100644
+--- a/gcc/testsuite/gcc.target/arm/mve/intrinsics/vbicq_n_u16.c
++++ b/gcc/testsuite/gcc.target/arm/mve/intrinsics/vbicq_n_u16.c
+@@ -12,7 +12,7 @@ extern "C" {
+ /*
+ **foo:
+ **	...
+-**	vbic.i16	q[0-9]+, #[0-9]+(?:	@.*|)
++**	vbic.i16	q[0-9]+, [0-9]+(?:	@.*|)
+ **	...
+ */
+ uint16x8_t
+@@ -25,7 +25,7 @@ foo (uint16x8_t a)
+ /*
+ **foo1:
+ **	...
+-**	vbic.i16	q[0-9]+, #[0-9]+(?:	@.*|)
++**	vbic.i16	q[0-9]+, [0-9]+(?:	@.*|)
+ **	...
+ */
+ uint16x8_t
+diff --git a/gcc/testsuite/gcc.target/arm/mve/intrinsics/vmvnq_m_n_s16.c b/gcc/testsuite/gcc.target/arm/mve/intrinsics/vmvnq_m_n_s16.c
+index 9d4804a0057f..77b778601dd1 100644
+--- a/gcc/testsuite/gcc.target/arm/mve/intrinsics/vmvnq_m_n_s16.c
++++ b/gcc/testsuite/gcc.target/arm/mve/intrinsics/vmvnq_m_n_s16.c
+@@ -16,7 +16,7 @@ extern "C" {
+ **	...
+ **	vpst(?:	@.*|)
+ **	...
+-**	vmvnt.i16	q[0-9]+, #[0-9]+(?:	@.*|)
++**	vmvnt.i16	q[0-9]+, [0-9]+(?:	@.*|)
+ **	...
+ */
+ int16x8_t
+@@ -33,7 +33,7 @@ foo (int16x8_t inactive, mve_pred16_t p)
+ **	...
+ **	vpst(?:	@.*|)
+ **	...
+-**	vmvnt.i16	q[0-9]+, #[0-9]+(?:	@.*|)
++**	vmvnt.i16	q[0-9]+, [0-9]+(?:	@.*|)
+ **	...
+ */
+ int16x8_t
+diff --git a/gcc/testsuite/gcc.target/arm/mve/intrinsics/vmvnq_m_n_u16.c b/gcc/testsuite/gcc.target/arm/mve/intrinsics/vmvnq_m_n_u16.c
+index 7b0b5a9ef835..7dde0c7bcec4 100644
+--- a/gcc/testsuite/gcc.target/arm/mve/intrinsics/vmvnq_m_n_u16.c
++++ b/gcc/testsuite/gcc.target/arm/mve/intrinsics/vmvnq_m_n_u16.c
+@@ -16,7 +16,7 @@ extern "C" {
+ **	...
+ **	vpst(?:	@.*|)
+ **	...
+-**	vmvnt.i16	q[0-9]+, #[0-9]+(?:	@.*|)
++**	vmvnt.i16	q[0-9]+, [0-9]+(?:	@.*|)
+ **	...
+ */
+ uint16x8_t
+@@ -33,7 +33,7 @@ foo (uint16x8_t inactive, mve_pred16_t p)
+ **	...
+ **	vpst(?:	@.*|)
+ **	...
+-**	vmvnt.i16	q[0-9]+, #[0-9]+(?:	@.*|)
++**	vmvnt.i16	q[0-9]+, [0-9]+(?:	@.*|)
+ **	...
+ */
+ uint16x8_t
+diff --git a/gcc/testsuite/gcc.target/arm/mve/intrinsics/vmvnq_n_s16.c b/gcc/testsuite/gcc.target/arm/mve/intrinsics/vmvnq_n_s16.c
+index 975639334d52..ccfa7ebbbcb2 100644
+--- a/gcc/testsuite/gcc.target/arm/mve/intrinsics/vmvnq_n_s16.c
++++ b/gcc/testsuite/gcc.target/arm/mve/intrinsics/vmvnq_n_s16.c
+@@ -12,7 +12,7 @@ extern "C" {
+ /*
+ **foo:
+ **	...
+-**	vmvn.i16	q[0-9]+, #[0-9]+(?:	@.*|)
++**	vmvn.i16	q[0-9]+, [0-9]+(?:	@.*|)
+ **	...
+ */
+ int16x8_t
+diff --git a/gcc/testsuite/gcc.target/arm/mve/intrinsics/vmvnq_n_u16.c b/gcc/testsuite/gcc.target/arm/mve/intrinsics/vmvnq_n_u16.c
+index 84e158ade937..3b8d876cd478 100644
+--- a/gcc/testsuite/gcc.target/arm/mve/intrinsics/vmvnq_n_u16.c
++++ b/gcc/testsuite/gcc.target/arm/mve/intrinsics/vmvnq_n_u16.c
+@@ -12,7 +12,7 @@ extern "C" {
+ /*
+ **foo:
+ **	...
+-**	vmvn.i16	q[0-9]+, #[0-9]+(?:	@.*|)
++**	vmvn.i16	q[0-9]+, [0-9]+(?:	@.*|)
+ **	...
+ */
+ uint16x8_t
+diff --git a/gcc/testsuite/gcc.target/arm/mve/intrinsics/vmvnq_x_n_s16.c b/gcc/testsuite/gcc.target/arm/mve/intrinsics/vmvnq_x_n_s16.c
+index a4d575e4aba2..26d03e645528 100644
+--- a/gcc/testsuite/gcc.target/arm/mve/intrinsics/vmvnq_x_n_s16.c
++++ b/gcc/testsuite/gcc.target/arm/mve/intrinsics/vmvnq_x_n_s16.c
+@@ -16,7 +16,7 @@ extern "C" {
+ **	...
+ **	vpst(?:	@.*|)
+ **	...
+-**	vmvnt.i16	q[0-9]+, #[0-9]+(?:	@.*|)
++**	vmvnt.i16	q[0-9]+, [0-9]+(?:	@.*|)
+ **	...
+ */
+ int16x8_t
+diff --git a/gcc/testsuite/gcc.target/arm/mve/intrinsics/vmvnq_x_n_u16.c b/gcc/testsuite/gcc.target/arm/mve/intrinsics/vmvnq_x_n_u16.c
+index 9fbf2b978ac5..176b03c068af 100644
+--- a/gcc/testsuite/gcc.target/arm/mve/intrinsics/vmvnq_x_n_u16.c
++++ b/gcc/testsuite/gcc.target/arm/mve/intrinsics/vmvnq_x_n_u16.c
+@@ -16,7 +16,7 @@ extern "C" {
+ **	...
+ **	vpst(?:	@.*|)
+ **	...
+-**	vmvnt.i16	q[0-9]+, #[0-9]+(?:	@.*|)
++**	vmvnt.i16	q[0-9]+, [0-9]+(?:	@.*|)
+ **	...
+ */
+ uint16x8_t
+diff --git a/gcc/testsuite/gcc.target/arm/mve/intrinsics/vorrq_m_n_s16.c b/gcc/testsuite/gcc.target/arm/mve/intrinsics/vorrq_m_n_s16.c
+index b591bd6fc119..f0f2ce47b3a9 100644
+--- a/gcc/testsuite/gcc.target/arm/mve/intrinsics/vorrq_m_n_s16.c
++++ b/gcc/testsuite/gcc.target/arm/mve/intrinsics/vorrq_m_n_s16.c
+@@ -16,7 +16,7 @@ extern "C" {
+ **	...
+ **	vpst(?:	@.*|)
+ **	...
+-**	vorrt.i16	q[0-9]+, #[0-9]+(?:	@.*|)
++**	vorrt.i16	q[0-9]+, [0-9]+(?:	@.*|)
+ **	...
+ */
+ int16x8_t
+@@ -33,7 +33,7 @@ foo (int16x8_t a, mve_pred16_t p)
+ **	...
+ **	vpst(?:	@.*|)
+ **	...
+-**	vorrt.i16	q[0-9]+, #[0-9]+(?:	@.*|)
++**	vorrt.i16	q[0-9]+, [0-9]+(?:	@.*|)
+ **	...
+ */
+ int16x8_t
+diff --git a/gcc/testsuite/gcc.target/arm/mve/intrinsics/vorrq_m_n_u16.c b/gcc/testsuite/gcc.target/arm/mve/intrinsics/vorrq_m_n_u16.c
+index 9e7788484ad1..92644b651486 100644
+--- a/gcc/testsuite/gcc.target/arm/mve/intrinsics/vorrq_m_n_u16.c
++++ b/gcc/testsuite/gcc.target/arm/mve/intrinsics/vorrq_m_n_u16.c
+@@ -16,7 +16,7 @@ extern "C" {
+ **	...
+ **	vpst(?:	@.*|)
+ **	...
+-**	vorrt.i16	q[0-9]+, #[0-9]+(?:	@.*|)
++**	vorrt.i16	q[0-9]+, [0-9]+(?:	@.*|)
+ **	...
+ */
+ uint16x8_t
+@@ -33,7 +33,7 @@ foo (uint16x8_t a, mve_pred16_t p)
+ **	...
+ **	vpst(?:	@.*|)
+ **	...
+-**	vorrt.i16	q[0-9]+, #[0-9]+(?:	@.*|)
++**	vorrt.i16	q[0-9]+, [0-9]+(?:	@.*|)
+ **	...
+ */
+ uint16x8_t
+diff --git a/gcc/testsuite/gcc.target/arm/mve/intrinsics/vorrq_n_s16.c b/gcc/testsuite/gcc.target/arm/mve/intrinsics/vorrq_n_s16.c
+index b95418d96688..670e753562f4 100644
+--- a/gcc/testsuite/gcc.target/arm/mve/intrinsics/vorrq_n_s16.c
++++ b/gcc/testsuite/gcc.target/arm/mve/intrinsics/vorrq_n_s16.c
+@@ -12,7 +12,7 @@ extern "C" {
+ /*
+ **foo:
+ **	...
+-**	vorr.i16	q[0-9]+, #[0-9]+(?:	@.*|)
++**	vorr.i16	q[0-9]+, [0-9]+(?:	@.*|)
+ **	...
+ */
+ int16x8_t
+@@ -25,7 +25,7 @@ foo (int16x8_t a)
+ /*
+ **foo1:
+ **	...
+-**	vorr.i16	q[0-9]+, #[0-9]+(?:	@.*|)
++**	vorr.i16	q[0-9]+, [0-9]+(?:	@.*|)
+ **	...
+ */
+ int16x8_t
+diff --git a/gcc/testsuite/gcc.target/arm/mve/intrinsics/vorrq_n_u16.c b/gcc/testsuite/gcc.target/arm/mve/intrinsics/vorrq_n_u16.c
+index 1f131501aec5..fd3d98ea86fc 100644
+--- a/gcc/testsuite/gcc.target/arm/mve/intrinsics/vorrq_n_u16.c
++++ b/gcc/testsuite/gcc.target/arm/mve/intrinsics/vorrq_n_u16.c
+@@ -12,7 +12,7 @@ extern "C" {
+ /*
+ **foo:
+ **	...
+-**	vorr.i16	q[0-9]+, #[0-9]+(?:	@.*|)
++**	vorr.i16	q[0-9]+, [0-9]+(?:	@.*|)
+ **	...
+ */
+ uint16x8_t
+@@ -25,7 +25,7 @@ foo (uint16x8_t a)
+ /*
+ **foo1:
+ **	...
+-**	vorr.i16	q[0-9]+, #[0-9]+(?:	@.*|)
++**	vorr.i16	q[0-9]+, [0-9]+(?:	@.*|)
+ **	...
+ */
+ uint16x8_t
+-- 
+2.43.7
+
+

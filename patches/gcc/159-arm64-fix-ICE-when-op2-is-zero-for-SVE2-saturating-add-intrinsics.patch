@@ -1,0 +1,136 @@
+From 7bfcc84bc70266bc97f4168b4c3526a198e50261 Mon Sep 17 00:00:00 2001
+From: Jennifer Schmitz <jschmitz@nvidia.com>
+Date: Thu, 21 Aug 2025 10:01:49 -0700
+Subject: [PATCH] aarch64: Fix ICE when op2 is zero for SVE2 saturating add
+ intrinsics.
+
+When op2 in SVE2 saturating add intrinsics (svuqadd, svsqadd) is a zero
+vector and predication is _z, an ICE in vregs occurs, e.g. for
+
+svuint8_t foo (svbool_t pg, svuint8_t op1)
+{
+    return svsqadd_u8_z (pg, op1, svdup_s8 (0));
+}
+
+The insn failed to match the pattern (aarch64-sve2.md):
+
+;; Predicated binary operations with no reverse form, merging with zero.
+;; At present we don't generate these patterns via a cond_* optab,
+;; so there's no correctness requirement to handle merging with an
+;; independent value.
+(define_insn_and_rewrite "*cond_<sve_int_op><mode>_z"
+  [(set (match_operand:SVE_FULL_I 0 "register_operand")
+	(unspec:SVE_FULL_I
+	  [(match_operand:<VPRED> 1 "register_operand")
+	   (unspec:SVE_FULL_I
+	     [(match_operand 5)
+	      (unspec:SVE_FULL_I
+		[(match_operand:SVE_FULL_I 2 "register_operand")
+		 (match_operand:SVE_FULL_I 3 "register_operand")]
+		SVE2_COND_INT_BINARY_NOREV)]
+	     UNSPEC_PRED_X)
+	   (match_operand:SVE_FULL_I 4 "aarch64_simd_imm_zero")]
+	  UNSPEC_SEL))]
+  "TARGET_SVE2"
+  {@ [ cons: =0 , 1   , 2 , 3  ]
+     [ &w       , Upl , 0 , w  ] movprfx\t%0.<Vetype>, %1/z, %0.<Vetype>\;<sve_int_op>\t%0.<Vetype>, %1/m, %0.<Vetype>, %3.<Vetype>
+     [ &w       , Upl , w , w  ] movprfx\t%0.<Vetype>, %1/z, %2.<Vetype>\;<sve_int_op>\t%0.<Vetype>, %1/m, %0.<Vetype>, %3.<Vetype>
+  }
+  "&& !CONSTANT_P (operands[5])"
+  {
+    operands[5] = CONSTM1_RTX (<VPRED>mode);
+  }
+  [(set_attr "movprfx" "yes")]
+)
+
+because operands[3] and operands[4] were both expanded into the same register
+operand containing a zero vector by define_expand "@cond_<sve_int_op><mode>".
+
+This patch fixes the ICE by making a case distinction in
+function_expander::use_cond_insn that uses add_fixed_operand if
+fallback_arg == CONST0_RTX (mode), and otherwise add_input_operand (which was
+previously the default and allowed the expansion of the zero-vector
+fallback_arg to a register operand).
+
+The patch was bootstrapped and tested on aarch64-linux-gnu, no regression.
+OK for trunk?
+
+Alex Coplan pointed out in the bugzilla ticket that this ICE goes back
+to GCC 10. Shall we backport?
+
+Signed-off-by: Jennifer Schmitz <jschmitz@nvidia.com>
+Co-authored by: Richard Sandiford <rdsandiford@googlemail.com>
+
+gcc/
+	PR target/121599
+	* config/aarch64/aarch64-sve-builtins.cc
+	(function_expander::use_cond_insn): Use add_fixed_operand if
+	fallback_arg == CONST0_RTX (mode).
+
+gcc/testsuite/
+	PR target/121599
+	* gcc.target/aarch64/sve2/pr121599.c: New test.
+---
+ gcc/config/aarch64/aarch64-sve-builtins.cc    |  6 +++-
+ .../gcc.target/aarch64/sve2/pr121599.c        | 31 +++++++++++++++++++
+ 2 files changed, 36 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/gcc.target/aarch64/sve2/pr121599.c
+
+diff --git a/gcc/config/aarch64/aarch64-sve-builtins.cc b/gcc/config/aarch64/aarch64-sve-builtins.cc
+index 3facc42843e3..24feb7ce1578 100644
+--- a/gcc/config/aarch64/aarch64-sve-builtins.cc
++++ b/gcc/config/aarch64/aarch64-sve-builtins.cc
+@@ -4352,7 +4352,11 @@ function_expander::use_cond_insn (insn_code icode, unsigned int merge_argno)
+   add_input_operand (icode, pred);
+   for (unsigned int i = 0; i < nops; ++i)
+     add_input_operand (icode, args[opno + i]);
+-  add_input_operand (icode, fallback_arg);
++  if (fallback_arg == CONST0_RTX (mode)
++      && insn_operand_matches (icode, m_ops.length (), fallback_arg))
++    add_fixed_operand (fallback_arg);
++  else
++    add_input_operand (icode, fallback_arg);
+   return generate_insn (icode);
+ }
+ 
+diff --git a/gcc/testsuite/gcc.target/aarch64/sve2/pr121599.c b/gcc/testsuite/gcc.target/aarch64/sve2/pr121599.c
+new file mode 100644
+index 000000000000..90c5ac97e4f8
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/aarch64/sve2/pr121599.c
+@@ -0,0 +1,31 @@
++/* PR target/121599.  */
++/* { dg-do compile } */
++/* { dg-options "-O2" } */
++/* { dg-final { check-function-bodies "**" "" "" } } */
++
++#include <arm_sve.h>
++
++/*
++** foo:
++**	movi	d([0-9]+), #0
++**	movprfx	z0\.b, p0/z, z0\.b
++**	usqadd	z0\.b, p0/m, z0\.b, z\1\.b
++**	ret
++*/
++svuint8_t foo (svbool_t pg, svuint8_t op1)
++{
++    return svsqadd_u8_z (pg, op1, svdup_s8 (0));
++}
++
++/*
++** bar:
++**	movi	d([0-9]+), #0
++**	movprfx	z0\.b, p0/z, z0\.b
++**	suqadd	z0\.b, p0/m, z0\.b, z\1\.b
++**	ret
++*/
++svint8_t bar (svbool_t pg, svint8_t op1)
++{
++    return svuqadd_n_s8_z (pg, op1, 0);
++}
++
+-- 
+2.43.7
+
+

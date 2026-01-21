@@ -1,0 +1,1068 @@
+From 594f4fbb758187a1e0dd92a1151dc6e2d718bbb6 Mon Sep 17 00:00:00 2001
+From: "Hu, Lin1" <lin1.hu@intel.com>
+Date: Tue, 28 Oct 2025 16:11:47 +0800
+Subject: [PATCH] i386: Support C++ template parameters in AMX intrinsics
+ [PR122446]
+
+The AMX intrinsics previously used string concatenation with the '#'
+operator to construct register names, which prevented their use with
+C++ template non-type parameters. This patch converts all AMX intrinsics
+to use inline assembly constraints with the %c format specifier.
+
+And Intel style registers also have % prefix, update Intel syntax to use plain
+register names without % preifx.
+
+gcc/ChangeLog:
+
+	PR target/122446
+	* config/i386/amxavx512intrin.h (_tile_cvtrowps2bf16hi_internal):
+	Input register name by inline asm %c[...], and remove %% before tmm
+	from intel side.
+	(_tile_cvtrowps2bf16li_internal): Ditto.
+	* config/i386/amxbf16intrin.h (_tile_dpbf16ps_internal): Ditto
+	* config/i386/amxcomplexintrin.h (_tile_cmmimfp16ps_internal): Ditto
+	(_tile_cmmrlfp16ps_internal): Ditto
+	(_tile_cmmimfp16ps): Ditto
+	(_tile_cmmrlfp16ps): Ditto
+	* config/i386/amxfp16intrin.h (_tile_dpfp16ps_internal): Ditto
+	(_tile_dpfp16ps): Ditto
+	* config/i386/amxfp8intrin.h (_tile_dpbf8ps_internal): Ditto
+	(_tile_dpbhf8ps_internal): Ditto
+	(_tile_dphbf8ps_internal): Ditto
+	(_tile_dphf8ps_internal): Ditto
+	(_tile_dpbf8ps): Ditto
+	(_tile_dpbhf8ps): Ditto
+	(_tile_dphbf8ps): Ditto
+	(_tile_dphf8ps): Ditto
+	* config/i386/amxint8intrin.h (_tile_int8_dp_internal): Ditto
+	* config/i386/amxmovrsintrin.h (_tile_loaddrs_internal): Ditto
+	(_tile_loaddrst1_internal): Ditto
+	(_tile_loaddrs): Ditto
+	(_tile_loaddrst1): Ditto
+	* config/i386/amxtf32intrin.h (_tile_mmultf32ps_internal): Ditto
+	* config/i386/amxtileintrin.h (_tile_loadd): Ditto
+	(_tile_loadd_internal): Ditto
+	(_tile_stream_loadd): Ditto
+	(_tile_stream_loadd_internal): Ditto
+	(_tile_stored): Ditto
+	(_tile_stored_internal): Ditto
+	(_tile_zero): Ditto
+	(_tile_zero_internal): Ditto
+
+gcc/testsuite/ChangeLog:
+
+	PR target/122446
+	* gcc.target/i386/amxbf16-asmintel-1.c: Modify dg-final to check intel
+	form.
+	* gcc.target/i386/amxcomplex-asmintel-1.c: Ditto.
+	* gcc.target/i386/amxfp16-asmintel-1.c: Ditto.
+	* gcc.target/i386/amxfp8-asmintel-1.c: Ditto.
+	* gcc.target/i386/amxint8-asmintel-1.c: Ditto.
+	* gcc.target/i386/amxmovrs-asmintel-1.c: Ditto.
+	* gcc.target/i386/amxtf32-asmintel-1.c: Ditto.
+	* gcc.target/i386/amxtile-asmintel-1.c: Ditto.
+	* g++.target/i386/pr122446-1.C: New test.
+	* g++.target/i386/pr122446-amxavx512.C: Ditto.
+	* g++.target/i386/pr122446-amxbf16.C: Ditto.
+	* g++.target/i386/pr122446-amxcomplex.C: Ditto.
+	* g++.target/i386/pr122446-amxfp16.C: Ditto.
+	* g++.target/i386/pr122446-amxfp8.C: Ditto.
+	* g++.target/i386/pr122446-amxint8.C: Ditto.
+	* g++.target/i386/pr122446-amxmovrs.C: Ditto.
+	* g++.target/i386/pr122446-amxtf32.C: Ditto.
+	* g++.target/i386/pr122446-amxtile.C: Ditto.
+
+(cherry picked from commit 47fe2348131d3450d8970599490bf77eef4ff34c)
+---
+ gcc/config/i386/amxavx512intrin.h             |  57 ++++++----
+ gcc/config/i386/amxbf16intrin.h               |   6 +-
+ gcc/config/i386/amxcomplexintrin.h            |  18 +--
+ gcc/config/i386/amxfp16intrin.h               |   8 +-
+ gcc/config/i386/amxfp8intrin.h                |  38 ++++---
+ gcc/config/i386/amxint8intrin.h               |   4 +-
+ gcc/config/i386/amxmovrsintrin.h              |  30 ++---
+ gcc/config/i386/amxtf32intrin.h               |   6 +-
+ gcc/config/i386/amxtileintrin.h               |  20 ++--
+ gcc/testsuite/g++.target/i386/pr122446-1.C    |  17 +++
+ .../g++.target/i386/pr122446-amxavx512.C      | 104 ++++++++++++++++++
+ .../g++.target/i386/pr122446-amxbf16.C        |  16 +++
+ .../g++.target/i386/pr122446-amxcomplex.C     |  24 ++++
+ .../g++.target/i386/pr122446-amxfp16.C        |  16 +++
+ .../g++.target/i386/pr122446-amxfp8.C         |  40 +++++++
+ .../g++.target/i386/pr122446-amxint8.C        |  40 +++++++
+ .../g++.target/i386/pr122446-amxmovrs.C       |  31 ++++++
+ .../g++.target/i386/pr122446-amxtf32.C        |  16 +++
+ .../g++.target/i386/pr122446-amxtile.C        |  50 +++++++++
+ .../gcc.target/i386/amxbf16-asmintel-1.c      |   2 +-
+ .../gcc.target/i386/amxcomplex-asmintel-1.c   |   4 +-
+ .../gcc.target/i386/amxfp16-asmintel-1.c      |   2 +-
+ .../gcc.target/i386/amxfp8-asmintel-1.c       |   8 +-
+ .../gcc.target/i386/amxint8-asmintel-1.c      |   8 +-
+ .../gcc.target/i386/amxmovrs-asmintel-1.c     |  12 +-
+ .../gcc.target/i386/amxtf32-asmintel-1.c      |   2 +-
+ .../gcc.target/i386/amxtile-asmintel-1.c      |   8 +-
+ 27 files changed, 485 insertions(+), 102 deletions(-)
+ create mode 100644 gcc/testsuite/g++.target/i386/pr122446-1.C
+ create mode 100644 gcc/testsuite/g++.target/i386/pr122446-amxavx512.C
+ create mode 100644 gcc/testsuite/g++.target/i386/pr122446-amxbf16.C
+ create mode 100644 gcc/testsuite/g++.target/i386/pr122446-amxcomplex.C
+ create mode 100644 gcc/testsuite/g++.target/i386/pr122446-amxfp16.C
+ create mode 100644 gcc/testsuite/g++.target/i386/pr122446-amxfp8.C
+ create mode 100644 gcc/testsuite/g++.target/i386/pr122446-amxint8.C
+ create mode 100644 gcc/testsuite/g++.target/i386/pr122446-amxmovrs.C
+ create mode 100644 gcc/testsuite/g++.target/i386/pr122446-amxtf32.C
+ create mode 100644 gcc/testsuite/g++.target/i386/pr122446-amxtile.C
+
+diff --git a/gcc/config/i386/amxavx512intrin.h b/gcc/config/i386/amxavx512intrin.h
+index ab5362571d1e..1e2846075729 100644
+--- a/gcc/config/i386/amxavx512intrin.h
++++ b/gcc/config/i386/amxavx512intrin.h
+@@ -39,8 +39,9 @@
+ ({									\
+   __m512 dst;								\
+   __asm__ volatile							\
+-  ("{tcvtrowd2ps\t%1, %%tmm"#src", %0|tcvtrowd2ps\t%0, %%tmm"#src", %1}"	\
+-   : "=v" (dst) : "r" ((unsigned) (A)));				\
++  ("{tcvtrowd2ps\t%1, %%tmm%c[_src], %0					\
++    |tcvtrowd2ps\t%0, tmm%c[_src], %1}"					\
++   : "=v" (dst) : "r" ((unsigned) (A)), [_src]"i"(src));		\
+   dst;									\
+ })
+ 
+@@ -48,8 +49,9 @@
+ ({									\
+   __m512 dst;								\
+   __asm__ volatile							\
+-  ("{tcvtrowd2ps\t$"#imm", %%tmm"#src", %0|tcvtrowd2ps\t%0, %%tmm"#src", "#imm"}"	\
+-   : "=v" (dst) :);							\
++  ("{tcvtrowd2ps\t%[_imm], %%tmm%c[_src], %0				\
++    |tcvtrowd2ps\t%0, tmm%c[_src], %[_imm]}"				\
++   : "=v" (dst) : [_src]"i"(src), [_imm]"i"(imm));			\
+   dst;									\
+ })
+ 
+@@ -57,8 +59,9 @@
+ ({									\
+   __m512bh dst;								\
+   __asm__ volatile							\
+-  ("{tcvtrowps2bf16h\t%1, %%tmm"#src", %0|tcvtrowps2bf16h\t%0, %%tmm"#src", %1}"	\
+-   : "=v" (dst) : "r" ((unsigned) (A)));				\
++  ("{tcvtrowps2bf16h\t%1, %%tmm%c[_src], %0				\
++    |tcvtrowps2bf16h\t%0, tmm%c[_src], %1}"				\
++    : "=v" (dst) : "r" ((unsigned) (A)), [_src]"i"(src));		\
+   dst;									\
+ })
+ 
+@@ -66,8 +69,9 @@
+ ({									\
+   __m512bh dst;								\
+   __asm__ volatile							\
+-  ("{tcvtrowps2bf16h\t$"#imm", %%tmm"#src", %0|tcvtrowps2bf16h\t%0, %%tmm"#src", "#imm"}"	\
+-   : "=v" (dst) :);							\
++  ("{tcvtrowps2bf16h\t%[_imm], %%tmm%c[_src], %0			\
++    |tcvtrowps2bf16h\t%0, tmm%c[_src], %[_imm]}"			\
++    : "=v" (dst) : [_src]"i"(src), [_imm]"i"(imm));			\
+   dst;									\
+ })
+ 
+@@ -75,8 +79,9 @@
+ ({									\
+   __m512bh dst;								\
+   __asm__ volatile							\
+-  ("{tcvtrowps2bf16l\t%1, %%tmm"#src", %0|tcvtrowps2bf16l\t%0, %%tmm"#src", %1}"	\
+-   : "=v" (dst) : "r" ((unsigned) (A)));				\
++  ("{tcvtrowps2bf16l\t%1, %%tmm%c[_src], %0				\
++    |tcvtrowps2bf16l\t%0, tmm%c[_src], %1}"				\
++    : "=v" (dst) : "r" ((unsigned) (A)), [_src]"i"(src));		\
+   dst;									\
+ })
+ 
+@@ -84,8 +89,9 @@
+ ({									\
+   __m512bh dst;								\
+   __asm__ volatile							\
+-  ("{tcvtrowps2bf16l\t$"#imm", %%tmm"#src", %0|tcvtrowps2bf16l\t%0, %%tmm"#src", "#imm"}"	\
+-   : "=v" (dst) :);							\
++  ("{tcvtrowps2bf16l\t%[_imm], %%tmm%c[_src], %0			\
++    |tcvtrowps2bf16l\t%0, tmm%c[_src], "#imm"}"				\
++    : "=v" (dst) : [_src]"i"(src), [_imm]"i"(imm));			\
+   dst;									\
+ })
+ 
+@@ -93,8 +99,8 @@
+ ({									\
+   __m512h dst;								\
+   __asm__ volatile							\
+-  ("{tcvtrowps2phh\t%1, %%tmm"#src", %0|tcvtrowps2phh\t%0, %%tmm"#src", %1}"	\
+-   : "=v" (dst) : "r" ((unsigned) (A)));				\
++  ("{tcvtrowps2phh\t%1, %%tmm%c[_src], %0|tcvtrowps2phh\t%0, tmm%c[_src], %1}"	\
++    : "=v" (dst) : "r" ((unsigned) (A)), [_src]"i"(src));		\
+   dst;									\
+ })
+ 
+@@ -102,8 +108,9 @@
+ ({									\
+   __m512h dst;								\
+   __asm__ volatile							\
+-  ("{tcvtrowps2phh\t$"#imm", %%tmm"#src", %0|tcvtrowps2phh\t%0, %%tmm"#src", "#imm"}"	\
+-   : "=v" (dst) :);							\
++  ("{tcvtrowps2phh\t%[_imm], %%tmm%c[_src], %0				\
++    |tcvtrowps2phh\t%0, tmm%c[_src], "#imm"}"				\
++    : "=v" (dst) : [_src]"i"(src), [_imm]"i"(imm));		      	\
+   dst;									\
+ })
+ 
+@@ -111,8 +118,8 @@
+ ({									\
+   __m512h dst;								\
+   __asm__ volatile							\
+-  ("{tcvtrowps2phl\t%1, %%tmm"#src", %0|tcvtrowps2phl\t%0, %%tmm"#src", %1}"	\
+-   : "=v" (dst) : "r" ((unsigned) (A)));				\
++  ("{tcvtrowps2phl\t%1, %%tmm%c[_src], %0|tcvtrowps2phl\t%0, tmm%c[_src], %1}"	\
++    : "=v" (dst) : "r" ((unsigned) (A)), [_src]"i"(src));		\
+   dst;									\
+ })
+ 
+@@ -120,8 +127,9 @@
+ ({									\
+   __m512h dst;								\
+   __asm__ volatile							\
+-  ("{tcvtrowps2phl\t$"#imm", %%tmm"#src", %0|tcvtrowps2phl\t%0, %%tmm"#src", "#imm"}"	\
+-   : "=v" (dst) :);							\
++  ("{tcvtrowps2phl\t%[_imm], %%tmm%c[_src], %0				\
++    |tcvtrowps2phl\t%0, tmm%c[_src], "#imm"}"				\
++    : "=v" (dst) : [_src]"i"(src), [_imm]"i"(imm));			\
+   dst;									\
+ })
+ 
+@@ -129,8 +137,8 @@
+ ({									\
+   __m512 dst;								\
+   __asm__ volatile							\
+-  ("{tilemovrow\t%1, %%tmm"#src", %0|tilemovrow\t%0, %%tmm"#src", %1}"	\
+-   : "=v" (dst) : "r" ((unsigned) (A)));				\
++  ("{tilemovrow\t%1, %%tmm%c[_src], %0|tilemovrow\t%0, tmm%c[_src], %1}"  \
++    : "=v" (dst) : "r" ((unsigned) (A)), [_src]"i"(src));		\
+   dst;									\
+ })
+ 
+@@ -138,8 +146,9 @@
+ ({									\
+   __m512 dst;								\
+   __asm__ volatile							\
+-  ("{tilemovrow\t$"#imm", %%tmm"#src", %0|tilemovrow\t%0, %%tmm"#src", "#imm"}"	\
+-   : "=v" (dst) :);							\
++  ("{tilemovrow\t%[_imm], %%tmm%c[_src], %0				\
++    |tilemovrow\t%0, tmm%c[_src], "#imm"}"				\
++    : "=v" (dst) : [_src]"i"(src), [_imm]"i"(imm));			\
+   dst;									\
+ })
+ 
+diff --git a/gcc/config/i386/amxbf16intrin.h b/gcc/config/i386/amxbf16intrin.h
+index 9f4a9d1fa3ef..b2792bb53e34 100644
+--- a/gcc/config/i386/amxbf16intrin.h
++++ b/gcc/config/i386/amxbf16intrin.h
+@@ -36,8 +36,10 @@
+ 
+ #if defined(__x86_64__)
+ #define _tile_dpbf16ps_internal(dst,src1,src2)					\
+-  __asm__ volatile\
+-  ("{tdpbf16ps\t%%tmm"#src2", %%tmm"#src1", %%tmm"#dst"|tdpbf16ps\t%%tmm"#dst", %%tmm"#src1", %%tmm"#src2"}" ::)
++  __asm__ volatile								\
++  ("{tdpbf16ps\t%%tmm%c[_src2], %%tmm%c[_src1], %%tmm%c[_dst]			\
++    |tdpbf16ps\ttmm%c[_dst], tmm%c[_src1], tmm%c[_src2]}"			\
++    :: [_dst]"i"(dst), [_src1]"i"(src1), [_src2]"i"(src2))
+ 
+ #define _tile_dpbf16ps(dst,src1,src2)					\
+   _tile_dpbf16ps_internal (dst, src1, src2)
+diff --git a/gcc/config/i386/amxcomplexintrin.h b/gcc/config/i386/amxcomplexintrin.h
+index fc5964f4af5c..55b7d532557d 100644
+--- a/gcc/config/i386/amxcomplexintrin.h
++++ b/gcc/config/i386/amxcomplexintrin.h
+@@ -35,13 +35,17 @@
+ #endif /* __AMX_COMPLEX__ */
+ 
+ #if defined(__x86_64__)
+-#define _tile_cmmimfp16ps_internal(src1_dst,src2,src3)				\
+-  __asm__ volatile\
+-  ("{tcmmimfp16ps\t%%tmm"#src3", %%tmm"#src2", %%tmm"#src1_dst"|tcmmimfp16ps\t%%tmm"#src1_dst", %%tmm"#src2", %%tmm"#src3"}" ::)
+-
+-#define _tile_cmmrlfp16ps_internal(src1_dst,src2,src3)				\
+-  __asm__ volatile\
+-  ("{tcmmrlfp16ps\t%%tmm"#src3", %%tmm"#src2", %%tmm"#src1_dst"|tcmmrlfp16ps\t%%tmm"#src1_dst", %%tmm"#src2", %%tmm"#src3"}" ::)
++#define _tile_cmmimfp16ps_internal(src1_dst,src2,src3)			  \
++  __asm__ volatile							  \
++  ("{tcmmimfp16ps\t%%tmm%c[_src3], %%tmm%c[_src2], %%tmm%c[_src1_dst]	  \
++    |tcmmimfp16ps\ttmm%c[_src1_dst], tmm%c[_src2], tmm%c[_src3]}"	  \
++    :: [_src1_dst]"i"(src1_dst), [_src2]"i"(src2), [_src3]"i"(src3))
++
++#define _tile_cmmrlfp16ps_internal(src1_dst,src2,src3)			  \
++  __asm__ volatile							  \
++  ("{tcmmrlfp16ps\t%%tmm%c[_src3], %%tmm%c[_src2], %%tmm%c[_src1_dst]	  \
++    |tcmmrlfp16ps\ttmm%c[_src1_dst], tmm%c[_src2], tmm%c[_src3]}"	  \
++    :: [_src1_dst]"i"(src1_dst), [_src2]"i"(src2), [_src3]"i"(src3))
+ 
+ #define _tile_cmmimfp16ps(src1_dst,src2,src3)					\
+   _tile_cmmimfp16ps_internal (src1_dst, src2, src3)
+diff --git a/gcc/config/i386/amxfp16intrin.h b/gcc/config/i386/amxfp16intrin.h
+index 02fd031cddd4..1e0ef278d60c 100644
+--- a/gcc/config/i386/amxfp16intrin.h
++++ b/gcc/config/i386/amxfp16intrin.h
+@@ -29,9 +29,11 @@
+ #define _AMXFP16INTRIN_H_INCLUDED
+ 
+ #if defined(__x86_64__)
+-#define _tile_dpfp16ps_internal(dst,src1,src2)			\
+-  __asm__ volatile \
+-  ("{tdpfp16ps\t%%tmm"#src2", %%tmm"#src1", %%tmm"#dst"|tdpfp16ps\t%%tmm"#dst", %%tmm"#src1", %%tmm"#src2"}" ::)
++#define _tile_dpfp16ps_internal(dst,src1,src2)				\
++  __asm__ volatile							\
++  ("{tdpfp16ps\t%%tmm%c[_src2], %%tmm%c[_src1], %%tmm%c[_dst]		\
++    |tdpfp16ps\ttmm%c[_dst], tmm%c[_src1], tmm%c[_src2]}"		\
++    :: [_dst]"i"(dst), [_src1]"i"(src1), [_src2]"i"(src2))
+ 
+ #define _tile_dpfp16ps(dst,src1,src2)				\
+   _tile_dpfp16ps_internal (dst,src1,src2)
+diff --git a/gcc/config/i386/amxfp8intrin.h b/gcc/config/i386/amxfp8intrin.h
+index 8952be96dec2..9467f53b1baf 100644
+--- a/gcc/config/i386/amxfp8intrin.h
++++ b/gcc/config/i386/amxfp8intrin.h
+@@ -29,21 +29,29 @@
+ #define _AMXFP8INTRIN_H_INCLUDED
+ 
+ #if defined(__x86_64__)
+-#define _tile_dpbf8ps_internal(dst,src1,src2)			\
+-  __asm__ volatile \
+-  ("{tdpbf8ps\t%%tmm"#src2", %%tmm"#src1", %%tmm"#dst"|tdpbf8ps\t%%tmm"#dst", %%tmm"#src1", %%tmm"#src2"}" ::)
+-
+-#define _tile_dpbhf8ps_internal(dst,src1,src2)			\
+-  __asm__ volatile \
+-  ("{tdpbhf8ps\t%%tmm"#src2", %%tmm"#src1", %%tmm"#dst"|tdpbhf8ps\t%%tmm"#dst", %%tmm"#src1", %%tmm"#src2"}" ::)
+-
+-#define _tile_dphbf8ps_internal(dst,src1,src2)			\
+-  __asm__ volatile \
+-  ("{tdphbf8ps\t%%tmm"#src2", %%tmm"#src1", %%tmm"#dst"|tdphbf8ps\t%%tmm"#dst", %%tmm"#src1", %%tmm"#src2"}" ::)
+-
+-#define _tile_dphf8ps_internal(dst,src1,src2)			\
+-  __asm__ volatile \
+-  ("{tdphf8ps\t%%tmm"#src2", %%tmm"#src1", %%tmm"#dst"|tdphf8ps\t%%tmm"#dst", %%tmm"#src1", %%tmm"#src2"}" ::)
++#define _tile_dpbf8ps_internal(dst,src1,src2)				\
++  __asm__ volatile							\
++  ("{tdpbf8ps\t%%tmm%c[_src2], %%tmm%c[_src1], %%tmm%c[_dst]		\
++    |tdpbf8ps\ttmm%c[_dst], tmm%c[_src1], tmm%c[_src2]}"		\
++    :: [_dst]"i"(dst), [_src1]"i"(src1), [_src2]"i"(src2))
++
++#define _tile_dpbhf8ps_internal(dst,src1,src2)				\
++  __asm__ volatile							\
++  ("{tdpbhf8ps\t%%tmm%c[_src2], %%tmm%c[_src1], %%tmm%c[_dst]		\
++    |tdpbhf8ps\ttmm%c[_dst], tmm%c[_src1], tmm%c[_src2]}"		\
++    :: [_dst]"i"(dst), [_src1]"i"(src1), [_src2]"i"(src2))
++
++#define _tile_dphbf8ps_internal(dst,src1,src2)				\
++  __asm__ volatile							\
++  ("{tdphbf8ps\t%%tmm%c[_src2], %%tmm%c[_src1], %%tmm%c[_dst]		\
++    |tdphbf8ps\ttmm%c[_dst], tmm%c[_src1], tmm%c[_src2]}"		\
++    :: [_dst]"i"(dst), [_src1]"i"(src1), [_src2]"i"(src2))
++
++#define _tile_dphf8ps_internal(dst,src1,src2)				\
++  __asm__ volatile							\
++  ("{tdphf8ps\t%%tmm%c[_src2], %%tmm%c[_src1], %%tmm%c[_dst]		\
++    |tdphf8ps\ttmm%c[_dst], tmm%c[_src1], tmm%c[_src2]}"		\
++    :: [_dst]"i"(dst), [_src1]"i"(src1), [_src2]"i"(src2))
+ 
+ #define _tile_dpbf8ps(dst,src1,src2)				\
+   _tile_dpbf8ps_internal (dst,src1,src2)
+diff --git a/gcc/config/i386/amxint8intrin.h b/gcc/config/i386/amxint8intrin.h
+index 332c8db91532..f7cb36cfce9f 100644
+--- a/gcc/config/i386/amxint8intrin.h
++++ b/gcc/config/i386/amxint8intrin.h
+@@ -37,7 +37,9 @@
+ #if defined(__x86_64__)
+ #define _tile_int8_dp_internal(name,dst,src1,src2)					\
+   __asm__ volatile							\
+-  ("{"#name"\t%%tmm"#src2", %%tmm"#src1", %%tmm"#dst"|"#name"\t%%tmm"#dst", %%tmm"#src1", %%tmm"#src2"}" ::)
++  ("{"#name"\t%%tmm%c[_src2], %%tmm%c[_src1], %%tmm%c[_dst]		\
++   |"#name"\ttmm%c[_dst], tmm%c[_src1], tmm%c[_src2]}"		\
++   ::[_dst]"i"(dst),[_src1]"i"(src1),[_src2]"i"(src2))
+ 
+ #define _tile_dpbssd(dst,src1,src2)					\
+   _tile_int8_dp_internal (tdpbssd, dst, src1, src2)
+diff --git a/gcc/config/i386/amxmovrsintrin.h b/gcc/config/i386/amxmovrsintrin.h
+index 2bc9f127138d..f2ee8135a03c 100644
+--- a/gcc/config/i386/amxmovrsintrin.h
++++ b/gcc/config/i386/amxmovrsintrin.h
+@@ -36,17 +36,17 @@
+ #define __DISABLE_AMX_MOVRS__
+ #endif /* __AMX_MOVRS__ */
+ 
+-#define _tile_loaddrs_internal(tdst, base, stride)	  \
+-__asm__ volatile					  \
+-  ("{tileloaddrs\t(%0,%1,1), %%tmm"#tdst		  \
+-     "|tileloaddrs\t%%tmm"#tdst", [%0+%1*1]}"		  \
+-   :: "r" ((const void*) (base)), "r" ((__PTRDIFF_TYPE__) (stride)))
+-
+-#define _tile_loaddrst1_internal(tdst, base, stride)	  \
+-__asm__ volatile					  \
+-  ("{tileloaddrst1\t(%0,%1,1), %%tmm"#tdst		  \
+-     "|tileloaddrst1\t%%tmm"#tdst", [%0+%1*1]}"		  \
+-   :: "r" ((const void*) (base)), "r" ((__PTRDIFF_TYPE__) (stride)))
++#define _tile_loaddrs_internal(tdst, base, stride)			\
++__asm__ volatile							\
++  ("{tileloaddrs\t(%0,%1,1), %%tmm%c[_tdst]				\
++    |tileloaddrs\ttmm%c[_tdst], [%0+%1*1]}"				\
++    :: "r" ((const void*) (base)), "r" ((__PTRDIFF_TYPE__) (stride)), [_tdst]"i"(tdst))
++
++#define _tile_loaddrst1_internal(tdst, base, stride)			\
++__asm__ volatile							\
++  ("{tileloaddrst1\t(%0,%1,1), %%tmm%c[_tdst]				\
++    |tileloaddrst1\ttmm%c[_tdst], [%0+%1*1]}"				\
++    :: "r" ((const void*) (base)), "r" ((__PTRDIFF_TYPE__) (stride)), [_tdst]"i"(tdst))
+ 
+ #define _tile_loaddrs(tdst, base, stride)		  \
+   _tile_loaddrs_internal(tdst, base, stride)
+@@ -68,25 +68,25 @@ __asm__ volatile					  \
+ #define _tile_2rpntlvwz0rs_internal(tdst, base, stride)	  \
+   __asm__ volatile					  \
+   ("{t2rpntlvwz0rs\t(%0,%1,1), %%tmm"#tdst		  \
+-     "|t2rpntlvwz0rs\t%%tmm"#tdst", [%0+%1*1]}"	  \
++     "|t2rpntlvwz0rs\ttmm"#tdst", [%0+%1*1]}"	  \
+    :: "r" ((const void*) (base)), "r" ((__PTRDIFF_TYPE__) (stride)))
+ 
+ #define _tile_2rpntlvwz0rst1_internal(tdst, base, stride) \
+   __asm__ volatile					  \
+   ("{t2rpntlvwz0rst1\t(%0,%1,1), %%tmm"#tdst		  \
+-     "|t2rpntlvwz0rst1\t%%tmm"#tdst", [%0+%1*1]}"	  \
++     "|t2rpntlvwz0rst1\ttmm"#tdst", [%0+%1*1]}"	  \
+    :: "r" ((const void*) (base)), "r" ((__PTRDIFF_TYPE__) (stride)))
+ 
+ #define _tile_2rpntlvwz1rs_internal(tdst, base, stride)	  \
+   __asm__ volatile					  \
+   ("{t2rpntlvwz1rs\t(%0,%1,1), %%tmm"#tdst		  \
+-     "|t2rpntlvwz1rs\t%%tmm"#tdst", [%0+%1*1]}"		  \
++     "|t2rpntlvwz1rs\ttmm"#tdst", [%0+%1*1]}"		  \
+    :: "r" ((const void*) (base)), "r" ((__PTRDIFF_TYPE__) (stride)))
+ 
+ #define _tile_2rpntlvwz1rst1_internal(tdst, base, stride) \
+   __asm__ volatile					  \
+   ("{t2rpntlvwz1rst1\t(%0,%1,1), %%tmm"#tdst		  \
+-     "|t2rpntlvwz1rst1\t%%tmm"#tdst", [%0+%1*1]}"	  \
++     "|t2rpntlvwz1rst1\ttmm"#tdst", [%0+%1*1]}"	  \
+    :: "r" ((const void*) (base)), "r" ((__PTRDIFF_TYPE__) (stride)))
+ 
+ #define _tile_2rpntlvwz0rs(tdst, base, stride)		  \
+diff --git a/gcc/config/i386/amxtf32intrin.h b/gcc/config/i386/amxtf32intrin.h
+index 8ed910d94fa4..a7a1f4ff08a5 100644
+--- a/gcc/config/i386/amxtf32intrin.h
++++ b/gcc/config/i386/amxtf32intrin.h
+@@ -31,8 +31,10 @@
+ 
+ #if defined(__x86_64__)
+ #define _tile_mmultf32ps_internal(src1_dst,src2,src3)			\
+-  __asm__ volatile\
+-  ("{tmmultf32ps\t%%tmm"#src3", %%tmm"#src2", %%tmm"#src1_dst"|tmmultf32ps\t%%tmm"#src1_dst", %%tmm"#src2", %%tmm"#src3"}" ::)
++  __asm__ volatile						    	\
++  ("{tmmultf32ps\t%%tmm%c[_src3], %%tmm%c[_src2], %%tmm%c[_src1_dst]	\
++    |tmmultf32ps\ttmm%c[_src1_dst], tmm%c[_src2], tmm%c[_src3]}"	\
++    :: [_src1_dst]"i"(src1_dst), [_src2]"i"(src2), [_src3]"i"(src3))
+ 
+ #define _tile_mmultf32ps(src1_dst,src2,src3)				\
+   _tile_mmultf32ps_internal (src1_dst, src2, src3)
+diff --git a/gcc/config/i386/amxtileintrin.h b/gcc/config/i386/amxtileintrin.h
+index 8c8e2cd90462..67c6b5391e4d 100644
+--- a/gcc/config/i386/amxtileintrin.h
++++ b/gcc/config/i386/amxtileintrin.h
+@@ -61,32 +61,32 @@ _tile_release (void)
+ 
+ #define _tile_loadd_internal(dst,base,stride)				\
+   __asm__ volatile							\
+-  ("{tileloadd\t(%0,%1,1), %%tmm"#dst"|tileloadd\t%%tmm"#dst", [%0+%1*1]}" \
+-   :: "r" ((const void*) (base)), "r" ((__PTRDIFF_TYPE__) (stride)))
++  ("{tileloadd\t(%0,%1,1), %%tmm%c[_dst]|tileloadd\ttmm%c[_dst], [%0+%1*1]}" \
++  :: "r" ((const void*) (base)), "r" ((__PTRDIFF_TYPE__) (stride)), [_dst]"i"(dst))
+ 
+ #define _tile_stream_loadd(dst,base,stride)		\
+   _tile_stream_loadd_internal (dst, base, stride)
+ 
+ #define _tile_stream_loadd_internal(dst,base,stride)			\
+   __asm__ volatile							\
+-  ("{tileloaddt1\t(%0,%1,1), %%tmm"#dst"|tileloaddt1\t%%tmm"#dst", [%0+%1*1]}" \
+-   :: "r" ((const void*) (base)), "r" ((__PTRDIFF_TYPE__) (stride)))
++  ("{tileloaddt1\t(%0,%1,1), %%tmm%c[_dst]|tileloaddt1\ttmm%c[_dst], [%0+%1*1]}" \
++  :: "r" ((const void*) (base)), "r" ((__PTRDIFF_TYPE__) (stride)), [_dst]"i"(dst))
+ 
+ #define _tile_stored(dst,base,stride)		\
+   _tile_stored_internal (dst, base, stride)
+ 
+ #define _tile_stored_internal(src,base,stride)				\
+   __asm__ volatile							\
+-  ("{tilestored\t%%tmm"#src", (%0,%1,1)|tilestored\t[%0+%1*1], %%tmm"#src"}" \
+-   :: "r" ((void*) (base)), "r" ((__PTRDIFF_TYPE__) (stride)) \
+-   : "memory")
++  ("{tilestored\t%%tmm%c[_src], (%0,%1,1)|tilestored\t[%0+%1*1], tmm%c[_src]}" \
++  :: "r" ((void*) (base)), "r" ((__PTRDIFF_TYPE__) (stride)), [_src]"i"(src) \
++  : "memory")
+ 
+ #define _tile_zero(dst)				\
+   _tile_zero_internal (dst)
+ 
+-#define _tile_zero_internal(dst)		\
+-  __asm__ volatile				\
+-  ("tilezero\t%%tmm"#dst ::)
++#define _tile_zero_internal(dst)					\
++  __asm__ volatile							\
++  ("{tilezero\t%%tmm%c[_dst]|tilezero\ttmm%c[_dst]}" :: [_dst]"i"(dst))
+ 
+ #endif
+ 
+diff --git a/gcc/testsuite/g++.target/i386/pr122446-1.C b/gcc/testsuite/g++.target/i386/pr122446-1.C
+new file mode 100644
+index 000000000000..39e594f69366
+--- /dev/null
++++ b/gcc/testsuite/g++.target/i386/pr122446-1.C
+@@ -0,0 +1,17 @@
++/* { dg-do compile { target { ! ia32 } } } */
++/* { dg-options "-mamx-tile -mamx-int8 -O0" } */
++/* { dg-final { scan-assembler "tdpbssd\[ \\t]+\[^\n\]*%tmm2+\[^\n\]*%tmm1+\[^\n\]*%tmm0" } } */
++
++#include <immintrin.h>
++
++template <int hello, int crazy, int gcc>
++struct dpbssd
++{
++  void operator()() { _tile_dpbssd(hello, crazy, gcc); }
++};
++
++void f()
++{
++  dpbssd<0, 1, 2>()();
++}
++
+diff --git a/gcc/testsuite/g++.target/i386/pr122446-amxavx512.C b/gcc/testsuite/g++.target/i386/pr122446-amxavx512.C
+new file mode 100644
+index 000000000000..bf11a3616b6e
+--- /dev/null
++++ b/gcc/testsuite/g++.target/i386/pr122446-amxavx512.C
+@@ -0,0 +1,104 @@
++/* { dg-do compile { target { ! ia32 } } } */
++/* { dg-options "-mamx-tile -mamx-avx512 -O0" } */
++/* { dg-final { scan-assembler "tcvtrowd2ps\[ \\t]+%e.x,\[ \\t\]*%tmm1,\[ \\t\]*%zmm\[0-9\]+" } } */
++/* { dg-final { scan-assembler "tcvtrowd2ps\[ \\t]+\\\$5,\[ \\t\]*%tmm2,\[ \\t\]*%zmm\[0-9\]+" } } */
++/* { dg-final { scan-assembler "tcvtrowps2bf16h\[ \\t]+%e.x,\[ \\t\]*%tmm1,\[ \\t\]*%zmm\[0-9\]+" } } */
++/* { dg-final { scan-assembler "tcvtrowps2bf16h\[ \\t]+\\\$7,\[ \\t\]*%tmm3,\[ \\t\]*%zmm\[0-9\]+" } } */
++/* { dg-final { scan-assembler "tcvtrowps2bf16l\[ \\t]+%e.x,\[ \\t\]*%tmm2,\[ \\t\]*%zmm\[0-9\]+" } } */
++/* { dg-final { scan-assembler "tcvtrowps2bf16l\[ \\t]+\\\$3,\[ \\t\]*%tmm4,\[ \\t\]*%zmm\[0-9\]+" } } */
++/* { dg-final { scan-assembler "tcvtrowps2phh\[ \\t]+%e.x,\[ \\t\]*%tmm1,\[ \\t\]*%zmm\[0-9\]+" } } */
++/* { dg-final { scan-assembler "tcvtrowps2phh\[ \\t]+\\\$6,\[ \\t\]*%tmm2,\[ \\t\]*%zmm\[0-9\]+" } } */
++/* { dg-final { scan-assembler "tcvtrowps2phl\[ \\t]+%e.x,\[ \\t\]*%tmm3,\[ \\t\]*%zmm\[0-9\]+" } } */
++/* { dg-final { scan-assembler "tcvtrowps2phl\[ \\t]+\\\$2,\[ \\t\]*%tmm4,\[ \\t\]*%zmm\[0-9\]+" } } */
++/* { dg-final { scan-assembler "tilemovrow\[ \\t]+%e.x,\[ \\t\]*%tmm5,\[ \\t\]*%zmm\[0-9\]+" } } */
++/* { dg-final { scan-assembler "tilemovrow\[ \\t]+\\\$4,\[ \\t\]*%tmm6,\[ \\t\]*%zmm\[0-9\]+" } } */
++
++#include <immintrin.h>
++
++template <int tmm_num>
++struct tile_cvtrowd2ps_test
++{
++  __m512 operator()() { return _tile_cvtrowd2ps(tmm_num, 0); }
++};
++
++template <int tmm_num, int imm>
++struct tile_cvtrowd2psi_test
++{
++  __m512 operator()() { return _tile_cvtrowd2psi(tmm_num, imm); }
++};
++
++template <int tmm_num>
++struct tile_cvtrowps2bf16h_test
++{
++  __m512bh operator()() { return _tile_cvtrowps2bf16h(tmm_num, 0); }
++};
++
++template <int tmm_num, int imm>
++struct tile_cvtrowps2bf16hi_test
++{
++  __m512bh operator()() { return _tile_cvtrowps2bf16hi(tmm_num, imm); }
++};
++
++template <int tmm_num>
++struct tile_cvtrowps2bf16l_test
++{
++  __m512bh operator()() { return _tile_cvtrowps2bf16l(tmm_num, 0); }
++};
++
++template <int tmm_num, int imm>
++struct tile_cvtrowps2bf16li_test
++{
++  __m512bh operator()() { return _tile_cvtrowps2bf16li(tmm_num, imm); }
++};
++
++template <int tmm_num>
++struct tile_cvtrowps2phh_test
++{
++  __m512h operator()() { return _tile_cvtrowps2phh(tmm_num, 0); }
++};
++
++template <int tmm_num, int imm>
++struct tile_cvtrowps2phhi_test
++{
++  __m512h operator()() { return _tile_cvtrowps2phhi(tmm_num, imm); }
++};
++
++template <int tmm_num>
++struct tile_cvtrowps2phl_test
++{
++  __m512h operator()() { return _tile_cvtrowps2phl(tmm_num, 0); }
++};
++
++template <int tmm_num, int imm>
++struct tile_cvtrowps2phli_test
++{
++  __m512h operator()() { return _tile_cvtrowps2phli(tmm_num, imm); }
++};
++
++template <int tmm_num>
++struct tile_movrow_test
++{
++  __m512 operator()() { return _tile_movrow(tmm_num, 0); }
++};
++
++template <int tmm_num, int imm>
++struct tile_movrowi_test
++{
++  __m512 operator()() { return _tile_movrowi(tmm_num, imm); }
++};
++
++void test_amx_avx512()
++{
++  __m512 r1 = tile_cvtrowd2ps_test<1>()();
++  __m512 r2 = tile_cvtrowd2psi_test<2, 5>()();
++  __m512bh r3 = tile_cvtrowps2bf16h_test<1>()();
++  __m512bh r4 = tile_cvtrowps2bf16hi_test<3, 7>()();
++  __m512bh r5 = tile_cvtrowps2bf16l_test<2>()();
++  __m512bh r6 = tile_cvtrowps2bf16li_test<4, 3>()();
++  __m512h r7 = tile_cvtrowps2phh_test<1>()();
++  __m512h r8 = tile_cvtrowps2phhi_test<2, 6>()();
++  __m512h r9 = tile_cvtrowps2phl_test<3>()();
++  __m512h r10 = tile_cvtrowps2phli_test<4, 2>()();
++  __m512 r11 = tile_movrow_test<5>()();
++  __m512 r12 = tile_movrowi_test<6, 4>()();
++}
+diff --git a/gcc/testsuite/g++.target/i386/pr122446-amxbf16.C b/gcc/testsuite/g++.target/i386/pr122446-amxbf16.C
+new file mode 100644
+index 000000000000..8ee03911d2bf
+--- /dev/null
++++ b/gcc/testsuite/g++.target/i386/pr122446-amxbf16.C
+@@ -0,0 +1,16 @@
++/* { dg-do compile { target { ! ia32 } } } */
++/* { dg-options "-mamx-tile -mamx-bf16 -O0" } */
++/* { dg-final { scan-assembler "tdpbf16ps\[ \\t]+%tmm2,\[ \\t\]*%tmm1,\[ \\t\]*%tmm0" } } */
++
++#include <immintrin.h>
++
++template <int dst, int src1, int src2>
++struct dpbf16ps
++{
++  void operator()() { _tile_dpbf16ps(dst, src1, src2); }
++};
++
++void test_amx_bf16()
++{
++  dpbf16ps<0, 1, 2>()();
++}
+diff --git a/gcc/testsuite/g++.target/i386/pr122446-amxcomplex.C b/gcc/testsuite/g++.target/i386/pr122446-amxcomplex.C
+new file mode 100644
+index 000000000000..3224b486f239
+--- /dev/null
++++ b/gcc/testsuite/g++.target/i386/pr122446-amxcomplex.C
+@@ -0,0 +1,24 @@
++/* { dg-do compile { target { ! ia32 } } } */
++/* { dg-options "-mamx-tile -mamx-complex -O0" } */
++/* { dg-final { scan-assembler "tcmmimfp16ps\[ \\t]+%tmm2,\[ \\t\]*%tmm1,\[ \\t\]*%tmm0" } } */
++/* { dg-final { scan-assembler "tcmmrlfp16ps\[ \\t]+%tmm5,\[ \\t\]*%tmm4,\[ \\t\]*%tmm3" } } */
++
++#include <immintrin.h>
++
++template <int dst, int src1, int src2>
++struct cmmimfp16ps
++{
++  void operator()() { _tile_cmmimfp16ps(dst, src1, src2); }
++};
++
++template <int dst, int src1, int src2>
++struct cmmrlfp16ps
++{
++  void operator()() { _tile_cmmrlfp16ps(dst, src1, src2); }
++};
++
++void test_amx_complex()
++{
++  cmmimfp16ps<0, 1, 2>()();
++  cmmrlfp16ps<3, 4, 5>()();
++}
+diff --git a/gcc/testsuite/g++.target/i386/pr122446-amxfp16.C b/gcc/testsuite/g++.target/i386/pr122446-amxfp16.C
+new file mode 100644
+index 000000000000..7467cd9546d4
+--- /dev/null
++++ b/gcc/testsuite/g++.target/i386/pr122446-amxfp16.C
+@@ -0,0 +1,16 @@
++/* { dg-do compile { target { ! ia32 } } } */
++/* { dg-options "-mamx-tile -mamx-fp16 -O0" } */
++/* { dg-final { scan-assembler "tdpfp16ps\[ \\t]+%tmm2,\[ \\t\]*%tmm1,\[ \\t\]*%tmm0" } } */
++
++#include <immintrin.h>
++
++template <int dst, int src1, int src2>
++struct dpfp16ps
++{
++  void operator()() { _tile_dpfp16ps(dst, src1, src2); }
++};
++
++void test_amx_fp16()
++{
++  dpfp16ps<0, 1, 2>()();
++}
+diff --git a/gcc/testsuite/g++.target/i386/pr122446-amxfp8.C b/gcc/testsuite/g++.target/i386/pr122446-amxfp8.C
+new file mode 100644
+index 000000000000..8e5af6c1e460
+--- /dev/null
++++ b/gcc/testsuite/g++.target/i386/pr122446-amxfp8.C
+@@ -0,0 +1,40 @@
++/* { dg-do compile { target { ! ia32 } } } */
++/* { dg-options "-mamx-tile -mamx-fp8 -O0" } */
++/* { dg-final { scan-assembler "tdpbf8ps\[ \\t]+%tmm2,\[ \\t\]*%tmm1,\[ \\t\]*%tmm0" } } */
++/* { dg-final { scan-assembler "tdpbhf8ps\[ \\t]+%tmm5,\[ \\t\]*%tmm4,\[ \\t\]*%tmm3" } } */
++/* { dg-final { scan-assembler "tdphbf8ps\[ \\t]+%tmm2,\[ \\t\]*%tmm1,\[ \\t\]*%tmm6" } } */
++/* { dg-final { scan-assembler "tdphf8ps\[ \\t]+%tmm1,\[ \\t\]*%tmm0,\[ \\t\]*%tmm7" } } */
++
++#include <immintrin.h>
++
++template <int dst, int src1, int src2>
++struct dpbf8ps
++{
++  void operator()() { _tile_dpbf8ps(dst, src1, src2); }
++};
++
++template <int dst, int src1, int src2>
++struct dpbhf8ps
++{
++  void operator()() { _tile_dpbhf8ps(dst, src1, src2); }
++};
++
++template <int dst, int src1, int src2>
++struct dphbf8ps
++{
++  void operator()() { _tile_dphbf8ps(dst, src1, src2); }
++};
++
++template <int dst, int src1, int src2>
++struct dphf8ps
++{
++  void operator()() { _tile_dphf8ps(dst, src1, src2); }
++};
++
++void test_amx_fp8()
++{
++  dpbf8ps<0, 1, 2>()();
++  dpbhf8ps<3, 4, 5>()();
++  dphbf8ps<6, 1, 2>()();
++  dphf8ps<7, 0, 1>()();
++}
+diff --git a/gcc/testsuite/g++.target/i386/pr122446-amxint8.C b/gcc/testsuite/g++.target/i386/pr122446-amxint8.C
+new file mode 100644
+index 000000000000..039379222a5f
+--- /dev/null
++++ b/gcc/testsuite/g++.target/i386/pr122446-amxint8.C
+@@ -0,0 +1,40 @@
++/* { dg-do compile { target { ! ia32 } } } */
++/* { dg-options "-mamx-tile -mamx-int8 -O0" } */
++/* { dg-final { scan-assembler "tdpbssd\[ \\t]+%tmm2,\[ \\t\]*%tmm1,\[ \\t\]*%tmm0" } } */
++/* { dg-final { scan-assembler "tdpbsud\[ \\t]+%tmm5,\[ \\t\]*%tmm4,\[ \\t\]*%tmm3" } } */
++/* { dg-final { scan-assembler "tdpbusd\[ \\t]+%tmm2,\[ \\t\]*%tmm1,\[ \\t\]*%tmm6" } } */
++/* { dg-final { scan-assembler "tdpbuud\[ \\t]+%tmm1,\[ \\t\]*%tmm0,\[ \\t\]*%tmm7" } } */
++
++#include <immintrin.h>
++
++template <int dst, int src1, int src2>
++struct dpbssd
++{
++  void operator()() { _tile_dpbssd(dst, src1, src2); }
++};
++
++template <int dst, int src1, int src2>
++struct dpbsud
++{
++  void operator()() { _tile_dpbsud(dst, src1, src2); }
++};
++
++template <int dst, int src1, int src2>
++struct dpbusd
++{
++  void operator()() { _tile_dpbusd(dst, src1, src2); }
++};
++
++template <int dst, int src1, int src2>
++struct dpbuud
++{
++  void operator()() { _tile_dpbuud(dst, src1, src2); }
++};
++
++void test_amx_int8()
++{
++  dpbssd<0, 1, 2>()();
++  dpbsud<3, 4, 5>()();
++  dpbusd<6, 1, 2>()();
++  dpbuud<7, 0, 1>()();
++}
+diff --git a/gcc/testsuite/g++.target/i386/pr122446-amxmovrs.C b/gcc/testsuite/g++.target/i386/pr122446-amxmovrs.C
+new file mode 100644
+index 000000000000..09f651d57f32
+--- /dev/null
++++ b/gcc/testsuite/g++.target/i386/pr122446-amxmovrs.C
+@@ -0,0 +1,31 @@
++/* { dg-do compile { target { ! ia32 } } } */
++/* { dg-options "-mamx-tile -mamx-movrs -O0" } */
++/* { dg-final { scan-assembler "tileloaddrs\[ \\t]+\[^\n\]*,\[ \\t\]*%tmm0" } } */
++/* { dg-final { scan-assembler "tileloaddrst1\[ \\t]+\[^\n\]*,\[ \\t\]*%tmm1" } } */
++
++#include <immintrin.h>
++
++template <int tmm_num>
++struct tile_loaddrs_test
++{
++  void operator()(const void* base, int stride)
++  {
++    _tile_loaddrs(tmm_num, base, stride);
++  }
++};
++
++template <int tmm_num>
++struct tile_loaddrst1_test
++{
++  void operator()(const void* base, int stride)
++  {
++    _tile_loaddrst1(tmm_num, base, stride);
++  }
++};
++
++void test_amx_movrs()
++{
++  char buf[1024];
++  tile_loaddrs_test<0>()(buf, 64);
++  tile_loaddrst1_test<1>()(buf, 64);
++}
+diff --git a/gcc/testsuite/g++.target/i386/pr122446-amxtf32.C b/gcc/testsuite/g++.target/i386/pr122446-amxtf32.C
+new file mode 100644
+index 000000000000..0d1220a4c918
+--- /dev/null
++++ b/gcc/testsuite/g++.target/i386/pr122446-amxtf32.C
+@@ -0,0 +1,16 @@
++/* { dg-do compile { target { ! ia32 } } } */
++/* { dg-options "-mamx-tile -mamx-tf32 -O0" } */
++/* { dg-final { scan-assembler "tmmultf32ps\[ \\t]+%tmm2,\[ \\t\]*%tmm1,\[ \\t\]*%tmm0" } } */
++
++#include <immintrin.h>
++
++template <int dst, int src1, int src2>
++struct mmultf32ps
++{
++  void operator()() { _tile_mmultf32ps(dst, src1, src2); }
++};
++
++void test_amx_tf32()
++{
++  mmultf32ps<0, 1, 2>()();
++}
+diff --git a/gcc/testsuite/g++.target/i386/pr122446-amxtile.C b/gcc/testsuite/g++.target/i386/pr122446-amxtile.C
+new file mode 100644
+index 000000000000..6836ba492d03
+--- /dev/null
++++ b/gcc/testsuite/g++.target/i386/pr122446-amxtile.C
+@@ -0,0 +1,50 @@
++/* { dg-do compile { target { ! ia32 } } } */
++/* { dg-options "-mamx-tile -O0" } */
++/* { dg-final { scan-assembler "tileloadd\[ \\t]+\[^\n\]*,\[ \\t\]*%tmm0" } } */
++/* { dg-final { scan-assembler "tilestored\[ \\t]+%tmm1," } } */
++/* { dg-final { scan-assembler "tilezero\[ \\t]+%tmm3" } } */
++/* { dg-final { scan-assembler "tileloaddt1\[ \\t]+\[^\n\]*,\[ \\t\]*%tmm2" } } */
++
++#include <immintrin.h>
++
++template <int tmm_num>
++struct tile_loadd_test
++{
++  void operator()(const void* base, int stride)
++  {
++    _tile_loadd(tmm_num, base, stride);
++  }
++};
++
++template <int tmm_num>
++struct tile_stored_test
++{
++  void operator()(void* base, int stride)
++  {
++    _tile_stored(tmm_num, base, stride);
++  }
++};
++
++template <int tmm_num>
++struct tile_zero_test
++{
++  void operator()() { _tile_zero(tmm_num); }
++};
++
++template <int tmm_num>
++struct tile_stream_loadd_test
++{
++  void operator()(const void* base, int stride)
++  {
++    _tile_stream_loadd(tmm_num, base, stride);
++  }
++};
++
++void test_amx_tile()
++{
++  char buf[1024];
++  tile_loadd_test<0>()(buf, 64);
++  tile_stored_test<1>()(buf, 64);
++  tile_stream_loadd_test<2>()(buf, 64);
++  tile_zero_test<3>()();
++}
+diff --git a/gcc/testsuite/gcc.target/i386/amxbf16-asmintel-1.c b/gcc/testsuite/gcc.target/i386/amxbf16-asmintel-1.c
+index 54194e1c5b0b..80d129e77ed8 100644
+--- a/gcc/testsuite/gcc.target/i386/amxbf16-asmintel-1.c
++++ b/gcc/testsuite/gcc.target/i386/amxbf16-asmintel-1.c
+@@ -1,7 +1,7 @@
+ /* { dg-do compile { target { ! ia32 } } } */
+ /* { dg-require-effective-target masm_intel } */
+ /* { dg-options "-O2 -mamx-bf16 -masm=intel" } */
+-/* { dg-final { scan-assembler "tdpbf16ps\[ \\t]+\[^\n\]*%tmm1+\[^\n\]*%tmm2+\[^\n\]*%tmm3"  } } */
++/* { dg-final { scan-assembler "tdpbf16ps\[ \\t]+\[^\n%\]*tmm1+\[^\n%\]*tmm2+\[^\n%\]*tmm3"  } } */
+ #include <immintrin.h>
+ 
+ void TEST ()
+diff --git a/gcc/testsuite/gcc.target/i386/amxcomplex-asmintel-1.c b/gcc/testsuite/gcc.target/i386/amxcomplex-asmintel-1.c
+index 305465e88607..51997b73e02e 100644
+--- a/gcc/testsuite/gcc.target/i386/amxcomplex-asmintel-1.c
++++ b/gcc/testsuite/gcc.target/i386/amxcomplex-asmintel-1.c
+@@ -1,8 +1,8 @@
+ /* { dg-do compile { target { ! ia32 } } } */
+ /* { dg-require-effective-target masm_intel } */
+ /* { dg-options "-O2 -mamx-complex -masm=intel" } */
+-/* { dg-final { scan-assembler "tcmmimfp16ps\[ \\t]+\[^\n\]*%tmm1+\[^\n\]*%tmm2+\[^\n\]*%tmm3"  } } */
+-/* { dg-final { scan-assembler "tcmmrlfp16ps\[ \\t]+\[^\n\]*%tmm1+\[^\n\]*%tmm2+\[^\n\]*%tmm3"  } } */
++/* { dg-final { scan-assembler "tcmmimfp16ps\[ \\t]+\[^\n%\]*tmm1+\[^\n%\]*tmm2+\[^\n%\]*tmm3"  } } */
++/* { dg-final { scan-assembler "tcmmrlfp16ps\[ \\t]+\[^\n%\]*tmm1+\[^\n%\]*tmm2+\[^\n%\]*tmm3"  } } */
+ #include <immintrin.h>
+ 
+ void TEST()
+diff --git a/gcc/testsuite/gcc.target/i386/amxfp16-asmintel-1.c b/gcc/testsuite/gcc.target/i386/amxfp16-asmintel-1.c
+index a8dff945f23f..8895da9aa8d0 100644
+--- a/gcc/testsuite/gcc.target/i386/amxfp16-asmintel-1.c
++++ b/gcc/testsuite/gcc.target/i386/amxfp16-asmintel-1.c
+@@ -1,7 +1,7 @@
+ /* { dg-do compile { target { ! ia32 } } } */
+ /* { dg-require-effective-target masm_intel } */
+ /* { dg-options "-O2 -mamx-fp16 -masm=intel" } */
+-/* { dg-final { scan-assembler "tdpfp16ps\[ \\t]+\[^\n\]*%tmm1+\[^\n\]*%tmm2+\[^\n\]*%tmm3"  } } */
++/* { dg-final { scan-assembler "tdpfp16ps\[ \\t]+\[^\n%\]*tmm1+\[^\n%\]*tmm2+\[^\n%\]*tmm3"  } } */
+ #include <immintrin.h>
+ 
+ void TEST ()
+diff --git a/gcc/testsuite/gcc.target/i386/amxfp8-asmintel-1.c b/gcc/testsuite/gcc.target/i386/amxfp8-asmintel-1.c
+index f83b7a9a287f..eecd2f574c97 100644
+--- a/gcc/testsuite/gcc.target/i386/amxfp8-asmintel-1.c
++++ b/gcc/testsuite/gcc.target/i386/amxfp8-asmintel-1.c
+@@ -1,10 +1,10 @@
+ /* { dg-do compile { target { ! ia32 } } } */
+ /* { dg-require-effective-target masm_intel } */
+ /* { dg-options "-O2 -mamx-fp16 -masm=intel" } */
+-/* { dg-final { scan-assembler "tdpbf8ps\[ \\t]+\[^\n\]*%tmm1+\[^\n\]*%tmm2+\[^\n\]*%tmm3"  } } */
+-/* { dg-final { scan-assembler "tdpbhf8ps\[ \\t]+\[^\n\]*%tmm1+\[^\n\]*%tmm2+\[^\n\]*%tmm3"  } } */
+-/* { dg-final { scan-assembler "tdphbf8ps\[ \\t]+\[^\n\]*%tmm1+\[^\n\]*%tmm2+\[^\n\]*%tmm3"  } } */
+-/* { dg-final { scan-assembler "tdphf8ps\[ \\t]+\[^\n\]*%tmm1+\[^\n\]*%tmm2+\[^\n\]*%tmm3"  } } */
++/* { dg-final { scan-assembler "tdpbf8ps\[ \\t]+\[^\n%\]*tmm1+\[^\n%\]*tmm2+\[^\n%\]*tmm3"  } } */
++/* { dg-final { scan-assembler "tdpbhf8ps\[ \\t]+\[^\n%\]*tmm1+\[^\n%\]*tmm2+\[^\n%\]*tmm3"  } } */
++/* { dg-final { scan-assembler "tdphbf8ps\[ \\t]+\[^\n%\]*tmm1+\[^\n%\]*tmm2+\[^\n%\]*tmm3"  } } */
++/* { dg-final { scan-assembler "tdphf8ps\[ \\t]+\[^\n%\]*tmm1+\[^\n%\]*tmm2+\[^\n%\]*tmm3"  } } */
+ 
+ #include <immintrin.h>
+ 
+diff --git a/gcc/testsuite/gcc.target/i386/amxint8-asmintel-1.c b/gcc/testsuite/gcc.target/i386/amxint8-asmintel-1.c
+index abc98745a769..46c1fa06fa18 100644
+--- a/gcc/testsuite/gcc.target/i386/amxint8-asmintel-1.c
++++ b/gcc/testsuite/gcc.target/i386/amxint8-asmintel-1.c
+@@ -1,10 +1,10 @@
+ /* { dg-do compile { target { ! ia32 } } } */
+ /* { dg-require-effective-target masm_intel } */
+ /* { dg-options "-O2 -mamx-int8 -masm=intel" } */
+-/* { dg-final { scan-assembler "tdpbssd\[ \\t]+\[^\n\]*%tmm1+\[^\n\]*%tmm2+\[^\n\]*%tmm3"  } } */
+-/* { dg-final { scan-assembler "tdpbsud\[ \\t]+\[^\n\]*%tmm1+\[^\n\]*%tmm2+\[^\n\]*%tmm3"  } } */
+-/* { dg-final { scan-assembler "tdpbusd\[ \\t]+\[^\n\]*%tmm1+\[^\n\]*%tmm2+\[^\n\]*%tmm3"  } } */
+-/* { dg-final { scan-assembler "tdpbuud\[ \\t]+\[^\n\]*%tmm1+\[^\n\]*%tmm2+\[^\n\]*%tmm3"  } } */
++/* { dg-final { scan-assembler "tdpbssd\[ \\t]+\[^\n%\]*tmm1+\[^\n%\]*tmm2+\[^\n%\]*tmm3"  } } */
++/* { dg-final { scan-assembler "tdpbsud\[ \\t]+\[^\n%\]*tmm1+\[^\n%\]*tmm2+\[^\n%\]*tmm3"  } } */
++/* { dg-final { scan-assembler "tdpbusd\[ \\t]+\[^\n%\]*tmm1+\[^\n%\]*tmm2+\[^\n%\]*tmm3"  } } */
++/* { dg-final { scan-assembler "tdpbuud\[ \\t]+\[^\n%\]*tmm1+\[^\n%\]*tmm2+\[^\n%\]*tmm3"  } } */
+ #include <immintrin.h>
+ 
+ void TEST ()
+diff --git a/gcc/testsuite/gcc.target/i386/amxmovrs-asmintel-1.c b/gcc/testsuite/gcc.target/i386/amxmovrs-asmintel-1.c
+index 6a3398669300..690a58bb7acc 100644
+--- a/gcc/testsuite/gcc.target/i386/amxmovrs-asmintel-1.c
++++ b/gcc/testsuite/gcc.target/i386/amxmovrs-asmintel-1.c
+@@ -1,12 +1,12 @@
+ /* { dg-do compile { target { ! ia32 } } } */
+ /* { dg-require-effective-target masm_intel } */
+ /* { dg-options "-O2 -mamx-movrs -mamx-transpose -masm=intel" } */
+-/* { dg-final { scan-assembler-times "tileloaddrs\[ \\t]%tmm\[0-9\]" 1 } } */
+-/* { dg-final { scan-assembler-times "tileloaddrst1\[ \\t]%tmm\[0-9\]" 1 } } */
+-/* { dg-final { scan-assembler "t2rpntlvwz0rs\[ \\t]%tmm\[0-9\]"  } } */
+-/* { dg-final { scan-assembler "t2rpntlvwz0rst1\[ \\t]%tmm\[0-9\]"  } } */
+-/* { dg-final { scan-assembler "t2rpntlvwz1rs\[ \\t]%tmm\[0-9\]"  } } */
+-/* { dg-final { scan-assembler "t2rpntlvwz1rst1\[ \\t]%tmm\[0-9\]"  } } */
++/* { dg-final { scan-assembler-times "tileloaddrs\[ \\t]tmm\[0-9\]" 1 } } */
++/* { dg-final { scan-assembler-times "tileloaddrst1\[ \\t]tmm\[0-9\]" 1 } } */
++/* { dg-final { scan-assembler "t2rpntlvwz0rs\[ \\t]tmm\[0-9\]"  } } */
++/* { dg-final { scan-assembler "t2rpntlvwz0rst1\[ \\t]tmm\[0-9\]"  } } */
++/* { dg-final { scan-assembler "t2rpntlvwz1rs\[ \\t]tmm\[0-9\]"  } } */
++/* { dg-final { scan-assembler "t2rpntlvwz1rst1\[ \\t]tmm\[0-9\]"  } } */
+ #include <immintrin.h>
+ 
+ extern const void* base;
+diff --git a/gcc/testsuite/gcc.target/i386/amxtf32-asmintel-1.c b/gcc/testsuite/gcc.target/i386/amxtf32-asmintel-1.c
+index 01887887df3c..03ae30750789 100644
+--- a/gcc/testsuite/gcc.target/i386/amxtf32-asmintel-1.c
++++ b/gcc/testsuite/gcc.target/i386/amxtf32-asmintel-1.c
+@@ -1,7 +1,7 @@
+ /* { dg-do compile { target { ! ia32 } } } */
+ /* { dg-require-effective-target masm_intel } */
+ /* { dg-options "-O2 -mamx-tf32 -masm=intel" } */
+-/* { dg-final { scan-assembler "tmmultf32ps\[ \\t]+\[^\n\]*%tmm1+\[^\n\]*%tmm2+\[^\n\]*%tmm3"  } } */
++/* { dg-final { scan-assembler "tmmultf32ps\[ \\t]+\[^\n%\]*tmm1+\[^\n%\]*tmm2+\[^\n%\]*tmm3"  } } */
+ #include <immintrin.h>
+ 
+ void TEST()
+diff --git a/gcc/testsuite/gcc.target/i386/amxtile-asmintel-1.c b/gcc/testsuite/gcc.target/i386/amxtile-asmintel-1.c
+index 6c08fec516ca..661645d09d5d 100644
+--- a/gcc/testsuite/gcc.target/i386/amxtile-asmintel-1.c
++++ b/gcc/testsuite/gcc.target/i386/amxtile-asmintel-1.c
+@@ -4,10 +4,10 @@
+ /* { dg-final { scan-assembler "ldtilecfg\[ \\t]"  } } */
+ /* { dg-final { scan-assembler "sttilecfg\[ \\t]"  } } */
+ /* { dg-final { scan-assembler "tilerelease"  } } */
+-/* { dg-final { scan-assembler "tileloadd\[ \\t]%tmm\[0-9\]"  } } */
+-/* { dg-final { scan-assembler "tileloaddt1\[ \\t]%tmm\[0-9\]"  } } */
+-/* { dg-final { scan-assembler "tilestored\[ \\t]\[^\n\]+\[^\n\]*%tmm\[0-9\]"  } } */
+-/* { dg-final { scan-assembler "tilezero\[ \\t]+\[^\n\]*%tmm\[0-9\]"  } } */
++/* { dg-final { scan-assembler "tileloadd\[ \\t]tmm\[0-9\]"  } } */
++/* { dg-final { scan-assembler "tileloaddt1\[ \\t]tmm\[0-9\]"  } } */
++/* { dg-final { scan-assembler "tilestored\[ \\t]\[^\n\]+\[^\n\]*tmm\[0-9\]"  } } */
++/* { dg-final { scan-assembler "tilezero\[ \\t]+\[^\n%\]*tmm\[0-9\]"  } } */
+ #include <immintrin.h>
+ 
+ extern int a[];
+-- 
+2.43.7
+
+

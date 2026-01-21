@@ -1,0 +1,80 @@
+From fb9d8d123059481ed91a142b0359e94d82c60520 Mon Sep 17 00:00:00 2001
+From: Jason Merrill <jason@redhat.com>
+Date: Tue, 19 Aug 2025 23:15:20 -0400
+Subject: [PATCH] c++: pointer to auto member function [PR120757]
+
+Here r13-1210 correctly changed &A<int>::foo to not be considered
+type-dependent, but tsubst_expr of the OFFSET_REF got confused trying to
+tsubst a type that involved auto.  Fixed by getting the type from the
+member rather than tsubst.
+
+	PR c++/120757
+
+gcc/cp/ChangeLog:
+
+	* pt.cc (tsubst_expr) [OFFSET_REF]: Don't tsubst the type.
+
+gcc/testsuite/ChangeLog:
+
+	* g++.dg/cpp1y/auto-fn66.C: New test.
+
+(cherry picked from commit ea6ef13d0fc4e020d8c405333153dad9eee1f18d)
+---
+ gcc/cp/pt.cc                           |  8 ++++++--
+ gcc/testsuite/g++.dg/cpp1y/auto-fn66.C | 20 ++++++++++++++++++++
+ 2 files changed, 26 insertions(+), 2 deletions(-)
+ create mode 100644 gcc/testsuite/g++.dg/cpp1y/auto-fn66.C
+
+diff --git a/gcc/cp/pt.cc b/gcc/cp/pt.cc
+index bdbb439d98dc..1b51d32228d8 100644
+--- a/gcc/cp/pt.cc
++++ b/gcc/cp/pt.cc
+@@ -22221,12 +22221,16 @@ tsubst_expr (tree t, tree args, tsubst_flags_t complain, tree in_decl)
+ 
+     case OFFSET_REF:
+       {
+-	tree type = tsubst (TREE_TYPE (t), args, complain, in_decl);
++	/* We should only get here for an OFFSET_REF like A::m; a .* in a
++	   template is represented as a DOTSTAR_EXPR.  */
++	gcc_checking_assert
++	  (same_type_p (TREE_TYPE (t), TREE_TYPE (TREE_OPERAND (t, 1))));
+ 	tree op0 = RECUR (TREE_OPERAND (t, 0));
+ 	tree op1 = RECUR (TREE_OPERAND (t, 1));
++	tree type = TREE_TYPE (op1);
+ 	r = build2 (OFFSET_REF, type, op0, op1);
+ 	PTRMEM_OK_P (r) = PTRMEM_OK_P (t);
+-	if (!mark_used (TREE_OPERAND (r, 1), complain)
++	if (!mark_used (op1, complain)
+ 	    && !(complain & tf_error))
+ 	  RETURN (error_mark_node);
+ 	RETURN (r);
+diff --git a/gcc/testsuite/g++.dg/cpp1y/auto-fn66.C b/gcc/testsuite/g++.dg/cpp1y/auto-fn66.C
+new file mode 100644
+index 000000000000..413154c2a7f8
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/cpp1y/auto-fn66.C
+@@ -0,0 +1,20 @@
++// PR c++/120757
++// { dg-do compile { target c++14 } }
++
++template <typename> struct A
++{
++  auto foo() {}
++};
++
++auto bar(void (A<int>::*)()) {}
++
++template <int> auto baz()
++{
++  bar(&A<int>::foo);
++}
++
++int main()
++{
++  baz<0>();
++  return 0;
++}
+-- 
+2.43.7
+
+

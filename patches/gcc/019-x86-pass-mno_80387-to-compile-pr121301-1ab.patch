@@ -1,0 +1,55 @@
+From e5905a527f523c76b8d7cc2ebe88717fa0ff7d40 Mon Sep 17 00:00:00 2001
+From: "H.J. Lu" <hjl.tools@gmail.com>
+Date: Tue, 29 Jul 2025 09:11:34 -0700
+Subject: [PATCH] x86: Pass -mno-80387 to compile pr121208-1(a|b).c
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf8
+Content-Transfer-Encoding: 8bit
+
+Pass -mno-80387 to compile pr121208-1(a|b).c to silence
+
+.../pr121208-1a.c:11:1: sorry, unimplemented: 80387 instructions arenât allowed in a function with the âno_caller_saved_registersâ attribute
+
+Partially backport the PR target/121540 fix
+
+9d7f45e9806 x86: Disallow MMX and 80387 in no_caller_saved_registers function
+
+to also add -mno-sse -mno-mmx.
+
+	PR target/121208
+	* gcc.target/i386/pr121208-1a.c (dg-options): Add
+	-mno-sse -mno-mmx -mno-80387.
+	* gcc.target/i386/pr121208-1b.c (dg-options): Likewise.
+
+Signed-off-by: H.J. Lu <hjl.tools@gmail.com>
+(cherry picked from commit c6d1f58da7eb72e8bac307d342e4655012b36a89)
+---
+ gcc/testsuite/gcc.target/i386/pr121208-1a.c | 2 +-
+ gcc/testsuite/gcc.target/i386/pr121208-1b.c | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/gcc/testsuite/gcc.target/i386/pr121208-1a.c b/gcc/testsuite/gcc.target/i386/pr121208-1a.c
+index ac851cb50d86..db8d34816225 100644
+--- a/gcc/testsuite/gcc.target/i386/pr121208-1a.c
++++ b/gcc/testsuite/gcc.target/i386/pr121208-1a.c
+@@ -1,5 +1,5 @@
+ /* { dg-do compile { target *-*-linux* } } */
+-/* { dg-options "-O2 -fPIC -mtls-dialect=gnu" } */
++/* { dg-options "-O2 -fPIC -mno-sse -mno-mmx -mno-80387 -mtls-dialect=gnu" } */
+ 
+ extern __thread int bar;
+ extern void func (void);
+diff --git a/gcc/testsuite/gcc.target/i386/pr121208-1b.c b/gcc/testsuite/gcc.target/i386/pr121208-1b.c
+index b97ac715c655..1591f7d3fedd 100644
+--- a/gcc/testsuite/gcc.target/i386/pr121208-1b.c
++++ b/gcc/testsuite/gcc.target/i386/pr121208-1b.c
+@@ -1,4 +1,4 @@
+ /* { dg-do compile { target *-*-linux* } } */
+-/* { dg-options "-O2 -fPIC -mtls-dialect=gnu2" } */
++/* { dg-options "-O2 -fPIC -mno-sse -mno-mmx -mno-80387 -mtls-dialect=gnu2" } */
+ 
+ #include "pr121208-1a.c"
+-- 
+2.43.7
+
+

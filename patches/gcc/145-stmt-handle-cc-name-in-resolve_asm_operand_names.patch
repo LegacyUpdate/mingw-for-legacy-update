@@ -1,0 +1,75 @@
+From e088f42517ed4c6f8c79e1c78839faec0aefe906 Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Mon, 6 Oct 2025 09:46:48 +0200
+Subject: [PATCH] stmt: Handle %cc[name] in resolve_asm_operand_names
+ [PR122133]
+
+Last year I've extended the asm template syntax in inline asm to support
+%cc0 etc., apparently the first 2 letter generic operand modifier.
+As the following testcase shows, I forgot to tweak the [foo] handling
+for it though.  As final.cc will error on any % ISALPHA not followed by
+digit (with the exception of % c c digit), I think we can safely handle
+this for any 2 letters in between % and [, instead of hardcoding it for
+now only for %cc[ and changing it again next time we add something
+two-letter.
+
+2025-10-06  Jakub Jelinek  <jakub@redhat.com>
+
+	PR middle-end/122133
+	* stmt.cc (resolve_asm_operand_names): Handle % and 2 letters followed
+	by open square.
+
+	* c-c++-common/toplevel-asm-9.c: New test.
+
+(cherry picked from commit 96c4a32cfec8c4b4c677de114164192cfd8ae54d)
+---
+ gcc/stmt.cc                                 |  5 ++++-
+ gcc/testsuite/c-c++-common/toplevel-asm-9.c | 12 ++++++++++++
+ 2 files changed, 16 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/c-c++-common/toplevel-asm-9.c
+
+diff --git a/gcc/stmt.cc b/gcc/stmt.cc
+index fa0c5d49aa23..01daffd4ca22 100644
+--- a/gcc/stmt.cc
++++ b/gcc/stmt.cc
+@@ -583,7 +583,8 @@ resolve_asm_operand_names (tree string, tree outputs, tree inputs, tree labels)
+     {
+       if (c[1] == '[')
+ 	break;
+-      else if (ISALPHA (c[1]) && c[2] == '[')
++      else if (ISALPHA (c[1])
++	       && (c[2] == '[' || (ISALPHA (c[2]) && c[3] == '[')))
+ 	break;
+       else
+ 	{
+@@ -607,6 +608,8 @@ resolve_asm_operand_names (tree string, tree outputs, tree inputs, tree labels)
+ 	    p += 1;
+ 	  else if (ISALPHA (p[1]) && p[2] == '[')
+ 	    p += 2;
++	  else if (ISALPHA (p[1]) && ISALPHA (p[2]) && p[3] == '[')
++	    p += 3;
+ 	  else
+ 	    {
+ 	      p += 1 + (p[1] == '%');
+diff --git a/gcc/testsuite/c-c++-common/toplevel-asm-9.c b/gcc/testsuite/c-c++-common/toplevel-asm-9.c
+new file mode 100644
+index 000000000000..a32187891aa1
+--- /dev/null
++++ b/gcc/testsuite/c-c++-common/toplevel-asm-9.c
+@@ -0,0 +1,12 @@
++/* PR middle-end/122133 */
++/* { dg-do compile } */
++/* { dg-options "-O0" } */
++
++extern int v[42], w;
++int x[42], y;
++void foo (void);
++void bar (void) {}
++
++asm ("# %cc[foo]: %cc[v]: %cc[w]: %cc[bar] %cc[x] %cc[y]"
++     :: [foo] ":" (foo), [v] ":" (v), [w] ":" (&w),
++	[bar] "-i" (bar), [x] "-s" (x), [y] "-s" (&y));
+-- 
+2.43.7
+
+

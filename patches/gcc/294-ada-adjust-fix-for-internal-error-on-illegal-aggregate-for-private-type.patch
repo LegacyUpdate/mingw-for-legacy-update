@@ -1,0 +1,36 @@
+From 6f1232d6a3b628b686c4a0ff3afaec95b91b33c4 Mon Sep 17 00:00:00 2001
+From: Eric Botcazou <ebotcazou@gcc.gnu.org>
+Date: Fri, 26 Dec 2025 23:10:15 +0100
+Subject: [PATCH] Ada: Adjust fix for internal error on illegal aggregate for
+ private type
+
+This adds a more robust guard to Resolve_Record_Aggregate.
+
+gcc/ada/
+	PR ada/123088
+	* sem_aggr.adb (Resolve_Record_Aggregate): Add more robust guard.
+---
+ gcc/ada/sem_aggr.adb | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/gcc/ada/sem_aggr.adb b/gcc/ada/sem_aggr.adb
+index ad2397d711b6..c78bed006ec2 100644
+--- a/gcc/ada/sem_aggr.adb
++++ b/gcc/ada/sem_aggr.adb
+@@ -6590,10 +6590,10 @@ package body Sem_Aggr is
+ 
+          --  Typ is not a derived tagged type
+ 
+-         else
++         elsif Nkind (Parent (Base_Type (Typ))) = N_Full_Type_Declaration then
+             Record_Def := Type_Definition (Parent (Base_Type (Typ)));
+ 
+-            if No (Record_Def) or else Null_Present (Record_Def) then
++            if Null_Present (Record_Def) then
+                null;
+ 
+             elsif not Has_Unknown_Discriminants (Typ) then
+-- 
+2.43.7
+
+

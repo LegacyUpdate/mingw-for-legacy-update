@@ -1,0 +1,537 @@
+From 9fa75e41070ef8a55886657a07bf75bc1aca946f Mon Sep 17 00:00:00 2001
+From: Siddhesh Poyarekar <siddhesh@gotplt.org>
+Date: Mon, 3 Nov 2025 17:02:00 -0600
+Subject: [PATCH] lto/122515: Fix archive offset types for i686
+
+On i686, offsets into object archives could be 64-bit, but they're
+inconsistently treated across the lto, which may sometimes result in
+truncation of those offsets for large archives.
+
+Use int64_t/off_t consistently across all uses of archive offsets to
+make sure that they're always read and mapped correctly.
+
+gcc/lto/ChangeLog
+
+	PR lto/122515
+	* lto.h (lto_section_slot): Set type of START to off_t.
+	* lto-common.cc (lto_read_section_data): Adjust.
+	* lto-object.cc (lto_obj_file_open): Set type of OFFSET to
+	int64_t.
+
+gcc/ChangeLog
+
+	PR lto/122515
+	* lto-wrapper.cc (debug_objcopy): Set type of INOFF to int64_t.
+	(run_gcc): Set type of FILE_OFFSET to int64_t.
+
+gcc/testsuite/ChangeLog
+
+	PR lto/122515
+	* lib/lto.exp (lto-build-archive): New procedure.
+	(lto-execute-1): Use it.
+	(lto-link-and-maybe-run, lto-get-options-main): Handle ar-link.
+	* gcc.dg/lto/pr122515_0.c: New test case.
+	* gcc.dg/lto/pr122515_1.c: New file.
+	* gcc.dg/lto/pr122515_2.c: Likewise.
+	* gcc.dg/lto/pr122515_3.c: Likewise.
+	* gcc.dg/lto/pr122515_4.c: Likewise.
+	* gcc.dg/lto/pr122515_5.c: Likewise.
+	* gcc.dg/lto/pr122515_6.c: Likewise.
+	* gcc.dg/lto/pr122515_7.c: Likewise.
+	* gcc.dg/lto/pr122515_8.c: Likewise.
+	* gcc.dg/lto/pr122515_9.c: Likewise.
+
+Signed-off-by: Siddhesh Poyarekar <siddhesh@gotplt.org>
+(cherry picked from commit 0013501e462bd362de50bbac71ea4c6c7528dc08)
+---
+ gcc/lto-wrapper.cc                    | 18 +++----
+ gcc/lto/lto-common.cc                 | 18 ++++---
+ gcc/lto/lto-object.cc                 |  6 +--
+ gcc/lto/lto.h                         |  2 +-
+ gcc/testsuite/gcc.dg/lto/pr122515_0.c |  9 ++++
+ gcc/testsuite/gcc.dg/lto/pr122515_1.c | 12 +++++
+ gcc/testsuite/gcc.dg/lto/pr122515_2.c | 12 +++++
+ gcc/testsuite/gcc.dg/lto/pr122515_3.c | 12 +++++
+ gcc/testsuite/gcc.dg/lto/pr122515_4.c | 12 +++++
+ gcc/testsuite/gcc.dg/lto/pr122515_5.c | 12 +++++
+ gcc/testsuite/gcc.dg/lto/pr122515_6.c | 12 +++++
+ gcc/testsuite/gcc.dg/lto/pr122515_7.c | 12 +++++
+ gcc/testsuite/gcc.dg/lto/pr122515_8.c | 12 +++++
+ gcc/testsuite/gcc.dg/lto/pr122515_9.c | 12 +++++
+ gcc/testsuite/lib/lto.exp             | 69 ++++++++++++++++++++++++++-
+ 15 files changed, 206 insertions(+), 24 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.dg/lto/pr122515_0.c
+ create mode 100644 gcc/testsuite/gcc.dg/lto/pr122515_1.c
+ create mode 100644 gcc/testsuite/gcc.dg/lto/pr122515_2.c
+ create mode 100644 gcc/testsuite/gcc.dg/lto/pr122515_3.c
+ create mode 100644 gcc/testsuite/gcc.dg/lto/pr122515_4.c
+ create mode 100644 gcc/testsuite/gcc.dg/lto/pr122515_5.c
+ create mode 100644 gcc/testsuite/gcc.dg/lto/pr122515_6.c
+ create mode 100644 gcc/testsuite/gcc.dg/lto/pr122515_7.c
+ create mode 100644 gcc/testsuite/gcc.dg/lto/pr122515_8.c
+ create mode 100644 gcc/testsuite/gcc.dg/lto/pr122515_9.c
+
+diff --git a/gcc/lto-wrapper.cc b/gcc/lto-wrapper.cc
+index a980b208783a..f5898e5f74cb 100644
+--- a/gcc/lto-wrapper.cc
++++ b/gcc/lto-wrapper.cc
+@@ -1206,18 +1206,16 @@ debug_objcopy (const char *infile, bool rename)
+ 
+   const char *p;
+   const char *orig_infile = infile;
+-  off_t inoff = 0;
+-  long loffset;
++  int64_t inoff = 0;
+   int consumed;
+   if ((p = strrchr (infile, '@'))
+       && p != infile
+-      && sscanf (p, "@%li%n", &loffset, &consumed) >= 1
++      && sscanf (p, "@%" PRIi64 "%n", &inoff, &consumed) >= 1
+       && strlen (p) == (unsigned int) consumed)
+     {
+       char *fname = xstrdup (infile);
+       fname[p - infile] = '\0';
+       infile = fname;
+-      inoff = (off_t) loffset;
+     }
+   int infd = open (infile, O_RDONLY | O_BINARY);
+   if (infd == -1)
+@@ -1483,8 +1481,7 @@ run_gcc (unsigned argc, char *argv[])
+     {
+       char *p;
+       int fd;
+-      off_t file_offset = 0;
+-      long loffset;
++      int64_t file_offset = 0;
+       int consumed;
+       char *filename = argv[i];
+ 
+@@ -1498,13 +1495,12 @@ run_gcc (unsigned argc, char *argv[])
+ 
+       if ((p = strrchr (argv[i], '@'))
+ 	  && p != argv[i]
+-	  && sscanf (p, "@%li%n", &loffset, &consumed) >= 1
++	  && sscanf (p, "@%" PRIi64 "%n", &file_offset, &consumed) >= 1
+ 	  && strlen (p) == (unsigned int) consumed)
+ 	{
+ 	  filename = XNEWVEC (char, p - argv[i] + 1);
+ 	  memcpy (filename, argv[i], p - argv[i]);
+ 	  filename[p - argv[i]] = '\0';
+-	  file_offset = (off_t) loffset;
+ 	}
+       fd = open (filename, O_RDONLY | O_BINARY);
+       /* Linker plugin passes -fresolution and -flinker-output options.
+@@ -1801,20 +1797,18 @@ cont1:
+       for (i = 0; i < num_offload_files; i++)
+ 	{
+ 	  char *p;
+-	  long loffset;
+ 	  int fd, consumed;
+-	  off_t file_offset = 0;
++	  int64_t file_offset = 0;
+ 	  char *filename = offload_argv[i];
+ 
+ 	  if ((p = strrchr (offload_argv[i], '@'))
+ 	      && p != offload_argv[i]
+-	      && sscanf (p, "@%li%n", &loffset, &consumed) >= 1
++	      && sscanf (p, "@%" PRIi64 "%n", &file_offset, &consumed) >= 1
+ 	      && strlen (p) == (unsigned int) consumed)
+ 	    {
+ 	      filename = XNEWVEC (char, p - offload_argv[i] + 1);
+ 	      memcpy (filename, offload_argv[i], p - offload_argv[i]);
+ 	      filename[p - offload_argv[i]] = '\0';
+-	      file_offset = (off_t) loffset;
+ 	    }
+ 	  fd = open (filename, O_RDONLY | O_BINARY);
+ 	  if (fd == -1)
+diff --git a/gcc/lto/lto-common.cc b/gcc/lto/lto-common.cc
+index 64631201939a..3d35c0389161 100644
+--- a/gcc/lto/lto-common.cc
++++ b/gcc/lto/lto-common.cc
+@@ -2395,15 +2395,15 @@ static size_t page_mask;
+ 
+ static char *
+ lto_read_section_data (struct lto_file_decl_data *file_data,
+-		       intptr_t offset, size_t len)
++		       off_t offset, size_t len)
+ {
+   char *result;
+   static int fd = -1;
+   static char *fd_name;
+ #if LTO_MMAP_IO
+-  intptr_t computed_len;
+-  intptr_t computed_offset;
+-  intptr_t diff;
++  size_t computed_len;
++  off_t computed_offset;
++  off_t diff;
+ #endif
+ 
+   /* Keep a single-entry file-descriptor cache.  The last file we
+@@ -2436,9 +2436,15 @@ lto_read_section_data (struct lto_file_decl_data *file_data,
+       page_mask = ~(page_size - 1);
+     }
+ 
+-  computed_offset = offset & page_mask;
++  computed_offset = offset & ((off_t) page_mask);
+   diff = offset - computed_offset;
+-  computed_len = len + diff;
++  if (len > (size_t) (SSIZE_MAX - diff))
++    {
++      fatal_error (input_location, "Cannot map %s: section is too long",
++		   file_data->file_name);
++      return NULL;
++    }
++  computed_len = (size_t) diff + len;
+ 
+   result = (char *) mmap (NULL, computed_len, PROT_READ, MAP_PRIVATE,
+ 			  fd, computed_offset);
+diff --git a/gcc/lto/lto-object.cc b/gcc/lto/lto-object.cc
+index 6f6d55bfc3c2..1fad6520c3b7 100644
+--- a/gcc/lto/lto-object.cc
++++ b/gcc/lto/lto-object.cc
+@@ -69,10 +69,9 @@ lto_file *
+ lto_obj_file_open (const char *filename, bool writable)
+ {
+   const char *offset_p;
+-  long loffset;
+   int consumed;
+   char *fname;
+-  off_t offset;
++  int64_t offset;
+   struct lto_simple_object *lo;
+   const char *errmsg;
+   int err;
+@@ -80,13 +79,12 @@ lto_obj_file_open (const char *filename, bool writable)
+   offset_p = strrchr (filename, '@');
+   if (offset_p != NULL
+       && offset_p != filename
+-      && sscanf (offset_p, "@%li%n", &loffset, &consumed) >= 1
++      && sscanf (offset_p, "@%" PRIi64 "%n", &offset, &consumed) >= 1
+       && strlen (offset_p) == (unsigned int) consumed)
+     {
+       fname = XNEWVEC (char, offset_p - filename + 1);
+       memcpy (fname, filename, offset_p - filename);
+       fname[offset_p - filename] = '\0';
+-      offset = (off_t) loffset;
+     }
+   else
+     {
+diff --git a/gcc/lto/lto.h b/gcc/lto/lto.h
+index e6499591474c..a619a43bf041 100644
+--- a/gcc/lto/lto.h
++++ b/gcc/lto/lto.h
+@@ -58,7 +58,7 @@ extern int lto_link_dump_id, decl_merge_dump_id, partition_dump_id;
+ struct lto_section_slot
+ {
+   const char *name;
+-  intptr_t start;
++  off_t start;
+   size_t len;
+   struct lto_section_slot *next;
+ };
+diff --git a/gcc/testsuite/gcc.dg/lto/pr122515_0.c b/gcc/testsuite/gcc.dg/lto/pr122515_0.c
+new file mode 100644
+index 000000000000..fb2fa8b8d82e
+--- /dev/null
++++ b/gcc/testsuite/gcc.dg/lto/pr122515_0.c
+@@ -0,0 +1,9 @@
++/* { dg-lto-do ar-link } */
++/* { dg-lto-options { { -flto=auto -ffat-lto-objects } } } */
++
++extern int bar_7 (int);
++
++int main (void)
++{
++  return bar_7 (42);
++}
+diff --git a/gcc/testsuite/gcc.dg/lto/pr122515_1.c b/gcc/testsuite/gcc.dg/lto/pr122515_1.c
+new file mode 100644
+index 000000000000..f676c4a5425a
+--- /dev/null
++++ b/gcc/testsuite/gcc.dg/lto/pr122515_1.c
+@@ -0,0 +1,12 @@
++typedef struct {
++  int num;
++  int foo[40000000];
++} A_1;
++
++A_1 a1_1 = {1};
++A_1 a2_1 = {2};
++
++int bar_1 (int i)
++{
++  return i++;
++}
+diff --git a/gcc/testsuite/gcc.dg/lto/pr122515_2.c b/gcc/testsuite/gcc.dg/lto/pr122515_2.c
+new file mode 100644
+index 000000000000..acda878c80ff
+--- /dev/null
++++ b/gcc/testsuite/gcc.dg/lto/pr122515_2.c
+@@ -0,0 +1,12 @@
++typedef struct {
++  int num;
++  int foo[40000000];
++} A_2;
++
++A_2 a1_2 = {1};
++A_2 a2_2 = {2};
++
++int bar_2 (int i)
++{
++  return i++;
++}
+diff --git a/gcc/testsuite/gcc.dg/lto/pr122515_3.c b/gcc/testsuite/gcc.dg/lto/pr122515_3.c
+new file mode 100644
+index 000000000000..7223e9f38bb9
+--- /dev/null
++++ b/gcc/testsuite/gcc.dg/lto/pr122515_3.c
+@@ -0,0 +1,12 @@
++typedef struct {
++  int num;
++  int foo[40000000];
++} A_3;
++
++A_3 a1_3 = {1};
++A_3 a2_3 = {2};
++
++int bar_3 (int i)
++{
++  return i++;
++}
+diff --git a/gcc/testsuite/gcc.dg/lto/pr122515_4.c b/gcc/testsuite/gcc.dg/lto/pr122515_4.c
+new file mode 100644
+index 000000000000..51754aed8e23
+--- /dev/null
++++ b/gcc/testsuite/gcc.dg/lto/pr122515_4.c
+@@ -0,0 +1,12 @@
++typedef struct {
++  int num;
++  int foo[40000000];
++} A_4;
++
++A_4 a1_4 = {1};
++A_4 a2_4 = {2};
++
++int bar_4 (int i)
++{
++  return i++;
++}
+diff --git a/gcc/testsuite/gcc.dg/lto/pr122515_5.c b/gcc/testsuite/gcc.dg/lto/pr122515_5.c
+new file mode 100644
+index 000000000000..cca1787b8c9e
+--- /dev/null
++++ b/gcc/testsuite/gcc.dg/lto/pr122515_5.c
+@@ -0,0 +1,12 @@
++typedef struct {
++  int num;
++  int foo[40000000];
++} A_5;
++
++A_5 a1_5 = {1};
++A_5 a2_5 = {2};
++
++int bar_5 (int i)
++{
++  return i++;
++}
+diff --git a/gcc/testsuite/gcc.dg/lto/pr122515_6.c b/gcc/testsuite/gcc.dg/lto/pr122515_6.c
+new file mode 100644
+index 000000000000..98e6213f2616
+--- /dev/null
++++ b/gcc/testsuite/gcc.dg/lto/pr122515_6.c
+@@ -0,0 +1,12 @@
++typedef struct {
++  int num;
++  int foo[40000000];
++} A_6;
++
++A_6 a1_6 = {1};
++A_6 a2_6 = {2};
++
++int bar_6 (int i)
++{
++  return i++;
++}
+diff --git a/gcc/testsuite/gcc.dg/lto/pr122515_7.c b/gcc/testsuite/gcc.dg/lto/pr122515_7.c
+new file mode 100644
+index 000000000000..7f27fff1b2d3
+--- /dev/null
++++ b/gcc/testsuite/gcc.dg/lto/pr122515_7.c
+@@ -0,0 +1,12 @@
++typedef struct {
++  int num;
++  int foo[40000000];
++} A_7;
++
++A_7 a1_7 = {1};
++A_7 a2_7 = {2};
++
++int bar_7 (int i)
++{
++  return i++;
++}
+diff --git a/gcc/testsuite/gcc.dg/lto/pr122515_8.c b/gcc/testsuite/gcc.dg/lto/pr122515_8.c
+new file mode 100644
+index 000000000000..f3d56bd1174b
+--- /dev/null
++++ b/gcc/testsuite/gcc.dg/lto/pr122515_8.c
+@@ -0,0 +1,12 @@
++typedef struct {
++  int num;
++  int foo[40000000];
++} A_8;
++
++A_8 a1_8 = {1};
++A_8 a2_8 = {2};
++
++int bar_8 (int i)
++{
++  return i++;
++}
+diff --git a/gcc/testsuite/gcc.dg/lto/pr122515_9.c b/gcc/testsuite/gcc.dg/lto/pr122515_9.c
+new file mode 100644
+index 000000000000..2fdd04c314f1
+--- /dev/null
++++ b/gcc/testsuite/gcc.dg/lto/pr122515_9.c
+@@ -0,0 +1,12 @@
++typedef struct {
++  int num;
++  int foo[40000000];
++} A_9;
++
++A_9 a1_9 = {1};
++A_9 a2_9 = {2};
++
++int bar_9 (int i)
++{
++  return i++;
++}
+diff --git a/gcc/testsuite/lib/lto.exp b/gcc/testsuite/lib/lto.exp
+index 9231e8550afb..a35a3fc3a748 100644
+--- a/gcc/testsuite/lib/lto.exp
++++ b/gcc/testsuite/lib/lto.exp
+@@ -309,6 +309,43 @@ proc lto-obj { source dest optall optfile optstr xfaildata } {
+     ${tool}_check_compile "$testcase $dest assemble" $optstr $dest $comp_output
+ }
+ 
++proc lto-build-archive { testname objlist dest } {
++    global testcase
++    global tool
++    global GCC_UNDER_TEST
++
++    upvar dg-messages-by-file dg-messages-by-file
++
++    verbose "lto-build-archive" 2
++    file_on_host delete $dest
++
++    # Check that all of the objects were built successfully.
++    foreach obj [split $objlist] {
++	if ![file_on_host exists $obj] then {
++	    unresolved "$testcase $testname build-archive"
++	    return
++	}
++    }
++
++    # Hack up the gcc-ar command from $GCC_UNDER_TEST.
++    set ar_cmd [file dirname [lindex $GCC_UNDER_TEST 0]]
++    set ar_cmd "$ar_cmd/gcc-ar [lrange $GCC_UNDER_TEST 1 end]"
++    set ar_output [remote_exec host "$ar_cmd rcs $dest $objlist"]
++    set retval [lindex $ar_output 0]
++    set retmsg [lindex $ar_output 1]
++
++    # If any message remains, we fail.  Don't bother overriding tool since
++    # we're not really looking to match any specific error or warning patterns
++    # here.
++    if ![string match "0" $retval] then {
++	${tool}_fail $testcase "ar returned $retval: $retmsg"
++	return 0
++    } else {
++	${tool}_pass $testcase "archive"
++	return 0
++    }
++}
++
+ # lto-link-and-maybe-run -- link the object files and run the executable
+ # if compile_type is set to "run"
+ #
+@@ -379,7 +416,8 @@ proc lto-link-and-maybe-run { testname objlist dest optall optfile optstr } {
+     }
+ 
+     # Return if we only needed to link.
+-    if { ![string compare "link" $compile_type] } {
++    if { ![string compare "link" $compile_type] \
++        || ![string compare "ar-link" $compile_type] } {
+ 	return
+     }
+ 
+@@ -510,6 +548,8 @@ proc lto-get-options-main { src } {
+ 		set compile_type "run"
+ 	    } elseif { ![string compare "link" $dgdo] } {
+ 		set compile_type "link"
++	    } elseif { ![string compare "ar-link" $dgdo] } {
++		set compile_type "ar-link"
+ 	    } else {
+ 		warning "lto.exp does not support dg-lto-do $dgdo"
+ 	    }
+@@ -691,6 +731,12 @@ proc lto-execute-1 { src1 sid } {
+     # Get the base name of this test, for use in messages.
+     set testcase [lindex ${src_list} 0]
+ 
++    # The test needs to build all but the main file into an archive and then
++    # link them all together.
++    if { ![string compare "ar-link" $compile_type] } {
++        set arname "${sid}_${base}.a"
++    }
++
+     # Remove the $srcdir and $tmpdir prefixes from $src1.  (It would
+     # be possible to use "regsub" here, if we were careful to escape
+     # all regular expression characters in $srcdir and $tmpdir, but
+@@ -755,8 +801,24 @@ proc lto-execute-1 { src1 sid } {
+ 	    incr i
+ 	}
+ 
++	# Bundle all but the main file into an archive. Update objlist to only
++	# have the archive and the last file.
++	if { ![string compare "ar-link" $compile_type] } {
++	    set mainsrc [lindex $obj_list 0]
++	    set obj_list [lrange $obj_list 1 end]
++	    lto-build-archive \
++		"[lindex $obj_list 1]-[lindex $obj_list end]" \
++		$obj_list $arname
++
++	    set obj_list ""
++	    lappend obj_list $mainsrc
++	    lappend obj_list $arname
++	    set num_srcs 2
++	}
++
+ 	# Link (using the compiler under test), run, and clean up tests.
+ 	if { ![string compare "run" $compile_type] \
++	     || ![string compare "ar-link" $compile_type] \
+ 	     || ![string compare "link" $compile_type] } {
+ 
+ 	    # Filter out any link options we were asked to suppress.
+@@ -772,6 +834,10 @@ proc lto-execute-1 { src1 sid } {
+ 		    "[lindex $obj_list 0]-[lindex $obj_list end]" \
+ 		    $obj_list $execname $filtered ${dg-extra-ld-options} \
+ 		    $filtered
++
++	    if (![string compare "ar-link" $compile_type]) {
++		file_on_host delete $arname
++	      }
+ 	}
+ 
+ 
+@@ -818,6 +884,7 @@ proc lto-execute-1 { src1 sid } {
+ 	unset testname_with_flags
+ 	
+ 	if { ![string compare "run" $compile_type] \
++	     || ![string compare "ar-link" $compile_type] \
+ 	     || ![string compare "link" $compile_type] } {
+ 	    file_on_host delete $execname
+ 	}
+-- 
+2.43.7
+
+

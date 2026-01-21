@@ -1,0 +1,82 @@
+From fad7547a50166f21fe4445af073e6b58e1a8473d Mon Sep 17 00:00:00 2001
+From: Nathaniel Shead <nathanieloshead@gmail.com>
+Date: Sat, 1 Nov 2025 22:59:33 +1100
+Subject: [PATCH] c++/modules: Stream BASELINK_OPTYPE [PR122381]
+
+This is used in template conversion operators to determine what type the
+user requested.
+
+	PR c++/122381
+
+gcc/cp/ChangeLog:
+
+	* module.cc (trees_out::core_vals): Write BASELINK_OPTYPE (aka
+	TREE_CHAIN).
+	(trees_in::core_vals): Read it.
+
+gcc/testsuite/ChangeLog:
+
+	* g++.dg/modules/convop-2_a.H: New test.
+	* g++.dg/modules/convop-2_b.C: New test.
+
+Signed-off-by: Nathaniel Shead <nathanieloshead@gmail.com>
+(cherry picked from commit b466450c6d502557921f03527cc165fb3402aaa9)
+---
+ gcc/cp/module.cc                          |  2 ++
+ gcc/testsuite/g++.dg/modules/convop-2_a.H | 10 ++++++++++
+ gcc/testsuite/g++.dg/modules/convop-2_b.C |  5 +++++
+ 3 files changed, 17 insertions(+)
+ create mode 100644 gcc/testsuite/g++.dg/modules/convop-2_a.H
+ create mode 100644 gcc/testsuite/g++.dg/modules/convop-2_b.C
+
+diff --git a/gcc/cp/module.cc b/gcc/cp/module.cc
+index 8c64a82f7ed8..632dc47552a6 100644
+--- a/gcc/cp/module.cc
++++ b/gcc/cp/module.cc
+@@ -6690,6 +6690,7 @@ trees_out::core_vals (tree t)
+       WT (((lang_tree_node *)t)->baselink.binfo);
+       WT (((lang_tree_node *)t)->baselink.functions);
+       WT (((lang_tree_node *)t)->baselink.access_binfo);
++      WT (((lang_tree_node *)t)->baselink.common.chain);
+       break;
+ 
+     case CONSTRAINT_INFO:
+@@ -7259,6 +7260,7 @@ trees_in::core_vals (tree t)
+       RT (((lang_tree_node *)t)->baselink.binfo);
+       RTU (((lang_tree_node *)t)->baselink.functions);
+       RT (((lang_tree_node *)t)->baselink.access_binfo);
++      RT (((lang_tree_node *)t)->baselink.common.chain);
+       break;
+ 
+     case CONSTRAINT_INFO:
+diff --git a/gcc/testsuite/g++.dg/modules/convop-2_a.H b/gcc/testsuite/g++.dg/modules/convop-2_a.H
+new file mode 100644
+index 000000000000..62bb2101f691
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/modules/convop-2_a.H
+@@ -0,0 +1,10 @@
++// PR c++/122381
++// { dg-additional-options "-fmodule-header" }
++// { dg-module-cmi {} }
++
++template <typename T> struct color_ref {
++  operator int() const { return 0; }
++  int foo(color_ref x) {
++    return x.operator int();
++  }
++};
+diff --git a/gcc/testsuite/g++.dg/modules/convop-2_b.C b/gcc/testsuite/g++.dg/modules/convop-2_b.C
+new file mode 100644
+index 000000000000..d1e829ec70ca
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/modules/convop-2_b.C
+@@ -0,0 +1,5 @@
++// PR c++/122381
++// { dg-additional-options "-fmodules" }
++
++import "convop-2_a.H";
++template struct color_ref<int>;
+-- 
+2.43.7
+
+

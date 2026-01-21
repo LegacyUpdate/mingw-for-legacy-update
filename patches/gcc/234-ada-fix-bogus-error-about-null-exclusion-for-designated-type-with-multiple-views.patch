@@ -1,0 +1,101 @@
+From 31ed7aec86c2cb4dc47e405f4be21fc840c7d5cf Mon Sep 17 00:00:00 2001
+From: Eric Botcazou <ebotcazou@adacore.com>
+Date: Fri, 7 Nov 2025 13:10:00 +0100
+Subject: [PATCH] ada: Fix bogus error about null exclusion for designated type
+ with multiple views
+
+It comes from the new legality check retroactively introduced by AI12-0289,
+but the implementation is fooled by the presence of both an incomplete and
+a partial view for a tagged type.
+
+gcc/ada/ChangeLog:
+
+	PR ada/111433
+	* sem_util.ads (Incomplete_Or_Partial_View): Add Partial_Only formal
+	parameter.
+	* sem_util.adb (Incomplete_Or_Partial_View): Likewise.  Do not look
+	for an incomplete view if it is set to True.
+	* sem_ch6.adb (Check_Conformance.Null_Exclusions_Match): Pass True
+	for Partial_Only in the call to Incomplete_Or_Partial_View.
+---
+ gcc/ada/sem_ch6.adb  | 2 +-
+ gcc/ada/sem_util.adb | 9 ++++++---
+ gcc/ada/sem_util.ads | 6 ++++--
+ 3 files changed, 11 insertions(+), 6 deletions(-)
+
+diff --git a/gcc/ada/sem_ch6.adb b/gcc/ada/sem_ch6.adb
+index aed983f7a311..8f208d73cc30 100644
+--- a/gcc/ada/sem_ch6.adb
++++ b/gcc/ada/sem_ch6.adb
+@@ -5599,7 +5599,7 @@ package body Sem_Ch6 is
+             declare
+                D : constant Entity_Id := Directly_Designated_Type (Etype (F1));
+                Partial_View_Of_Desig : constant Entity_Id :=
+-                 Incomplete_Or_Partial_View (D);
++                 Incomplete_Or_Partial_View (D, Partial_Only => True);
+             begin
+                return No (Partial_View_Of_Desig)
+                  or else Is_Tagged_Type (Partial_View_Of_Desig)
+diff --git a/gcc/ada/sem_util.adb b/gcc/ada/sem_util.adb
+index 4961c7a7115a..295e7f74067a 100644
+--- a/gcc/ada/sem_util.adb
++++ b/gcc/ada/sem_util.adb
+@@ -14355,7 +14355,9 @@ package body Sem_Util is
+    -- Incomplete_Or_Partial_View --
+    --------------------------------
+ 
+-   function Incomplete_Or_Partial_View (Id : Entity_Id) return Entity_Id is
++   function Incomplete_Or_Partial_View
++     (Id : Entity_Id; Partial_Only : Boolean := False) return Entity_Id
++   is
+       S : constant Entity_Id := Scope (Id);
+ 
+       function Inspect_Decls
+@@ -14438,6 +14440,7 @@ package body Sem_Util is
+         and then (Is_Incomplete_Type (Prev) or else Ekind (Prev) = E_Constant)
+         and then Present (Full_View (Prev))
+         and then Full_View (Prev) = Id
++        and then not Partial_Only
+       then
+          return Prev;
+       end if;
+@@ -14449,7 +14452,7 @@ package body Sem_Util is
+             Pkg_Decl : constant Node_Id := Package_Specification (S);
+ 
+          begin
+-            --  It is knows that Typ has a private view, look for it in the
++            --  It is known that Typ has a private view, look for it in the
+             --  visible declarations of the enclosing scope. A special case
+             --  of this is when the two views have been exchanged - the full
+             --  appears earlier than the private.
+@@ -14469,7 +14472,7 @@ package body Sem_Util is
+             --  Taft amendment type. The incomplete view should be located in
+             --  the private declarations of the enclosing scope.
+ 
+-            elsif In_Package_Body (S) then
++            elsif In_Package_Body (S) and then not Partial_Only then
+                return Inspect_Decls (Private_Declarations (Pkg_Decl), True);
+             end if;
+          end;
+diff --git a/gcc/ada/sem_util.ads b/gcc/ada/sem_util.ads
+index fd749c4b8d41..df2f193294f9 100644
+--- a/gcc/ada/sem_util.ads
++++ b/gcc/ada/sem_util.ads
+@@ -1685,9 +1685,11 @@ package Sem_Util is
+    --  package specification. The package must be on the scope stack, and the
+    --  corresponding private part must not.
+ 
+-   function Incomplete_Or_Partial_View (Id : Entity_Id) return Entity_Id;
++   function Incomplete_Or_Partial_View
++     (Id : Entity_Id; Partial_Only : Boolean := False) return Entity_Id;
+    --  Given the entity of a constant or a type, retrieve the incomplete or
+-   --  partial view of the same entity. Note that Id may not have a partial
++   --  partial view of the same entity. If Partial_Only is True, retrieve
++   --  only the partial view of a type. Note that Id may not have a partial
+    --  view in which case the function returns Empty.
+ 
+    function Incomplete_View_From_Limited_With
+-- 
+2.43.7
+
+

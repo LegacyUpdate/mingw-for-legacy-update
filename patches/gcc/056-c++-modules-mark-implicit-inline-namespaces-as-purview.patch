@@ -1,0 +1,85 @@
+From 597bc675e6f5392caee0c423b9a6c5c1b8e93db5 Mon Sep 17 00:00:00 2001
+From: Nathaniel Shead <nathanieloshead@gmail.com>
+Date: Mon, 1 Sep 2025 21:28:03 +1000
+Subject: [PATCH] c++/modules: Mark implicit inline namespaces as purview
+ [PR121724]
+
+When we push an existing namespace within the module purview for the
+first time, we also need to mark any parent inline namespaces as purview
+to not confuse the streaming logic.
+
+	PR c++/121724
+
+gcc/cp/ChangeLog:
+
+	* name-lookup.cc (push_namespace): Mark inline namespace
+	contexts as purview if needed.
+
+gcc/testsuite/ChangeLog:
+
+	* g++.dg/modules/namespace-12_a.C: New test.
+	* g++.dg/modules/namespace-12_b.C: New test.
+
+Signed-off-by: Nathaniel Shead <nathanieloshead@gmail.com>
+(cherry picked from commit 03505e5b93e635907ed5ef7edac11da4026655e2)
+---
+ gcc/cp/name-lookup.cc                         |  3 +++
+ gcc/testsuite/g++.dg/modules/namespace-12_a.C | 17 +++++++++++++++++
+ gcc/testsuite/g++.dg/modules/namespace-12_b.C |  6 ++++++
+ 3 files changed, 26 insertions(+)
+ create mode 100644 gcc/testsuite/g++.dg/modules/namespace-12_a.C
+ create mode 100644 gcc/testsuite/g++.dg/modules/namespace-12_b.C
+
+diff --git a/gcc/cp/name-lookup.cc b/gcc/cp/name-lookup.cc
+index d2898ec5d395..72d480c56ae4 100644
+--- a/gcc/cp/name-lookup.cc
++++ b/gcc/cp/name-lookup.cc
+@@ -9236,6 +9236,9 @@ push_namespace (tree name, bool make_inline)
+ 		  gcc_checking_assert (!(tree)slot || (tree)slot == ctx);
+ 		  slot = ctx;
+ 		}
++
++	      if (module_purview_p ())
++		DECL_MODULE_PURVIEW_P (ctx) = true;
+ 	    }
+ 	}
+ 
+diff --git a/gcc/testsuite/g++.dg/modules/namespace-12_a.C b/gcc/testsuite/g++.dg/modules/namespace-12_a.C
+new file mode 100644
+index 000000000000..a43262638f12
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/modules/namespace-12_a.C
+@@ -0,0 +1,17 @@
++// PR c++/121724
++// { dg-additional-options "-fmodules -Wno-global-module" }
++// { dg-module-cmi foo }
++
++module;
++namespace A {
++  inline namespace X {
++    namespace B {
++    }
++  }
++}
++export module foo;
++export namespace A {
++  namespace B {
++    struct S {};
++  }
++}
+diff --git a/gcc/testsuite/g++.dg/modules/namespace-12_b.C b/gcc/testsuite/g++.dg/modules/namespace-12_b.C
+new file mode 100644
+index 000000000000..8c429ba9e73b
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/modules/namespace-12_b.C
+@@ -0,0 +1,6 @@
++// PR c++/121724
++// { dg-additional-options "-fmodules" }
++
++import foo;
++using T = A::B::S;
++using T = A::X::B::S;
+-- 
+2.43.7
+
+

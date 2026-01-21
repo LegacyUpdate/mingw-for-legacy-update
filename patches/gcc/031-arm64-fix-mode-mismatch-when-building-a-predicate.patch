@@ -1,0 +1,77 @@
+From 58a9717df098defb7f595fbc56122107e952a46b Mon Sep 17 00:00:00 2001
+From: Richard Sandiford <richard.sandiford@arm.com>
+Date: Mon, 18 Aug 2025 12:15:21 +0100
+Subject: [PATCH] aarch64: Fix mode mismatch when building a predicate
+ [PR121118]
+
+This PR is about a case where we used aarch64_expand_sve_const_pred_trn
+to combine two predicates, one of which was constructing using
+aarch64_sve_move_pred_via_while.  The former requires the inputs
+to have mode VNx16BI, but the latter returned VNx8BI for a .H
+WHILELO.
+
+The proper fix, used on trunk, is to make the pattern emitted by
+aarch64_sve_move_pred_via_while produce an VNx16BI for all element
+sizes, since every bit of the result is significant.  However,
+that required some target-independent changes that are too invasive
+to backport.  This patch goes for the simpler (but less robust) approach
+of using the original pattern and casting it to VNx16BI after the fact.
+
+Since the WHILELO pattern is an unspec, the chances of something
+optimising it in a way that changes the undefined bits of the output
+should be very low, especially on a release branch.  It is still a less
+satisfactory fix though.
+
+gcc/
+	PR target/121118
+	* config/aarch64/aarch64.cc (aarch64_sve_move_pred_via_while):
+	Return a VNx16BI predicate.
+
+gcc/testsuite/
+	PR target/121118
+	* gcc.target/aarch64/sve/acle/general/pr121118_1.c: New test.
+---
+ gcc/config/aarch64/aarch64.cc                    |  2 +-
+ .../aarch64/sve/acle/general/pr121118_1.c        | 16 ++++++++++++++++
+ 2 files changed, 17 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/gcc.target/aarch64/sve/acle/general/pr121118_1.c
+
+diff --git a/gcc/config/aarch64/aarch64.cc b/gcc/config/aarch64/aarch64.cc
+index add7d130dce7..7bd75470cac3 100644
+--- a/gcc/config/aarch64/aarch64.cc
++++ b/gcc/config/aarch64/aarch64.cc
+@@ -5943,7 +5943,7 @@ aarch64_sve_move_pred_via_while (rtx target, machine_mode mode,
+   target = aarch64_target_reg (target, mode);
+   emit_insn (gen_while (UNSPEC_WHILELO, DImode, mode,
+ 			target, const0_rtx, limit));
+-  return target;
++  return gen_lowpart (VNx16BImode, target);
+ }
+ 
+ static rtx
+diff --git a/gcc/testsuite/gcc.target/aarch64/sve/acle/general/pr121118_1.c b/gcc/testsuite/gcc.target/aarch64/sve/acle/general/pr121118_1.c
+new file mode 100644
+index 000000000000..b59a972c0c44
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/aarch64/sve/acle/general/pr121118_1.c
+@@ -0,0 +1,16 @@
++/* { dg-options "-O2 -msve-vector-bits=512" } */
++
++typedef __SVBool_t fixed_bool __attribute__((arm_sve_vector_bits(512)));
++
++#define TEST_CONST(NAME, CONST)						\
++  fixed_bool								\
++  NAME ()								\
++  {									\
++    union { unsigned long long i; fixed_bool pg; } u = { CONST };	\
++    return u.pg;							\
++  }
++
++TEST_CONST (test1, 0x02aaaaaaaa)
++TEST_CONST (test2, 0x0155555557)
++TEST_CONST (test3, 0x0013333333333333ULL)
++TEST_CONST (test4, 0x0011111111111113ULL)
+-- 
+2.43.7
+
+

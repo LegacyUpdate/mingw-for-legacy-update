@@ -1,0 +1,29 @@
+From e2dfb4610831d1996913d451f89024e10aaa5056 Mon Sep 17 00:00:00 2001
+From: =?utf8?q?Marc=20Poulhi=C3=A8s?= <poulhies@adacore.com>
+Date: Thu, 17 Jul 2025 15:00:25 +0200
+Subject: [PATCH] ada: Minor typo fix in comment
+
+gcc/ada/ChangeLog:
+
+	* gcc-interface/trans.cc (gnat_to_gnu): Fix typo in comment.
+---
+ gcc/ada/gcc-interface/trans.cc | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/gcc/ada/gcc-interface/trans.cc b/gcc/ada/gcc-interface/trans.cc
+index e02804b75af1..e815eb52e340 100644
+--- a/gcc/ada/gcc-interface/trans.cc
++++ b/gcc/ada/gcc-interface/trans.cc
+@@ -8737,7 +8737,7 @@ gnat_to_gnu (Node_Id gnat_node)
+ 
+   /* Set the location information on the result if it's not a simple name
+      or something that contains a simple name, for example a tag, because
+-     we don"t want all the references to get the location of the first use.
++     we don't want all the references to get the location of the first use.
+      Note that we may have no result if we tried to build a CALL_EXPR node
+      to a procedure with no side-effects and optimization is enabled.  */
+   else if (kind != N_Identifier
+-- 
+2.43.7
+
+

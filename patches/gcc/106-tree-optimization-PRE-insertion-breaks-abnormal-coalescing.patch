@@ -1,0 +1,77 @@
+From b9e703f0b42b2a86c9e18cd12497a0c19d2eb96c Mon Sep 17 00:00:00 2001
+From: Richard Biener <rguenther@suse.de>
+Date: Mon, 22 Sep 2025 10:14:31 +0200
+Subject: [PATCH] tree-optimization/122016 - PRE insertion breaks abnormal
+ coalescing
+
+When PRE asks VN to simplify a NARY but not insert, that bypasses
+the abnormal guard in maybe_push_res_to_seq and we blindly accept
+new uses of abnormals.  The following fixes this.
+
+	PR tree-optimization/122016
+	* tree-ssa-sccvn.cc (vn_nary_simplify): Do not use the
+	simplified expression when it references abnormals.
+
+	* gcc.dg/torture/pr122016.c: New testcase.
+
+(cherry picked from commit 52b53cfb5392257536fce8dd22ea60412ceaee7d)
+---
+ gcc/testsuite/gcc.dg/torture/pr122016.c | 27 +++++++++++++++++++++++++
+ gcc/tree-ssa-sccvn.cc                   |  6 ++++++
+ 2 files changed, 33 insertions(+)
+ create mode 100644 gcc/testsuite/gcc.dg/torture/pr122016.c
+
+diff --git a/gcc/testsuite/gcc.dg/torture/pr122016.c b/gcc/testsuite/gcc.dg/torture/pr122016.c
+new file mode 100644
+index 000000000000..027a63d42562
+--- /dev/null
++++ b/gcc/testsuite/gcc.dg/torture/pr122016.c
+@@ -0,0 +1,27 @@
++/* { dg-do compile } */
++/* { dg-additional-options "-ftree-pre" } */
++
++int merge_parse_args_argc;
++char merge_parse_args_argv_0;
++int strncmp(char *, char *, long);
++void _setjmp();
++typedef enum { FALSE, TRUE } boool;
++void directory_exists();
++void merge_parse_args() {
++  int i;
++  boool help_found = FALSE;
++  while (i < merge_parse_args_argc && !help_found) {
++    if (strncmp("", &merge_parse_args_argv_0, 2))
++      help_found = TRUE;
++    else {
++      for (;;) {
++        _setjmp();
++        break;
++      }
++      i++;
++      directory_exists();
++    }
++    i++;
++  }
++  _setjmp();
++}
+diff --git a/gcc/tree-ssa-sccvn.cc b/gcc/tree-ssa-sccvn.cc
+index 9bf25c67dc95..a217bab88762 100644
+--- a/gcc/tree-ssa-sccvn.cc
++++ b/gcc/tree-ssa-sccvn.cc
+@@ -2622,6 +2622,12 @@ vn_nary_simplify (vn_nary_op_t nary)
+ 		      nary->type, nary->length);
+   memcpy (op.ops, nary->op, sizeof (tree) * nary->length);
+   tree res = vn_nary_build_or_lookup_1 (&op, false, true);
++  /* Do not update *NARY with a simplified result that contains abnormals.
++     This matches what maybe_push_res_to_seq does when requesting insertion.  */
++  for (unsigned i = 0; i < op.num_ops; ++i)
++    if (TREE_CODE (op.ops[i]) == SSA_NAME
++	&& SSA_NAME_OCCURS_IN_ABNORMAL_PHI (op.ops[i]))
++      return res;
+   if (op.code.is_tree_code ()
+       && op.num_ops <= nary->length
+       && (tree_code) op.code != CONSTRUCTOR)
+-- 
+2.43.7
+
+

@@ -1,0 +1,48 @@
+From 28061487f8813d47c15d165faac3663322811a7d Mon Sep 17 00:00:00 2001
+From: Haochen Jiang <haochen.jiang@intel.com>
+Date: Tue, 1 Jul 2025 14:11:55 +0800
+Subject: [PATCH] i386: Remove AMX-TRANSPOSE from Diamond Rapids
+
+AMX-TRANSPOSE will be removed from Diamond Rapids according to ISE.
+Backported from trunk AMX-TRANSPOSE removal patch.
+
+gcc/ChangeLog:
+
+	* config/i386/i386.h (PTA_DIAMONDRAPIDS): Remove AMX-TRANSPOSE.
+	* doc/invoke.texi: Correct documentation.
+---
+ gcc/config/i386/i386.h | 2 +-
+ gcc/doc/invoke.texi    | 3 +--
+ 2 files changed, 2 insertions(+), 3 deletions(-)
+
+diff --git a/gcc/config/i386/i386.h b/gcc/config/i386/i386.h
+index e850b618b8fa..64f917f78b65 100644
+--- a/gcc/config/i386/i386.h
++++ b/gcc/config/i386/i386.h
+@@ -2456,7 +2456,7 @@ constexpr wide_int_bitmask PTA_DIAMONDRAPIDS = PTA_SKYLAKE | PTA_PKU | PTA_SHA
+   | PTA_AVX10_1 | PTA_AVXIFMA | PTA_AVXNECONVERT | PTA_AVXVNNIINT16
+   | PTA_AVXVNNIINT8 | PTA_CMPCCXADD | PTA_SHA512 | PTA_SM3 | PTA_SM4
+   | PTA_AVX10_2 | PTA_APX_F | PTA_AMX_AVX512 | PTA_AMX_FP8 | PTA_AMX_TF32
+-  | PTA_AMX_TRANSPOSE | PTA_MOVRS | PTA_AMX_MOVRS | PTA_USER_MSR;
++  | PTA_MOVRS | PTA_AMX_MOVRS | PTA_USER_MSR;
+ 
+ constexpr wide_int_bitmask PTA_BDVER1 = PTA_64BIT | PTA_MMX | PTA_SSE
+   | PTA_SSE2 | PTA_SSE3 | PTA_SSE4A | PTA_CX16 | PTA_ABM | PTA_SSSE3
+diff --git a/gcc/doc/invoke.texi b/gcc/doc/invoke.texi
+index 6a1ba08ca60a..5b2ff2c8fadd 100644
+--- a/gcc/doc/invoke.texi
++++ b/gcc/doc/invoke.texi
+@@ -35236,8 +35236,7 @@ MOVDIRI, MOVDIR64B, ENQCMD, CLDEMOTE, PTWRITE, WAITPKG, SERIALIZE, TSXLDTRK,
+ UINTR, AMX-BF16, AMX-TILE, AMX-INT8, AVX-VNNI, AVX512FP16, AVX512BF16, AMX-FP16,
+ PREFETCHI, AMX-COMPLEX, AVX10.1-512, AVX-IFMA, AVX-NE-CONVERT, AVX-VNNI-INT16,
+ AVX-VNNI-INT8, CMPccXADD, SHA512, SM3, SM4, AVX10.2-512, APX_F, AMX-AVX512,
+-AMX-FP8, AMX-TF32, AMX-TRANSPOSE, MOVRS, AMX-MOVRS and USER_MSR instruction set
+-support.
++AMX-FP8, AMX-TF32, MOVRS, AMX-MOVRS and USER_MSR instruction set support.
+ 
+ @item bonnell
+ @itemx atom
+-- 
+2.43.7
+
+

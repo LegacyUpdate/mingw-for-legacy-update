@@ -1,0 +1,121 @@
+From 868a5774431e889aa2c35bf7f678433cfa21e3d4 Mon Sep 17 00:00:00 2001
+From: Richard Sandiford <richard.sandiford@arm.com>
+Date: Thu, 14 Aug 2025 17:56:51 +0100
+Subject: [PATCH] aarch64: Mark SME functions as .variant_pcs [PR121414]
+
+Unlike base PCS functions, __arm_streaming and __arm_streaming_compatible
+functions allow/require PSTATE.SM to be 1 on entry, so they need to
+be treated as STO_AARCH64_VARIANT_PCS.
+
+Similarly, functions that share ZA or ZT0 with their callers require
+ZA to be active on entry, whereas the base PCS requires ZA to be
+dormant or off.  These functions too need to be marked as having
+a variant PCS.
+
+gcc/
+	PR target/121414
+	* config/aarch64/aarch64.cc (aarch64_is_variant_pcs): New function,
+	split out from...
+	(aarch64_asm_output_variant_pcs): ...here.  Handle various types
+	of SME function type.
+
+gcc/testsuite/
+	PR target/121414
+	* gcc.target/aarch64/sme/pr121414_1.c: New test.
+---
+ gcc/config/aarch64/aarch64.cc                 | 37 +++++++++++++++----
+ .../gcc.target/aarch64/sme/pr121414_1.c       | 27 ++++++++++++++
+ 2 files changed, 56 insertions(+), 8 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.target/aarch64/sme/pr121414_1.c
+
+diff --git a/gcc/config/aarch64/aarch64.cc b/gcc/config/aarch64/aarch64.cc
+index 859ada781f99..add7d130dce7 100644
+--- a/gcc/config/aarch64/aarch64.cc
++++ b/gcc/config/aarch64/aarch64.cc
+@@ -25084,20 +25084,41 @@ aarch64_asm_preferred_eh_data_format (int code ATTRIBUTE_UNUSED, int global)
+    return (global ? DW_EH_PE_indirect : 0) | DW_EH_PE_pcrel | type;
+ }
+ 
++/* Return true if function declaration FNDECL needs to be marked as
++   having a variant PCS.  */
++
++static bool
++aarch64_is_variant_pcs (tree fndecl)
++{
++  /* Check for ABIs that preserve more registers than usual.  */
++  arm_pcs pcs = (arm_pcs) fndecl_abi (fndecl).id ();
++  if (pcs == ARM_PCS_SIMD || pcs == ARM_PCS_SVE)
++    return true;
++
++  /* Check for ABIs that allow PSTATE.SM to be 1 on entry.  */
++  tree fntype = TREE_TYPE (fndecl);
++  if (aarch64_fntype_pstate_sm (fntype) != AARCH64_ISA_MODE_SM_OFF)
++    return true;
++
++  /* Check for ABIs that require PSTATE.ZA to be 1 on entry, either because
++     of ZA or ZT0.  */
++  if (aarch64_fntype_pstate_za (fntype) != 0)
++    return true;
++
++  return false;
++}
++
+ /* Output .variant_pcs for aarch64_vector_pcs function symbols.  */
+ 
+ static void
+ aarch64_asm_output_variant_pcs (FILE *stream, const tree decl, const char* name)
+ {
+-  if (TREE_CODE (decl) == FUNCTION_DECL)
++  if (TREE_CODE (decl) == FUNCTION_DECL
++      && aarch64_is_variant_pcs (decl))
+     {
+-      arm_pcs pcs = (arm_pcs) fndecl_abi (decl).id ();
+-      if (pcs == ARM_PCS_SIMD || pcs == ARM_PCS_SVE)
+-	{
+-	  fprintf (stream, "\t.variant_pcs\t");
+-	  assemble_name (stream, name);
+-	  fprintf (stream, "\n");
+-	}
++      fprintf (stream, "\t.variant_pcs\t");
++      assemble_name (stream, name);
++      fprintf (stream, "\n");
+     }
+ }
+ 
+diff --git a/gcc/testsuite/gcc.target/aarch64/sme/pr121414_1.c b/gcc/testsuite/gcc.target/aarch64/sme/pr121414_1.c
+new file mode 100644
+index 000000000000..ad8600f18be3
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/aarch64/sme/pr121414_1.c
+@@ -0,0 +1,27 @@
++#pragma GCC target "+sme2"
++
++void f1() __arm_streaming_compatible {}
++void f2() __arm_streaming {}
++void f3() __arm_in("za") {}
++void f4() __arm_out("za") {}
++void f5() __arm_inout("za") {}
++void f6() __arm_in("zt0") {}
++void f7() __arm_out("zt0") {}
++void f8() __arm_inout("zt0") {}
++
++__arm_locally_streaming void g1() {}
++__arm_new("za") void g2() {}
++__arm_new("zt0") void g3() {}
++
++/* { dg-final { scan-assembler {\t\.variant_pcs\tf1\n} } } */
++/* { dg-final { scan-assembler {\t\.variant_pcs\tf2\n} } } */
++/* { dg-final { scan-assembler {\t\.variant_pcs\tf3\n} } } */
++/* { dg-final { scan-assembler {\t\.variant_pcs\tf4\n} } } */
++/* { dg-final { scan-assembler {\t\.variant_pcs\tf5\n} } } */
++/* { dg-final { scan-assembler {\t\.variant_pcs\tf6\n} } } */
++/* { dg-final { scan-assembler {\t\.variant_pcs\tf7\n} } } */
++/* { dg-final { scan-assembler {\t\.variant_pcs\tf8\n} } } */
++
++/* { dg-final { scan-assembler-not {\t\.variant_pcs\tg1\n} } } */
++/* { dg-final { scan-assembler-not {\t\.variant_pcs\tg2\n} } } */
++/* { dg-final { scan-assembler-not {\t\.variant_pcs\tg3\n} } } */
+-- 
+2.43.7
+
+

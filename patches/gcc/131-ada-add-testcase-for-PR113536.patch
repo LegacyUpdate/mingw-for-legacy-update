@@ -1,0 +1,41 @@
+From 90343acda3042ce2790223a860c72828d29295fc Mon Sep 17 00:00:00 2001
+From: Eric Botcazou <ebotcazou@adacore.com>
+Date: Sun, 5 Oct 2025 10:42:25 +0200
+Subject: [PATCH] Add testcase for PR ada/113536
+
+gcc/testsuite/
+	PR ada/113536
+	* gnat.dg/reduce2.adb: New test.
+---
+ gcc/testsuite/gnat.dg/reduce2.adb | 18 ++++++++++++++++++
+ 1 file changed, 18 insertions(+)
+ create mode 100644 gcc/testsuite/gnat.dg/reduce2.adb
+
+diff --git a/gcc/testsuite/gnat.dg/reduce2.adb b/gcc/testsuite/gnat.dg/reduce2.adb
+new file mode 100644
+index 000000000000..0246709ec43a
+--- /dev/null
++++ b/gcc/testsuite/gnat.dg/reduce2.adb
+@@ -0,0 +1,18 @@
++-- { dg-do compile }
++-- { dg-options "-gnat2022" }
++
++procedure Reduce2 is
++
++  subtype Value is Natural range 0 .. 255;
++
++  function Do_Something (Accumulator : Value; Symbol : Character) return Value
++    is (((Accumulator + Character'Pos (Symbol)) * 17) mod 256);
++
++  function Do_It_By_Reduction (S : String) return Value is
++    (S'Reduce (Do_Something, 0));
++
++  Test_It : constant Value := Do_It_By_Reduction ("Hello, world!");
++
++begin
++  null;
++end;
+-- 
+2.43.7
+
+

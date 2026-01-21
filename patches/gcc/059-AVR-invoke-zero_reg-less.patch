@@ -1,0 +1,41 @@
+From 73126534491dfa64bc9778fa6a6ca65a62d1dbf4 Mon Sep 17 00:00:00 2001
+From: Georg-Johann Lay <avr@gjlay.de>
+Date: Sun, 7 Sep 2025 12:19:26 +0200
+Subject: [PATCH] AVR: ad target/121794 - Invoke zero_reg less.
+
+gcc/
+	PR target/121794
+	* config/avr/avr.md (cmpqi3): Use cpi R,0 if possible.
+
+(cherry picked from commit 93af5f69d15934edda4ff6a6eb63bde9ae7b8e45)
+---
+ gcc/config/avr/avr.md | 10 +++++-----
+ 1 file changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/gcc/config/avr/avr.md b/gcc/config/avr/avr.md
+index f8bbdc766085..3ca0efbbe759 100644
+--- a/gcc/config/avr/avr.md
++++ b/gcc/config/avr/avr.md
+@@ -6811,13 +6811,13 @@
+ ;; "cmpqq3" "cmpuqq3"
+ (define_insn "cmp<mode>3"
+   [(set (reg:CC REG_CC)
+-        (compare:CC (match_operand:ALL1 0 "register_operand"  "r  ,r,d")
+-                    (match_operand:ALL1 1 "nonmemory_operand" "Y00,r,i")))]
++        (compare:CC (match_operand:ALL1 0 "register_operand"  "d,r  ,r")
++                    (match_operand:ALL1 1 "nonmemory_operand" "i,Y00,r")))]
+   "reload_completed"
+   "@
+-	cp %0, __zero_reg__
+-	cp %0,%1
+-	cpi %0,lo8(%1)"
++	cpi %0,lo8(%1)
++	cp %0,__zero_reg__
++	cp %0,%1"
+   [(set_attr "length" "1,1,1")])
+ 
+ 
+-- 
+2.43.7
+
+

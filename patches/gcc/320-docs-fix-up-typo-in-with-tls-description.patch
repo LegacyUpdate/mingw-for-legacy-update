@@ -1,0 +1,31 @@
+From 354cad70f0efe7f67c13f29cabd56faa37bc78f3 Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Fri, 19 Dec 2025 10:17:23 +0100
+Subject: [PATCH] docs: Fix up typo in --with-tls= description
+
+2025-12-19  Jakub Jelinek  <jakub@redhat.com>
+
+	* doc/install.texi (--with-tls=): Fix a typo, were -> where.
+
+(cherry picked from commit f172f032e32bd68eabfe0cc158e0841f69866c88)
+---
+ gcc/doc/install.texi | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/gcc/doc/install.texi b/gcc/doc/install.texi
+index 3e9e09b4ae3e..dcb2f3b35005 100644
+--- a/gcc/doc/install.texi
++++ b/gcc/doc/install.texi
+@@ -1244,7 +1244,7 @@ Same as @uref{#with-as,,@option{--with-as}}
+ but for the debug linker (only used on Darwin platforms so far).
+ 
+ @item --with-tls=@var{dialect}
+-Specify the default TLS dialect, for systems were there is a choice.
++Specify the default TLS dialect, for systems where there is a choice.
+ For ARM targets, possible values for @var{dialect} are @code{gnu} or
+ @code{gnu2}, which select between the original GNU dialect and the GNU TLS
+ descriptor-based dialect.
+-- 
+2.43.7
+
+

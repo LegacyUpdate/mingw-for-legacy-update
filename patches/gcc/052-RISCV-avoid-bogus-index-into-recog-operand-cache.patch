@@ -1,0 +1,111 @@
+From 52a0ccca9554dae85a72eb8ed3b8c670bfa30d6d Mon Sep 17 00:00:00 2001
+From: Jeff Law <jlaw@ventanamicro.com>
+Date: Fri, 29 Aug 2025 11:43:30 -0600
+Subject: [PATCH] [RISC-V][PR target/121548] Avoid bogus index into recog
+ operand cache
+
+So the RISC-V port has attributes which indicate the index within the
+recog_data where certain operands will be found.
+
+For this BZ the default value for the merge_op_idx attribute on the given insn
+is "2".  But the insn only has operands 0 & 1.  So we do an out of bounds array
+access and boom the ICE/valgrind failure.
+
+As we discussed in the patchwork meeting, this is all a bit clunky and has been
+fairly error prone.  This doesn't add any massive checking, but does introduce
+some asserts to help catch problems a bit earlier and clearer.
+
+In particular in cases where we're already asserting that the returned index is
+valid (!= INVALID_ATTRIBUTE) we also assert that the index is less than the
+total number of operands.
+
+In the get_vlmax_ta_preferred_avl routine it appears like we need to handle
+these two cases more gracefully as we apparently legitimately query for the
+merge_op_idx on a fairly arbitrary insn.  We just have to make sure to not
+*use* the result if it's INVALID_ATTRIBUTE.  So for that code we assert that
+merge_op_idx is either INVALID_ATTRIBUTE or smaller than the number of
+operands.
+
+This patch also adds overrides for 3 patterns to return INVALID_ATTRIBUTE for
+merge_op_idx, similar to how they already do for mode_idx and avl_type_idx.
+
+This has been bootstrapped and regression tested on the bpi & pioneer systems
+and regression tested for riscv32-elf and riscv64-elf.  Waiting on CI before
+pushing.
+
+	PR target/121548
+gcc/
+	* config/riscv/riscv-avlprop.cc (get_insn_vtype_mode): Assert
+	MODE_IDX is smaller than the number of operands.
+	(simplify_replace_vlmax_avl): Similarly.
+	(pass_avlprop::get_vlmax_ta_preferred_avl): Similarly.
+	* config/riscv/vector.md: Override merge_op_idx computation
+	for simple moves, just like is done for avl_type_idx and mode_idx.
+
+(cherry picked from commit 25bbc0f20a25a1db59baaf36d119ce274968747f)
+---
+ gcc/config/riscv/riscv-avlprop.cc | 4 ++++
+ gcc/config/riscv/vector.md        | 3 +++
+ 2 files changed, 7 insertions(+)
+
+diff --git a/gcc/config/riscv/riscv-avlprop.cc b/gcc/config/riscv/riscv-avlprop.cc
+index bb4aceb75064..b8b61fc847ba 100644
+--- a/gcc/config/riscv/riscv-avlprop.cc
++++ b/gcc/config/riscv/riscv-avlprop.cc
+@@ -156,6 +156,7 @@ get_insn_vtype_mode (rtx_insn *rinsn)
+   extract_insn_cached (rinsn);
+   int mode_idx = get_attr_mode_idx (rinsn);
+   gcc_assert (mode_idx != INVALID_ATTRIBUTE);
++  gcc_assert (mode_idx < recog_data.n_operands);
+   return GET_MODE (recog_data.operand[mode_idx]);
+ }
+ 
+@@ -205,6 +206,7 @@ simplify_replace_vlmax_avl (rtx_insn *rinsn, rtx new_avl)
+     {
+       int index = get_attr_avl_type_idx (rinsn);
+       gcc_assert (index != INVALID_ATTRIBUTE);
++      gcc_assert (index < recog_data.n_operands);
+       validate_change_or_fail (rinsn, recog_data.operand_loc[index],
+ 			       get_avl_type_rtx (avl_type::NONVLMAX), false);
+     }
+@@ -361,6 +363,8 @@ pass_avlprop::get_vlmax_ta_preferred_avl (insn_info *insn) const
+ 	     is not depend on.  */
+ 	  extract_insn_cached (use_insn->rtl ());
+ 	  int merge_op_idx = get_attr_merge_op_idx (use_insn->rtl ());
++	  gcc_assert (merge_op_idx == INVALID_ATTRIBUTE
++		      || merge_op_idx < recog_data.n_operands);
+ 	  if (merge_op_idx != INVALID_ATTRIBUTE
+ 	      && !satisfies_constraint_vu (recog_data.operand[merge_op_idx])
+ 	      && refers_to_regno_p (set->regno (),
+diff --git a/gcc/config/riscv/vector.md b/gcc/config/riscv/vector.md
+index 51eb64fb1226..9c2571899ae8 100644
+--- a/gcc/config/riscv/vector.md
++++ b/gcc/config/riscv/vector.md
+@@ -1412,6 +1412,7 @@
+   }
+   [(set_attr "type" "vmov,vlde,vste")
+    (set_attr "mode" "<VT:MODE>")
++   (set (attr "merge_op_idx") (const_int INVALID_ATTRIBUTE))
+    (set (attr "avl_type_idx") (const_int INVALID_ATTRIBUTE))
+    (set (attr "mode_idx") (const_int INVALID_ATTRIBUTE))])
+ 
+@@ -1449,6 +1450,7 @@
+   }
+   [(set_attr "type" "vlde,vste,vmov")
+    (set_attr "mode" "<MODE>")
++   (set (attr "merge_op_idx") (const_int INVALID_ATTRIBUTE))
+    (set (attr "avl_type_idx") (const_int INVALID_ATTRIBUTE))
+    (set (attr "mode_idx") (const_int INVALID_ATTRIBUTE))]
+ )
+@@ -1499,6 +1501,7 @@
+ }
+   [(set_attr "type" "vlde,vste,vmov")
+    (set_attr "mode" "<VLS_AVL_REG:MODE>")
++   (set (attr "merge_op_idx") (const_int INVALID_ATTRIBUTE))
+    (set (attr "avl_type_idx") (const_int INVALID_ATTRIBUTE))
+    (set (attr "mode_idx") (const_int INVALID_ATTRIBUTE))]
+ )
+-- 
+2.43.7
+
+

@@ -1,0 +1,111 @@
+From fc388414002f5720718a1e80f62f2920d091002e Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Wed, 7 Jan 2026 15:17:21 +0100
+Subject: [PATCH] combine: Fix up serious regression in try_combine [PR121773]
+
+Back in April last year I've changed try_combine's condition when trying to
+split two independent sets by moving one of them to i2.  Previously this was
+testing !modified_between_p (SET_DEST (setN), i2, i3) and I've changed it
+to SET_DEST (setN) != pc_rtx && !reg_used_between_p (SET_DEST (set1), i2, i3)
+on the assumption written in the r15-9131-g19ba913517b5e2a00 commit
+message:
+"The following patch replaces the modified_between_p
+tests with reg_used_between_p, my understanding is that
+modified_between_p is a subset of reg_used_between_p, so one
+doesn't need both."
+That assumption is wrong though, neither of these is a subset of the
+other and I don't see any APIs which test both.  We need to avoid moving
+a set from i3 to i2 both in case where the REG (or SUBREG_REG of SUBREG or
+MEM or whatever else) is set/modified between i2 and i3 exclusive, as shown
+by the testcase in PR121773 (which I'm not including because my ARM neon
+knowledge is limited).  We have i2 insn 18 and i3 insn 7 after the current
+try_combine modifications:
+(insn 18 5 19 2 (set (reg:SI 104 [ _6 ])
+        (const_int 305419896 [0x12345678])) "include/arm_neon.h":7467:22 542 {*arm_movsi_vfp}
+     (expr_list:REG_EQUAL (const_int 305419896 [0x12345678])
+        (nil)))
+(insn 19 18 21 2 (set (reg:SI 105 [ _6+4 ])
+        (const_int 538968064 [0x20200000])) "include/arm_neon.h":7467:22 542 {*arm_movsi_vfp}
+     (nil))
+(insn 21 19 7 2 (set (reg:DI 101 [ _5 ])
+        (const_int 0 [0])) "include/arm_neon.h":607:14 -1
+     (nil))
+(insn 7 21 8 2 (parallel [
+            (set (pc)
+                (pc))
+            (set (subreg:SI (reg:DI 101 [ _5 ]) 0)
+                (const_int 610839792 [0x2468acf0]))
+        ]) "include/arm_neon.h":607:14 17 {addsi3_compare_op1}
+     (expr_list:REG_DEAD (reg:SI 104 [ _6 ])
+        (nil)))
+The second set can't be moved to the i2 location, because (reg:DI 101)
+is modified in insn 21 and so if setting half of it to 610839792 is
+moved from insn 7 where it modifies what was previously 0 into a location
+where it overwrites something and is later overwritten in insn 21, we get
+different behavior.
+And the second case is mentioned in the PR119291 commit log:
+(insn 22 21 23 4 (set (reg:SI 104 [ _7 ])
+        (const_int 0 [0])) "pr119291.c":25:15 96 {*movsi_internal}
+     (nil))
+(insn 23 22 24 4 (set (reg/v:SI 117 [ e ])
+        (reg/v:SI 116 [ e ])) 96 {*movsi_internal}
+     (expr_list:REG_DEAD (reg/v:SI 116 [ e ])
+        (nil)))
+(note 24 23 25 4 NOTE_INSN_DELETED)
+(insn 25 24 26 4 (parallel [
+            (set (pc)
+                (pc))
+            (set (reg/v:SI 116 [ e ])
+                (const_int 0 [0]))
+        ]) "pr119291.c":28:13 977 {*negsi_2}
+     (expr_list:REG_DEAD (reg:SI 104 [ _7 ])
+        (nil)))
+i2 is insn 22, i3 is insn 25 after in progress modifications and the
+second set can't be moved to i2 location, because (reg/v:SI 116) is used
+in insn 23, so with it being set to 0 around insn 22 insn 23 will see
+a different value.
+
+So, I'm afraid we need both the modified_between_p and reg_used_between_p
+check.  We don't need the SET_DEST (setN) != pc_rtx checks, those were
+added because modified_between_p (pc_rtx, i2, i3) returns true if start
+is not the same as end, but reg_used_between_p doesn't behave like that.
+
+2026-01-07  Jakub Jelinek  <jakub@redhat.com>
+
+	PR rtl-optimization/119291
+	PR rtl-optimization/121773
+	* combine.cc (try_combine): Check that SET_DEST (setN) is neither
+	modified_between_p nor reg_used_between_p instead of just not
+	reg_used_between_p or pc_rtx.
+
+(cherry picked from commit 3ee0e36f81af4ca2355430c910ada014c66aab3a)
+---
+ gcc/combine.cc | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/gcc/combine.cc b/gcc/combine.cc
+index e1186087dff4..98ee8300f98e 100644
+--- a/gcc/combine.cc
++++ b/gcc/combine.cc
+@@ -4026,7 +4026,7 @@ try_combine (rtx_insn *i3, rtx_insn *i2, rtx_insn *i1, rtx_insn *i0,
+ 	  && !(GET_CODE (SET_DEST (set1)) == SUBREG
+ 	       && find_reg_note (i2, REG_DEAD,
+ 				 SUBREG_REG (SET_DEST (set1))))
+-	  && SET_DEST (set1) != pc_rtx
++	  && !modified_between_p (SET_DEST (set1), i2, i3)
+ 	  && !reg_used_between_p (SET_DEST (set1), i2, i3)
+ 	  /* If I3 is a jump, ensure that set0 is a jump so that
+ 	     we do not create invalid RTL.  */
+@@ -4042,7 +4042,7 @@ try_combine (rtx_insn *i3, rtx_insn *i2, rtx_insn *i1, rtx_insn *i0,
+ 	       && !(GET_CODE (SET_DEST (set0)) == SUBREG
+ 		    && find_reg_note (i2, REG_DEAD,
+ 				      SUBREG_REG (SET_DEST (set0))))
+-	       && SET_DEST (set0) != pc_rtx
++	       && !modified_between_p (SET_DEST (set0), i2, i3)
+ 	       && !reg_used_between_p (SET_DEST (set0), i2, i3)
+ 	       /* If I3 is a jump, ensure that set1 is a jump so that
+ 		  we do not create invalid RTL.  */
+-- 
+2.43.7
+
+

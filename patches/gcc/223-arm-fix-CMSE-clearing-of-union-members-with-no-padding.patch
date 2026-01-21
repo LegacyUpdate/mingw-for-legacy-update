@@ -1,0 +1,196 @@
+From 0ea9ba6ed73d92335d62bb4e19764514faa2db8c Mon Sep 17 00:00:00 2001
+From: Andre Vieira <andre.simoesdiasvieira@arm.com>
+Date: Wed, 12 Nov 2025 10:25:14 +0000
+Subject: [PATCH] arm: Fix CMSE clearing of union members with no padding
+ [PR122539]
+
+This patch fixes the CMSE register clearing to make sure we don't clear
+registers used by a function call.  Before this patch the algorithm would only
+correctly handle registers with padding bits to clear, any registers that were
+fully utilised would be wrongfully cleared.
+
+gcc/ChangeLog:
+
+	PR target/122539
+	* config/arm/arm.cc (comp_not_to_clear_mask_str_un): Update
+	not_to_clear_reg_mask for union members.
+
+gcc/testsuite/ChangeLog:
+
+	* gcc.target/arm/cmse/union-3.x: New test.
+	* gcc.target/arm/cmse/baseline/union-3.c: New test.
+	* gcc.target/arm/cmse/mainline/8m/union-3.c: New test.
+	* gcc.target/arm/cmse/mainline/8_1m/union-3.c: New test.
+
+(cherry picked from commit 4aa3af633c26d61ad2a247bb3399cf815dd757e3)
+---
+ gcc/config/arm/arm.cc                         |  3 ++
+ .../gcc.target/arm/cmse/baseline/union-3.c    | 29 ++++++++++++++++
+ .../arm/cmse/mainline/8_1m/union-3.c          | 32 ++++++++++++++++++
+ .../gcc.target/arm/cmse/mainline/8m/union-3.c | 33 +++++++++++++++++++
+ gcc/testsuite/gcc.target/arm/cmse/union-3.x   | 23 +++++++++++++
+ 5 files changed, 120 insertions(+)
+ create mode 100644 gcc/testsuite/gcc.target/arm/cmse/baseline/union-3.c
+ create mode 100644 gcc/testsuite/gcc.target/arm/cmse/mainline/8_1m/union-3.c
+ create mode 100644 gcc/testsuite/gcc.target/arm/cmse/mainline/8m/union-3.c
+ create mode 100644 gcc/testsuite/gcc.target/arm/cmse/union-3.x
+
+diff --git a/gcc/config/arm/arm.cc b/gcc/config/arm/arm.cc
+index 5b6558e0af6c..29680fe09076 100644
+--- a/gcc/config/arm/arm.cc
++++ b/gcc/config/arm/arm.cc
+@@ -18739,6 +18739,9 @@ comp_not_to_clear_mask_str_un (tree arg_type, int * regno,
+       padding_bits_to_clear[max_reg]
+ 	|= padding_bits_to_clear_res[max_reg] & mask;
+ 
++      for (int i = *regno; i < max_reg; ++i)
++	not_to_clear_reg_mask |= HOST_WIDE_INT_1U << i;
++
+       *regno = max_reg;
+       *last_used_bit = max_bit;
+     }
+diff --git a/gcc/testsuite/gcc.target/arm/cmse/baseline/union-3.c b/gcc/testsuite/gcc.target/arm/cmse/baseline/union-3.c
+new file mode 100644
+index 000000000000..f68a081e1bc3
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/arm/cmse/baseline/union-3.c
+@@ -0,0 +1,29 @@
++
++/* { dg-do compile } */
++/* { dg-options "-mcmse" } */
++/* { dg-final { check-function-bodies "**" "" } } */
++
++#include "../union-3.x"
++
++/*
++** fn_caller_0:
++** ...
++**	lsrs	r4, r4, #1
++**	lsls	r4, r4, #1
++**	movs	r2, r4
++**	movs	r3, r4
++**	bl	__gnu_cmse_nonsecure_call
++** ...
++*/
++
++/*
++** fn_caller_1:
++** ...
++**	lsrs	r4, r4, #1
++**	lsls	r4, r4, #1
++**	movs	r1, r4
++**	movs	r2, r4
++**	movs	r3, r4
++**	bl	__gnu_cmse_nonsecure_call
++** ...
++*/
+diff --git a/gcc/testsuite/gcc.target/arm/cmse/mainline/8_1m/union-3.c b/gcc/testsuite/gcc.target/arm/cmse/mainline/8_1m/union-3.c
+new file mode 100644
+index 000000000000..022bef7095c6
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/arm/cmse/mainline/8_1m/union-3.c
+@@ -0,0 +1,32 @@
++
++/* { dg-do compile } */
++/* { dg-options "-mcmse" } */
++/* { dg-final { check-function-bodies "**" "" } } */
++
++#include "../../union-3.x"
++
++/*
++** fn_caller_0:
++** ...
++**	lsrs	r3, r3, #1
++**	lsls	r3, r3, #1
++**	push	{r4, r5, r6, r7, r8, r9, r10, fp}
++This test is not meant to be to test the FP clearing, so accept any, preventing
++the need to specialize the test further for different float-abi's
++** ...
++**	clrm	{r2, r4, r5, r6, r7, r8, r9, r10, fp, ip, APSR}
++**	blxns	r3
++** ...
++*/
++
++/*
++** fn_caller_1:
++** ...
++**	lsrs	r3, r3, #1
++**	lsls	r3, r3, #1
++**	push	{r4, r5, r6, r7, r8, r9, r10, fp}
++** ...
++**	clrm	{r1, r2, r4, r5, r6, r7, r8, r9, r10, fp, ip, APSR}
++**	blxns	r3
++** ...
++*/
+diff --git a/gcc/testsuite/gcc.target/arm/cmse/mainline/8m/union-3.c b/gcc/testsuite/gcc.target/arm/cmse/mainline/8m/union-3.c
+new file mode 100644
+index 000000000000..dd115b4a2b63
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/arm/cmse/mainline/8m/union-3.c
+@@ -0,0 +1,33 @@
++
++/* { dg-do compile } */
++/* { dg-options "-mcmse" } */
++/* { dg-final { check-function-bodies "**" "" } } */
++
++#include "../../union-3.x"
++
++/*
++** fn_caller_0:
++** ...
++**	lsrs	r4, r4, #1
++**	lsls	r4, r4, #1
++**	mov	r2, r4
++**	mov	r3, r4
++This test is not meant to be to test the FP clearing, so accept any, preventing
++the need to specialize the test further for different float-abi's
++** ...
++**	bl	__gnu_cmse_nonsecure_call
++** ...
++*/
++
++/*
++** fn_caller_1:
++** ...
++**	lsrs	r4, r4, #1
++**	lsls	r4, r4, #1
++**	mov	r1, r4
++**	mov	r2, r4
++**	mov	r3, r4
++** ...
++**	bl	__gnu_cmse_nonsecure_call
++** ...
++*/
+diff --git a/gcc/testsuite/gcc.target/arm/cmse/union-3.x b/gcc/testsuite/gcc.target/arm/cmse/union-3.x
+new file mode 100644
+index 000000000000..880ceb4cc83e
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/arm/cmse/union-3.x
+@@ -0,0 +1,23 @@
++#include <arm_cmse.h>
++
++union u_t_0 {
++  long long ll;
++};
++
++typedef void(__attribute__((cmse_nonsecure_call)) fn_t_0)(union u_t_0);
++
++void fn_caller_0(fn_t_0 *f_ptr) {
++  union u_t_0 x = {1234};
++  f_ptr(x);
++}
++
++union u_t_1 {
++  long int l;
++};
++
++typedef void(__attribute__((cmse_nonsecure_call)) fn_t_1)(union u_t_1);
++
++void fn_caller_1(fn_t_1 *f_ptr) {
++  union u_t_1 x = {1234};
++  f_ptr(x);
++}
+-- 
+2.43.7
+
+

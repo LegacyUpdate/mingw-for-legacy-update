@@ -1,0 +1,50 @@
+From f0767ec84b4381fb22b6226acb76bbd9bbd18d6f Mon Sep 17 00:00:00 2001
+From: Georg-Johann Lay <avr@gjlay.de>
+Date: Mon, 15 Sep 2025 14:20:59 +0200
+Subject: [PATCH] AVR: Support AVR32EB14/20/28/32.
+
+Add support for some recent AVR devices.
+
+gcc/
+	* config/avr/avr-mcus.def: Add avr32eb14, avr32eb20,
+	avr32eb28, avr32eb32.
+	* doc/avr-mmcu.texi: Rebuild.
+
+(cherry picked from commit 45f605a74fd7e96294477db064cc58033c3fba49)
+---
+ gcc/config/avr/avr-mcus.def | 4 ++++
+ gcc/doc/avr-mmcu.texi       | 2 +-
+ 2 files changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/gcc/config/avr/avr-mcus.def b/gcc/config/avr/avr-mcus.def
+index 2e7c8ac736e8..896623d039e3 100644
+--- a/gcc/config/avr/avr-mcus.def
++++ b/gcc/config/avr/avr-mcus.def
+@@ -411,6 +411,10 @@ AVR_MCU ("avr16eb14",        ARCH_AVRXMEGA3, AVR_CVT,                 "__AVR_AVR
+ AVR_MCU ("avr16eb20",        ARCH_AVRXMEGA3, AVR_CVT,                 "__AVR_AVR16EB20__",   0x7800, 0x0, 0x4000, 0x8000)
+ AVR_MCU ("avr16eb28",        ARCH_AVRXMEGA3, AVR_CVT,                 "__AVR_AVR16EB28__",   0x7800, 0x0, 0x4000, 0x8000)
+ AVR_MCU ("avr16eb32",        ARCH_AVRXMEGA3, AVR_CVT,                 "__AVR_AVR16EB32__",   0x7800, 0x0, 0x4000, 0x8000)
++AVR_MCU ("avr32eb14",        ARCH_AVRXMEGA3, AVR_CVT,                 "__AVR_AVR32EB14__",   0x7400, 0x0, 0x8000, 0x8000)
++AVR_MCU ("avr32eb20",        ARCH_AVRXMEGA3, AVR_CVT,                 "__AVR_AVR32EB20__",   0x7400, 0x0, 0x8000, 0x8000)
++AVR_MCU ("avr32eb28",        ARCH_AVRXMEGA3, AVR_CVT,                 "__AVR_AVR32EB28__",   0x7400, 0x0, 0x8000, 0x8000)
++AVR_MCU ("avr32eb32",        ARCH_AVRXMEGA3, AVR_CVT,                 "__AVR_AVR32EB32__",   0x7400, 0x0, 0x8000, 0x8000)
+ AVR_MCU ("avr16ea28",        ARCH_AVRXMEGA3, AVR_CVT,                 "__AVR_AVR16EA28__",   0x7800, 0x0, 0x4000, 0x8000)
+ AVR_MCU ("avr16ea32",        ARCH_AVRXMEGA3, AVR_CVT,                 "__AVR_AVR16EA32__",   0x7800, 0x0, 0x4000, 0x8000)
+ AVR_MCU ("avr16ea48",        ARCH_AVRXMEGA3, AVR_CVT,                 "__AVR_AVR16EA48__",   0x7800, 0x0, 0x4000, 0x8000)
+diff --git a/gcc/doc/avr-mmcu.texi b/gcc/doc/avr-mmcu.texi
+index 5efcc8198808..1938994d74f9 100644
+--- a/gcc/doc/avr-mmcu.texi
++++ b/gcc/doc/avr-mmcu.texi
+@@ -54,7 +54,7 @@
+ 
+ @item @anchor{avrxmega3}avrxmega3
+ ``XMEGA'' devices with up to 64@tie{}KiB of combined program memory and RAM, and with program memory visible in the RAM address space.
+-@*@var{mcu}@tie{}= @code{attiny202}, @code{attiny204}, @code{attiny212}, @code{attiny214}, @code{attiny402}, @code{attiny404}, @code{attiny406}, @code{attiny412}, @code{attiny414}, @code{attiny416}, @code{attiny416auto}, @code{attiny417}, @code{attiny424}, @code{attiny426}, @code{attiny427}, @code{attiny804}, @code{attiny806}, @code{attiny807}, @code{attiny814}, @code{attiny816}, @code{attiny817}, @code{attiny824}, @code{attiny826}, @code{attiny827}, @code{attiny1604}, @code{attiny1606}, @code{attiny1607}, @code{attiny1614}, @code{attiny1616}, @code{attiny1617}, @code{attiny1624}, @code{attiny1626}, @code{attiny1627}, @code{attiny3214}, @code{attiny3216}, @code{attiny3217}, @code{attiny3224}, @code{attiny3226}, @code{attiny3227}, @code{atmega808}, @code{atmega809}, @code{atmega1608}, @code{atmega1609}, @code{atmega3208}, @code{atmega3209}, @code{atmega4808}, @code{atmega4809}, @code{avr16dd14}, @code{avr16dd20}, @code{avr16dd28}, @code{avr16dd32}, @code{avr16du14}, @code{avr16du20}, @code{avr16du28}, @code{avr16du32}, @code{avr16ea28}, @code{avr16ea32}, @code{avr16ea48}, @code{avr16eb14}, @code{avr16eb20}, @code{avr16eb28}, @code{avr16eb32}, @code{avr32da28}, @code{avr32da28s}, @code{avr32da32}, @code{avr32da32s}, @code{avr32da48}, @code{avr32da48s}, @code{avr32db28}, @code{avr32db32}, @code{avr32db48}, @code{avr32dd14}, @code{avr32dd20}, @code{avr32dd28}, @code{avr32dd32}, @code{avr32du14}, @code{avr32du20}, @code{avr32du28}, @code{avr32du32}, @code{avr32ea28}, @code{avr32ea32}, @code{avr32ea48}, @code{avr32sd20}, @code{avr32sd28}, @code{avr32sd32}.
++@*@var{mcu}@tie{}= @code{attiny202}, @code{attiny204}, @code{attiny212}, @code{attiny214}, @code{attiny402}, @code{attiny404}, @code{attiny406}, @code{attiny412}, @code{attiny414}, @code{attiny416}, @code{attiny416auto}, @code{attiny417}, @code{attiny424}, @code{attiny426}, @code{attiny427}, @code{attiny804}, @code{attiny806}, @code{attiny807}, @code{attiny814}, @code{attiny816}, @code{attiny817}, @code{attiny824}, @code{attiny826}, @code{attiny827}, @code{attiny1604}, @code{attiny1606}, @code{attiny1607}, @code{attiny1614}, @code{attiny1616}, @code{attiny1617}, @code{attiny1624}, @code{attiny1626}, @code{attiny1627}, @code{attiny3214}, @code{attiny3216}, @code{attiny3217}, @code{attiny3224}, @code{attiny3226}, @code{attiny3227}, @code{atmega808}, @code{atmega809}, @code{atmega1608}, @code{atmega1609}, @code{atmega3208}, @code{atmega3209}, @code{atmega4808}, @code{atmega4809}, @code{avr16dd14}, @code{avr16dd20}, @code{avr16dd28}, @code{avr16dd32}, @code{avr16du14}, @code{avr16du20}, @code{avr16du28}, @code{avr16du32}, @code{avr16ea28}, @code{avr16ea32}, @code{avr16ea48}, @code{avr16eb14}, @code{avr16eb20}, @code{avr16eb28}, @code{avr16eb32}, @code{avr32da28}, @code{avr32da28s}, @code{avr32da32}, @code{avr32da32s}, @code{avr32da48}, @code{avr32da48s}, @code{avr32db28}, @code{avr32db32}, @code{avr32db48}, @code{avr32dd14}, @code{avr32dd20}, @code{avr32dd28}, @code{avr32dd32}, @code{avr32du14}, @code{avr32du20}, @code{avr32du28}, @code{avr32du32}, @code{avr32ea28}, @code{avr32ea32}, @code{avr32ea48}, @code{avr32eb14}, @code{avr32eb20}, @code{avr32eb28}, @code{avr32eb32}, @code{avr32sd20}, @code{avr32sd28}, @code{avr32sd32}.
+ 
+ @item @anchor{avrxmega4}avrxmega4
+ ``XMEGA'' devices with more than 64@tie{}KiB and up to 128@tie{}KiB of program memory.
+-- 
+2.43.7
+
+

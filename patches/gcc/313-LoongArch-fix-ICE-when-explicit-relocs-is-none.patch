@@ -1,0 +1,60 @@
+From e5472188ab388bb9a61885ba44a93897caa41281 Mon Sep 17 00:00:00 2001
+From: DengJianbo <dengjianbo@loongson.cn>
+Date: Tue, 13 Jan 2026 15:21:54 +0800
+Subject: [PATCH] LoongArch: Fix ICE when explicit-relocs is none
+
+When set -mexplicit-relocs=none, the symbol address should be caclulated
+by macro instructions, for example la.local. Due to the condition
+TARGET_CMODEL_EXTREME in movdi_symbolic_off64, this template can not be
+matched in case the cmodel is normal. If the variable has attribute
+model("extreme"), gcc will get crashed with error unrecognizable insns.
+This patch fix this issue by removing TARGET_CMODEL_EXTREME, since it
+already checked in prediction symbolic_off64_or_reg_operand.
+
+gcc/ChangeLog:
+
+	* config/loongarch/loongarch.md: Remove condition in template
+	movdi_symbolic_off64.
+
+gcc/testsuite/ChangeLog:
+
+	* gcc.target/loongarch/attr-model-6.c: New test.
+
+(cherry picked from commit a0ee159bb584855ad2db4563b6e31f88cebe055f)
+---
+ gcc/config/loongarch/loongarch.md                 | 2 +-
+ gcc/testsuite/gcc.target/loongarch/attr-model-6.c | 8 ++++++++
+ 2 files changed, 9 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/gcc.target/loongarch/attr-model-6.c
+
+diff --git a/gcc/config/loongarch/loongarch.md b/gcc/config/loongarch/loongarch.md
+index f42dc102d109..761e4605dc3e 100644
+--- a/gcc/config/loongarch/loongarch.md
++++ b/gcc/config/loongarch/loongarch.md
+@@ -2237,7 +2237,7 @@
+   (unspec:DI [(const_int 0)]
+     UNSPEC_LOAD_SYMBOL_OFFSET64)
+   (clobber (match_operand:DI 2 "register_operand" "=&r,r"))]
+- "TARGET_64BIT && TARGET_CMODEL_EXTREME"
++ "TARGET_64BIT"
+ {
+   if (which_alternative == 1)
+     return "#";
+diff --git a/gcc/testsuite/gcc.target/loongarch/attr-model-6.c b/gcc/testsuite/gcc.target/loongarch/attr-model-6.c
+new file mode 100644
+index 000000000000..9fa32a67bf41
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/loongarch/attr-model-6.c
+@@ -0,0 +1,8 @@
++/* { dg-do compile } */
++/* { dg-options "-mexplicit-relocs=none -mcmodel=normal -O2 -fno-pic" } */
++/* { dg-final { scan-assembler "la.local\t\\\$r\[0-9\]+,\\\$r\[0-9\]+,x" } } */
++/* { dg-final { scan-assembler "la.local\t\\\$r\[0-9\]+,y" } } */
++/* { dg-final { scan-assembler "la.local\t\\\$r\[0-9\]+,\\\$r\[0-9\]+,counter" } } */
++
++#define ATTR_MODEL_TEST
++#include "attr-model-test.c"
+-- 
+2.43.7
+
+

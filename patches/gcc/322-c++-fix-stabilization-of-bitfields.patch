@@ -1,0 +1,259 @@
+From 66d1adb29c8a4bf9987e50d94e55ab13f510da67 Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Fri, 19 Dec 2025 11:24:02 +0100
+Subject: [PATCH] c++: Fix stabilization of bitfields [PR122772]
+
+The following testcase is rejected, because due to the C++17
+b @= a ordering of side-effects cp_stabilize_reference is called
+on the lhs of the compound assignment.  For some cases
+cp_stabilize_reference just uses stabilize_reference, but for other
+cases it attempts to bind a reference to the expression.
+This doesn't work for bit-fields and DECL_PACKED fields though,
+we can't take address of a bit-field (nor DECL_PACKED field)
+and error on that.
+This patch introduces for this another wrapper around
+stabilize_reference, which for clk_bitfield | clk_packed handles
+some trees stabilize_reference doesn't handle correctly for C++,
+and for the rest defers to stabilize_reference.
+This way, we can introduce multiple SAVE_EXPRs (like stabilize_expr
+itself already can as well), but can handle even the weirdest
+lhs expressions for which lvalue_kind returns clk_bitfield or clk_packed
+set.
+
+2025-12-19  Jakub Jelinek  <jakub@redhat.com>
+
+	PR c++/122772
+	* tree.cc (cp_stabilize_bitfield_reference): New function.
+	(cp_stabilize_reference): Use it for stabilization of
+	clk_bitfield or clk_packed lvalues.
+
+	* g++.dg/cpp1z/eval-order14.C: New test.
+
+(cherry picked from commit 1eb6a757b060087731162d821410a9b384568079)
+---
+ gcc/cp/tree.cc                            |  79 +++++++++++++++
+ gcc/testsuite/g++.dg/cpp1z/eval-order14.C | 114 ++++++++++++++++++++++
+ 2 files changed, 193 insertions(+)
+ create mode 100644 gcc/testsuite/g++.dg/cpp1z/eval-order14.C
+
+diff --git a/gcc/cp/tree.cc b/gcc/cp/tree.cc
+index 30b3aac948e5..00f7a810fd1d 100644
+--- a/gcc/cp/tree.cc
++++ b/gcc/cp/tree.cc
+@@ -424,6 +424,83 @@ non_mergeable_glvalue_p (const_tree ref)
+ 	  && !(kind & (clk_class|clk_mergeable)));
+ }
+ 
++/* C++-specific version of stabilize_reference for bit-fields and
++   DECL_PACKED fields.  We can't bind a reference to those.  */
++
++static tree
++cp_stabilize_bitfield_reference (tree ref)
++{
++  tree op1, op2, op3;
++  STRIP_ANY_LOCATION_WRAPPER (ref);
++  switch (TREE_CODE (ref))
++    {
++    case VAR_DECL:
++    case PARM_DECL:
++    case RESULT_DECL:
++    CASE_CONVERT:
++    case FLOAT_EXPR:
++    case FIX_TRUNC_EXPR:
++    case INDIRECT_REF:
++    case COMPONENT_REF:
++    case BIT_FIELD_REF:
++    case ARRAY_REF:
++    case ARRAY_RANGE_REF:
++    case ERROR_MARK:
++    case REALPART_EXPR:
++    case IMAGPART_EXPR:
++    default:
++      break;
++    case COMPOUND_EXPR:
++      op2 = cp_stabilize_bitfield_reference (TREE_OPERAND (ref, 1));
++      if (op2 == TREE_OPERAND (ref, 1))
++	return ref;
++      op1 = TREE_OPERAND (ref, 0);
++      if (TREE_SIDE_EFFECTS (op1))
++	{
++	  if (VOID_TYPE_P (TREE_TYPE (op1)))
++	    op1 = save_expr (op1);
++	  else
++	    {
++	      op1 = build2 (COMPOUND_EXPR, void_type_node, op1,
++			    void_node);
++	      op1 = save_expr (op1);
++	    }
++	}
++      return build2 (COMPOUND_EXPR, TREE_TYPE (op2), op1, op2);
++    case COND_EXPR:
++      op1 = TREE_OPERAND (ref, 0);
++      op2 = TREE_OPERAND (ref, 1);
++      op3 = TREE_OPERAND (ref, 2);
++      if (op2 && TREE_CODE (op2) != THROW_EXPR)
++	op2 = cp_stabilize_bitfield_reference (op2);
++      if (TREE_CODE (op3) != THROW_EXPR)
++	op3 = cp_stabilize_bitfield_reference (op3);
++      if (op2 == NULL_TREE)
++	op1 = cp_stabilize_bitfield_reference (op1);
++      if (op1 == TREE_OPERAND (ref, 0)
++	  && op2 == TREE_OPERAND (ref, 1)
++	  && op3 == TREE_OPERAND (ref, 2))
++	return ref;
++      if (op2 != NULL_TREE && TREE_SIDE_EFFECTS (op1))
++	op1 = save_expr (op1);
++      return build3 (COND_EXPR, TREE_TYPE (ref), op1, op2, op3);
++    case PREINCREMENT_EXPR:
++    case PREDECREMENT_EXPR:
++      op1 = cp_stabilize_bitfield_reference (TREE_OPERAND (ref, 0));
++      if (op1 == TREE_OPERAND (ref, 0))
++	return ref;
++      return build2 (COMPOUND_EXPR, TREE_TYPE (ref),
++		     build2 (TREE_CODE (ref), TREE_TYPE (ref), op1,
++			     TREE_OPERAND (ref, 0)), op1);
++    case PAREN_EXPR:
++      op1 = cp_stabilize_bitfield_reference (TREE_OPERAND (ref, 0));
++      if (op1 == TREE_OPERAND (ref, 0))
++	return ref;
++      return build1 (PAREN_EXPR, TREE_TYPE (ref), op1);
++    }
++  return stabilize_reference (ref);
++}
++
+ /* C++-specific version of stabilize_reference.  */
+ 
+ tree
+@@ -455,6 +532,8 @@ cp_stabilize_reference (tree ref)
+       cp_lvalue_kind kind = lvalue_kind (ref);
+       if ((kind & ~clk_class) != clk_none)
+ 	{
++	  if (kind & (clk_bitfield | clk_packed))
++	    return cp_stabilize_bitfield_reference (ref);
+ 	  tree type = unlowered_expr_type (ref);
+ 	  bool rval = !!(kind & clk_rvalueref);
+ 	  type = cp_build_reference_type (type, rval);
+diff --git a/gcc/testsuite/g++.dg/cpp1z/eval-order14.C b/gcc/testsuite/g++.dg/cpp1z/eval-order14.C
+new file mode 100644
+index 000000000000..e3538ba5640f
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/cpp1z/eval-order14.C
+@@ -0,0 +1,114 @@
++// PR c++/122772
++// { dg-do run }
++
++struct S { int y : 7; } s;
++struct T { int x; int z : 7; } t;
++int cnt, mode;
++
++int
++foo ()
++{
++#if __cplusplus >= 201703L
++  if (cnt != 1 + (mode & 1))
++    __builtin_abort ();
++#endif
++  ++cnt;
++  return 2;
++}
++
++int
++bar ()
++{
++#if __cplusplus >= 201703L
++  if (cnt != 0)
++    __builtin_abort ();
++#endif
++  ++cnt;
++  return 40;
++}
++
++S &
++baz ()
++{
++#if __cplusplus >= 201703L
++  if (cnt != 2 + (mode & 1))
++    __builtin_abort ();
++#endif
++  if (mode & 2)
++    __builtin_abort ();
++  ++cnt;
++  return s;
++}
++
++T &
++qux ()
++{
++#if __cplusplus >= 201703L
++  if (cnt != 2 + (mode & 1))
++    __builtin_abort ();
++#endif
++  if ((mode & 2) == 0)
++    __builtin_abort ();
++  ++cnt;
++  return t;
++}
++
++bool
++fred (bool x)
++{
++#if __cplusplus >= 201703L
++  if (cnt != 1)
++    __builtin_abort ();
++#endif
++  ++cnt;
++  return x;
++}
++
++void
++plugh (bool b)
++{
++  S x;
++  x.y = 5;
++  mode = 0;
++  cnt = 0;
++  (x.y = foo ()) += bar ();
++  if (cnt != 2 || x.y != 42)
++    __builtin_abort ();
++  x.y = 5;
++  cnt = 0;
++  (baz ().y = foo ()) += bar ();
++  if (cnt != 3 || s.y != 42)
++    __builtin_abort ();
++  s.y = 5;
++  mode = (b ? 0 : 2);
++  cnt = 0;
++  (b ? (baz ().y = foo ()) : (qux ().z = foo ())) += bar ();
++  if (cnt != 3 || (b ? (s.y != 42) : (t.z != 42)))
++    __builtin_abort ();
++  s.y = 5;
++  t.z = 5;
++  mode |= 1;
++  cnt = 0;
++  (fred (b) ? (baz ().y = foo ()) : (qux ().z = foo ())) += bar ();
++  if (cnt != 4 || (b ? (s.y != 42) : (t.z != 42)))
++    __builtin_abort ();
++  s.y = 5;
++  t.z = 5;
++  mode = 0;
++  cnt = 0;
++  ++x.y += bar ();
++  if (cnt != 1 || x.y != 46)
++    __builtin_abort ();
++  cnt = 0;
++  x.y = 9;
++  --x.y += bar ();
++  if (cnt != 1 || x.y != 48)
++    __builtin_abort ();
++}
++
++int
++main ()
++{
++  plugh (false);
++  plugh (true);
++}
+-- 
+2.43.7
+
+

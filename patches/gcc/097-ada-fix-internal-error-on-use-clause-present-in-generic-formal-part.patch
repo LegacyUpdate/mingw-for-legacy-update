@@ -1,0 +1,64 @@
+From 84ac6f3503ec331f3524f9c5c44a8f4e37b1d081 Mon Sep 17 00:00:00 2001
+From: Eric Botcazou <ebotcazou@adacore.com>
+Date: Mon, 22 Sep 2025 11:08:34 +0200
+Subject: [PATCH] Ada: Fix internal error on use clause present in generic
+ formal part
+
+This is a regression present on the mainline and 15 branch: the compiler
+aborts on a use clause present in the formal part of a generic unit because
+of an oversight in the new inference code for generic actual parameters.
+
+The fix also adds a missing test to Analyze_Dimension_Array_Aggregate.
+
+gcc/ada/
+	PR ada/121968
+	* sem_ch12.adb (Associations.Find_Assoc): Add guard for clauses.
+	* sem_dim.adb (Analyze_Dimension_Array_Aggregate): Add test for
+	N_Iterated_Component_Association nodes.
+---
+ gcc/ada/sem_ch12.adb | 12 +++++++++---
+ gcc/ada/sem_dim.adb  |  4 +++-
+ 2 files changed, 12 insertions(+), 4 deletions(-)
+
+diff --git a/gcc/ada/sem_ch12.adb b/gcc/ada/sem_ch12.adb
+index e00f5140588d..5a9a38cb4921 100644
+--- a/gcc/ada/sem_ch12.adb
++++ b/gcc/ada/sem_ch12.adb
+@@ -2044,9 +2044,15 @@ package body Sem_Ch12 is
+       is
+       begin
+          for Index in Gen_Assocs.Assocs'Range loop
+-            if Defining_Entity (Gen_Assocs.Assocs (Index).An_Formal) = F then
+-               return Index;
+-            end if;
++            declare
++               An_F : constant Node_Id := Gen_Assocs.Assocs (Index).An_Formal;
++            begin
++               if Nkind (An_F) not in N_Use_Package_Clause | N_Use_Type_Clause
++                 and then Defining_Entity (An_F) = F
++               then
++                  return Index;
++               end if;
++            end;
+          end loop;
+ 
+          raise Program_Error; -- it must be present
+diff --git a/gcc/ada/sem_dim.adb b/gcc/ada/sem_dim.adb
+index 139ed661f901..822c1284d539 100644
+--- a/gcc/ada/sem_dim.adb
++++ b/gcc/ada/sem_dim.adb
+@@ -1273,7 +1273,9 @@ package body Sem_Dim is
+ 
+          --  Get the expression from the component
+ 
+-         if Nkind (Comp) = N_Component_Association then
++         if Nkind (Comp) in N_Component_Association
++                          | N_Iterated_Component_Association
++         then
+             Expr := Expression (Comp);
+          else
+             Expr := Comp;
+-- 
+2.43.7
+
+

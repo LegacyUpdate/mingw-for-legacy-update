@@ -1,0 +1,102 @@
+From 545bdfc81340100cfbf69de1fbd4f0fd26d1ed9c Mon Sep 17 00:00:00 2001
+From: Richard Earnshaw <rearnsha@arm.com>
+Date: Tue, 14 Oct 2025 13:53:05 +0100
+Subject: [PATCH] arm: avoid unmatched insn in movhfcc [PR118460]
+
+When compiling for m-profile with the floating-point extension we have
+a vsel instruction that takes a limited set of comparisons.  In most
+cases we can use this with careful selection of the operand order, but
+we need to expand things in the right way.  This patch is in two parts:
+
+1) We validate that the expansion will produce correct RTL;
+2) We canonicalize the comparison to increase the chances that the
+above check will pass.
+
+gcc:
+
+	PR target/118460
+	* config/arm/arm.cc (arm_canonicalize_comparison): For floating-
+	point comparisons, swap the operand order if that will be more
+	likely to produce a comparison that can be used with VSEL.
+	(arm_validize_comparison): Make sure that HFmode comparisons
+	are compatible with VSEL.
+
+gcc/testsuite:
+
+	PR target/118460
+	* gcc.target/arm/armv8_2-fp16-move-1.c: Adjust expected output.
+	* gcc.target/arm/armv8_2-fp16-move-2.c: Likewise.
+
+(cherry picked from commit 99af0f9078865269ae13367a25e2b156c8ccba77)
+---
+ gcc/config/arm/arm.cc                         | 19 +++++++++++++++++++
+ .../gcc.target/arm/armv8_2-fp16-move-1.c      |  4 ++--
+ .../gcc.target/arm/armv8_2-fp16-move-2.c      |  2 +-
+ 3 files changed, 22 insertions(+), 3 deletions(-)
+
+diff --git a/gcc/config/arm/arm.cc b/gcc/config/arm/arm.cc
+index 670f487bcce3..5b6558e0af6c 100644
+--- a/gcc/config/arm/arm.cc
++++ b/gcc/config/arm/arm.cc
+@@ -5726,6 +5726,22 @@ arm_canonicalize_comparison (int *code, rtx *op0, rtx *op1,
+ 
+   maxval = (HOST_WIDE_INT_1U << (GET_MODE_BITSIZE (mode) - 1)) - 1;
+ 
++  /* For floating-point comparisons, prefer >= and > over <= and < since
++     the former are supported by VSEL on some architectures.  Only do this
++     if both operands are registers.  */
++  if (GET_MODE_CLASS (mode) == MODE_FLOAT
++      && (*code == LE
++	  || *code == LT
++	  || *code == UNGT
++	  || *code == UNGE)
++      && register_operand (*op0, mode)
++      && register_operand (*op1, mode))
++    {
++      std::swap (*op0, *op1);
++      *code = (int) swap_condition ((rtx_code)*code);
++      return;
++    }
++
+   /* For DImode, we have GE/LT/GEU/LTU comparisons (with cmp/sbc).  In
+      ARM mode we can also use cmp/cmpeq for GTU/LEU.  GT/LE must be
+      either reversed or (for constant OP1) adjusted to GE/LT.
+@@ -32860,6 +32876,9 @@ arm_validize_comparison (rtx *comparison, rtx * op1, rtx * op2)
+     case E_HFmode:
+       if (!TARGET_VFP_FP16INST)
+ 	break;
++      if (!arm_vsel_comparison_operator (*comparison, mode))
++	return false;
++
+       /* FP16 comparisons are done in SF mode.  */
+       mode = SFmode;
+       *op1 = convert_to_mode (mode, *op1, 1);
+diff --git a/gcc/testsuite/gcc.target/arm/armv8_2-fp16-move-1.c b/gcc/testsuite/gcc.target/arm/armv8_2-fp16-move-1.c
+index 444c4a335355..02d7b51ac8b9 100644
+--- a/gcc/testsuite/gcc.target/arm/armv8_2-fp16-move-1.c
++++ b/gcc/testsuite/gcc.target/arm/armv8_2-fp16-move-1.c
+@@ -134,8 +134,8 @@ test_select_8 (__fp16 a, __fp16 b, __fp16 c)
+ }
+ 
+ /* { dg-final { scan-assembler-times {vseleq\.f16\ts[0-9]+, s[0-9]+, s[0-9]+} 4 } } */
+-/* { dg-final { scan-assembler-times {vselgt\.f16\ts[0-9]+, s[0-9]+, s[0-9]+} 1 } }  */
+-/* { dg-final { scan-assembler-times {vselge\.f16\ts[0-9]+, s[0-9]+, s[0-9]+} 1 } }  */
++/* { dg-final { scan-assembler-times {vselgt\.f16\ts[0-9]+, s[0-9]+, s[0-9]+} 2 } }  */
++/* { dg-final { scan-assembler-times {vselge\.f16\ts[0-9]+, s[0-9]+, s[0-9]+} 2 } }  */
+ 
+ /* { dg-final { scan-assembler-not {vmov\.f16} } }  */
+ 
+diff --git a/gcc/testsuite/gcc.target/arm/armv8_2-fp16-move-2.c b/gcc/testsuite/gcc.target/arm/armv8_2-fp16-move-2.c
+index dff57ac8147c..a249d712119f 100644
+--- a/gcc/testsuite/gcc.target/arm/armv8_2-fp16-move-2.c
++++ b/gcc/testsuite/gcc.target/arm/armv8_2-fp16-move-2.c
+@@ -8,4 +8,4 @@ test_select (__fp16 a, __fp16 b, __fp16 c)
+ {
+   return (a < b) ? b : c;
+ }
+-/* { dg-final { scan-assembler "bx?(mi|pl)" } } */
++/* { dg-final { scan-assembler "vselgt\.f16\t" } } */
+-- 
+2.43.7
+
+

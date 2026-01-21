@@ -1,0 +1,34 @@
+From d9fbf1d2de56009aca112596ee68b4938e145d0a Mon Sep 17 00:00:00 2001
+From: Sam James <sam@gentoo.org>
+Date: Sun, 20 Apr 2025 01:43:39 +0100
+Subject: [PATCH] libphobos: enable for sparc64-unknown-linux-gnu
+
+This bootstraps with some test failures but works well enough to build
+11..15.
+
+libphobos/ChangeLog:
+
+	* configure.tgt: Add sparc64-unknown-linux-gnu as a supported target.
+
+(cherry picked from commit 2572d46f0d1e426c1091f9b84861ee5213b84b5a)
+---
+ libphobos/configure.tgt | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/libphobos/configure.tgt b/libphobos/configure.tgt
+index ae3b2c20ea7c..456b4d5b96d6 100644
+--- a/libphobos/configure.tgt
++++ b/libphobos/configure.tgt
+@@ -67,7 +67,7 @@ case "${target}" in
+   s390*-linux*)
+ 	LIBPHOBOS_SUPPORTED=yes
+ 	;;
+-  sparc*-*-solaris2.11*)
++  sparc64-*-linux* | sparc*-*-solaris2.11*)
+ 	LIBPHOBOS_SUPPORTED=yes
+ 	;;
+   *-*-darwin9* | *-*-darwin1[01]*)
+-- 
+2.43.7
+
+

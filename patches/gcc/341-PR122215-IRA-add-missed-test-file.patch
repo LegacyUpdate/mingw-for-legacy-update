@@ -1,0 +1,36 @@
+From b327411e4cecca2e77b30573b13ec9581cd698b2 Mon Sep 17 00:00:00 2001
+From: "Vladimir N. Makarov" <vmakarov@redhat.com>
+Date: Tue, 20 Jan 2026 13:08:49 -0500
+Subject: [PATCH] [PR122215, IRA]: Add missed test file
+
+The test for PR122215 requires to suppress valgrind sparseset warnings for passing the test.  The patch adds such file.
+
+gcc/testsuite/ChangeLog:
+
+	PR rtl-optimization/122215
+	* sparseset.supp: New.
+---
+ gcc/testsuite/sparseset.supp | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+ create mode 100644 gcc/testsuite/sparseset.supp
+
+diff --git a/gcc/testsuite/sparseset.supp b/gcc/testsuite/sparseset.supp
+new file mode 100644
+index 000000000000..60824fea84da
+--- /dev/null
++++ b/gcc/testsuite/sparseset.supp
+@@ -0,0 +1,10 @@
++{
++   SPARSESET1
++   Memcheck:Cond
++   fun:sparseset_bit_p
++}
++{
++   SPARSESET2
++   Memcheck:Value8
++   fun:sparseset_bit_p
++}
+-- 
+2.43.7
+
+

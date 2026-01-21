@@ -1,0 +1,69 @@
+From b9693dfdefbe07e1412e995b19d5ebc2ae442558 Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Tue, 25 Nov 2025 10:30:51 +0100
+Subject: [PATCH] openmp: Fix up OpenMP expansion of collapsed loops [PR120564]
+
+Most of gimple_build_cond_empty callers call just build2 to prepare
+condition which is put into GIMPLE_COND, but this one spot has been
+using incorrectly fold_build2.  Now the arguments of the *build2 were
+already gimplified, but the folding of some conditions can turn say
+unsigned_var > INT_MAX into (int) unsigned_var < 0 etc. and thus
+turn the condition into something invalid in gimple, because we only
+try to regimplify the operands if they refer to some decl which needs
+to be regimplified (has DECL_VALUE_EXPR on it).
+
+Fixed by also using build2 instead of fold_build2.
+
+2025-11-25  Jakub Jelinek  <jakub@redhat.com>
+
+	PR middle-end/120564
+	* omp-expand.cc (extract_omp_for_update_vars): Use build2 instead of
+	fold_build2 to build argument for gimple_build_cond_empty.
+
+	* c-c++-common/gomp/pr120564.c: New test.
+
+(cherry picked from commit a117fd63e423fb60f5e5f07125a11c7183109bf2)
+---
+ gcc/omp-expand.cc                          |  2 +-
+ gcc/testsuite/c-c++-common/gomp/pr120564.c | 15 +++++++++++++++
+ 2 files changed, 16 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/c-c++-common/gomp/pr120564.c
+
+diff --git a/gcc/omp-expand.cc b/gcc/omp-expand.cc
+index 385fe1cc8870..6acfd8341187 100644
+--- a/gcc/omp-expand.cc
++++ b/gcc/omp-expand.cc
+@@ -3299,7 +3299,7 @@ extract_omp_for_update_vars (struct omp_for_data *fd, tree *nonrect_bounds,
+ 	  if (DECL_P (v) && TREE_ADDRESSABLE (v))
+ 	    v = force_gimple_operand_gsi (&gsi, v, true, NULL_TREE,
+ 					  false, GSI_CONTINUE_LINKING);
+-	  t = fold_build2 (fd->loops[i].cond_code, boolean_type_node, v, t);
++	  t = build2 (fd->loops[i].cond_code, boolean_type_node, v, t);
+ 	  stmt = gimple_build_cond_empty (t);
+ 	  gsi_insert_after (&gsi, stmt, GSI_CONTINUE_LINKING);
+ 	  if (walk_tree (gimple_cond_lhs_ptr (as_a <gcond *> (stmt)),
+diff --git a/gcc/testsuite/c-c++-common/gomp/pr120564.c b/gcc/testsuite/c-c++-common/gomp/pr120564.c
+new file mode 100644
+index 000000000000..4dfa4fcfbc91
+--- /dev/null
++++ b/gcc/testsuite/c-c++-common/gomp/pr120564.c
+@@ -0,0 +1,15 @@
++/* PR middle-end/120564 */
++/* { dg-do compile } */
++
++void bar (unsigned long long, unsigned long long, unsigned long long);
++
++void
++foo (void)
++{
++  unsigned long long v1, v2, v3;
++#pragma omp parallel for schedule(static, 32) collapse(3)
++  for (v1 = 0; v1 < 20; v1 += 2)
++    for (v2 = __LONG_LONG_MAX__; v2 > __LONG_LONG_MAX__; v2 -= 3)
++      for (v3 = 10; v3 > 0; v3--)
++	bar (v1, v2, v3);
++}
+-- 
+2.43.7
+
+

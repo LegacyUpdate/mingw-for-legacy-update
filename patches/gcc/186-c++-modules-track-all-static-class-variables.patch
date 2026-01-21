@@ -1,0 +1,111 @@
+From 59213fd40fe5f272f603f5b8303d2c371f05c7a5 Mon Sep 17 00:00:00 2001
+From: Nathaniel Shead <nathanieloshead@gmail.com>
+Date: Sun, 26 Oct 2025 22:27:33 +1100
+Subject: [PATCH] c++/modules: Track all static class variables [PR122421]
+
+The linker error in the PR is caused because when a static is defined
+out of the class body, it doesn't yet have a definition and so
+read_var_def (which would otherwise have noted it) never gets called.
+
+This instead moves the responsibility for noting class-scope variables
+to read_class_def.
+
+	PR c++/122421
+
+gcc/cp/ChangeLog:
+
+	* module.cc (trees_in::read_var_def): Don't handle class-scope
+	variables anymore.
+	(trees_in::read_class_def): Handle them here instead.
+
+gcc/testsuite/ChangeLog:
+
+	* g++.dg/modules/inst-6_a.C: New test.
+	* g++.dg/modules/inst-6_b.C: New test.
+
+Signed-off-by: Nathaniel Shead <nathanieloshead@gmail.com>
+Reviewed-by: Jason Merrill <jason@redhat.com>
+(cherry picked from commit fd5c057c2d01346d69119f88ca94debf27842e4e)
+---
+ gcc/cp/module.cc                        | 15 +++++++++------
+ gcc/testsuite/g++.dg/modules/inst-6_a.C | 14 ++++++++++++++
+ gcc/testsuite/g++.dg/modules/inst-6_b.C | 12 ++++++++++++
+ 3 files changed, 35 insertions(+), 6 deletions(-)
+ create mode 100644 gcc/testsuite/g++.dg/modules/inst-6_a.C
+ create mode 100644 gcc/testsuite/g++.dg/modules/inst-6_b.C
+
+diff --git a/gcc/cp/module.cc b/gcc/cp/module.cc
+index 632dc47552a6..eed84706686b 100644
+--- a/gcc/cp/module.cc
++++ b/gcc/cp/module.cc
+@@ -12848,12 +12848,11 @@ trees_in::read_var_def (tree decl, tree maybe_template)
+ 	  if (DECL_EXPLICIT_INSTANTIATION (decl)
+ 	      && !DECL_EXTERNAL (decl))
+ 	    setup_explicit_instantiation_definition_linkage (decl);
+-	  if (DECL_IMPLICIT_INSTANTIATION (decl)
+-	      || (DECL_EXPLICIT_INSTANTIATION (decl)
+-		  && !DECL_EXTERNAL (decl))
+-	      || (DECL_CLASS_SCOPE_P (decl)
+-		  && !DECL_VTABLE_OR_VTT_P (decl)
+-		  && !DECL_TEMPLATE_INFO (decl)))
++	  /* Class static data members are handled in read_class_def.  */
++	  if (!DECL_CLASS_SCOPE_P (decl)
++	      && (DECL_IMPLICIT_INSTANTIATION (decl)
++		  || (DECL_EXPLICIT_INSTANTIATION (decl)
++		      && !DECL_EXTERNAL (decl))))
+ 	    note_vague_linkage_variable (decl);
+ 	}
+       if (!dyn_init)
+@@ -13267,6 +13266,10 @@ trees_in::read_class_def (tree defn, tree maybe_template)
+ 			DECL_ACCESS (d) = tree_cons (type, access, list);
+ 		    }
+ 		}
++
++	      if (TREE_CODE (decl) == VAR_DECL
++		  && TREE_CODE (maybe_template) != TEMPLATE_DECL)
++		note_vague_linkage_variable (decl);
+ 	    }
+ 	}
+ 
+diff --git a/gcc/testsuite/g++.dg/modules/inst-6_a.C b/gcc/testsuite/g++.dg/modules/inst-6_a.C
+new file mode 100644
+index 000000000000..7f35cc161bfc
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/modules/inst-6_a.C
+@@ -0,0 +1,14 @@
++// PR c++/122421
++// { dg-additional-options "-fmodules" }
++// { dg-module-cmi M }
++
++export module M;
++
++export template <typename T> struct Type {
++  static const int arr[3];
++};
++
++extern template const int Type<double>::arr[3];
++template <typename T> const int Type<T>::arr[] = { 42, 43, 44 };
++
++export Type<int> ti;
+diff --git a/gcc/testsuite/g++.dg/modules/inst-6_b.C b/gcc/testsuite/g++.dg/modules/inst-6_b.C
+new file mode 100644
+index 000000000000..5a8092ccb148
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/modules/inst-6_b.C
+@@ -0,0 +1,12 @@
++// PR c++/122421
++// { dg-additional-options "-fmodules" }
++
++import M;
++
++int main() {
++  const int& a = Type<int>::arr[0];
++  const int& b = Type<double>::arr[0];
++}
++
++// { dg-final { scan-assembler {_ZNW1M4TypeIiE3arrE:} } }
++// { dg-final { scan-assembler-not {_ZNW1M4TypeIdE3arrE:} } }
+-- 
+2.43.7
+
+

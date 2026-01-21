@@ -1,0 +1,53 @@
+From 839618f53ffb773b99cc54fd01307bd0a437cdc7 Mon Sep 17 00:00:00 2001
+From: Alex Coplan <alex.coplan@arm.com>
+Date: Mon, 13 Oct 2025 13:41:09 +0000
+Subject: [PATCH] aarch64, testsuite: Add -fchecking to test options [PR121772]
+
+I noticed while testing a backport of the PR121772 fix to GCC 13 that
+the test wasn't triggering the ICE as expected with the unpatched
+compiler.
+
+This turned out to be because the ICE is a checking ICE, and we
+configure by default with --enable-checking=release on the branches.
+Additionally, I hadn't noticed when doing the backports to 15 and 14
+since there we still ICE later on in emit_move_insn even if we don't
+catch the invalid gimple with checking.
+
+I'm not too sure why the 13 branch doesn't see the emit_move_insn ICE,
+but it's somewhat irrelevant - the important thing is that adding
+-fchecking to the options makes the test fail as expected with an
+unpatched compiler (i.e. with a gimple checking failure), even on
+release branches.
+
+I considered applying this patch to just the release branches, but
+figured that trunk will at some point itself become a release branch, so
+it seems to make most sense just to apply it everywhere.
+
+I've checked that the test still passes with this patch, and still fails
+if I revert the PR121772 fix.
+
+gcc/testsuite/ChangeLog:
+
+	PR tree-optimization/121772
+	* gcc.target/aarch64/torture/pr121772.c: Add -fchecking to
+	dg-options.
+
+(cherry picked from commit 0c670d38455c788ac0447e3b86ba621521d44bce)
+---
+ gcc/testsuite/gcc.target/aarch64/torture/pr121772.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/gcc/testsuite/gcc.target/aarch64/torture/pr121772.c b/gcc/testsuite/gcc.target/aarch64/torture/pr121772.c
+index 3b4cf4d7d189..d47a026c3ce6 100644
+--- a/gcc/testsuite/gcc.target/aarch64/torture/pr121772.c
++++ b/gcc/testsuite/gcc.target/aarch64/torture/pr121772.c
+@@ -1,4 +1,5 @@
+ /* { dg-do compile } */
++/* { dg-options "-fchecking" } */
+ #include <arm_neon.h>
+ int16_t f(int16x4_t b) {
+   return vaddvq_s16(vcombine_s16(b, vdup_n_s16 (0)));
+-- 
+2.43.7
+
+

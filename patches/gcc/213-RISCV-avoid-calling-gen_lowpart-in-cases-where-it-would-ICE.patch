@@ -1,0 +1,83 @@
+From e4f492106bf25a9b1376f9cf5f29cf88c5633334 Mon Sep 17 00:00:00 2001
+From: Jeff Law <jlaw@ventanamicro.com>
+Date: Thu, 14 Aug 2025 14:15:40 -0600
+Subject: [PATCH] [PR target/119275][RISC-V] Avoid calling gen_lowpart in cases
+ where it would ICE
+
+So this is a minor bug in the riscv move expanders.  It has a special cases for
+extraction from vector objects which makes assumptions that it can use
+gen_lowpart unconditionally.  That's not always the case.
+
+We can just bypass that special code for cases where we can't use gen_lowpart
+and let the more generic code run. If gen_lowpart_common indicates we've got a
+case that can't be handled we just bypass the special extraction code.
+
+Tested on riscv64-elf and riscv32-elf.  Waiting for pre-commit CI to do its
+thing.
+
+	PR target/119275
+gcc/
+	* config/riscv/riscv.cc (riscv_legitimize_move): Avoid calling
+	gen_lowpart for cases where it'll fail.  Just use standard expander
+	paths for those cases.
+
+gcc/testsuite/
+	* gcc.target/riscv/pr119275.c: New test.
+
+(cherry picked from commit 44cd33881ff45ee7acc0ae1ddf154163d1eef924)
+---
+ gcc/config/riscv/riscv.cc                 |  3 ++-
+ gcc/testsuite/gcc.target/riscv/pr119275.c | 26 +++++++++++++++++++++++
+ 2 files changed, 28 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/gcc.target/riscv/pr119275.c
+
+diff --git a/gcc/config/riscv/riscv.cc b/gcc/config/riscv/riscv.cc
+index 314524ac1c87..dc5c72097e82 100644
+--- a/gcc/config/riscv/riscv.cc
++++ b/gcc/config/riscv/riscv.cc
+@@ -3597,7 +3597,8 @@ riscv_legitimize_move (machine_mode mode, rtx dest, rtx src)
+ 	 not enabled.  In that case we just want to let the standard
+ 	 expansion path run.  */
+       if (riscv_vector::get_vector_mode (smode, nunits).exists (&vmode)
+-	  && convert_optab_handler (vec_extract_optab, vmode, smode))
++	  && convert_optab_handler (vec_extract_optab, vmode, smode)
++	  && gen_lowpart_common (vmode, SUBREG_REG (src)))
+ 	{
+ 	  rtx v = gen_lowpart (vmode, SUBREG_REG (src));
+ 	  rtx int_reg = dest;
+diff --git a/gcc/testsuite/gcc.target/riscv/pr119275.c b/gcc/testsuite/gcc.target/riscv/pr119275.c
+new file mode 100644
+index 000000000000..02a1a7bebd23
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/riscv/pr119275.c
+@@ -0,0 +1,26 @@
++/* { dg-do compile { target int128 } } */
++/* { dg-options "-march=rv64gv -mabi=lp64d -mrvv-vector-bits=zvl" { target { rv64 } } } */
++
++__int128 h, j;
++int y;
++double d;
++void *p;
++char *q;
++char x;
++long u;
++
++char *bar(int, int);
++
++typedef __attribute__((__vector_size__ (2))) char V;
++
++void
++foo(V v)
++{
++  x += *bar (0, 0);
++  for(;;) {
++    __builtin_strcat (p, 7 + q);
++    d += __builtin_stdc_rotate_left (
++        (unsigned __int128) u | h << *__builtin_strcat (p, 7 + q), j);
++    u += (long) __builtin_memmove (&y, &v, 2);
++  }
++}
+-- 
+2.43.7
+
+

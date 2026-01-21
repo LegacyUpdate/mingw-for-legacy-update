@@ -1,0 +1,101 @@
+From 27d6b600b1e5c0e0eccb41d957ef453c4f347e8d Mon Sep 17 00:00:00 2001
+From: Lulu Cheng <chenglulu@loongson.cn>
+Date: Thu, 14 Aug 2025 11:59:53 +0800
+Subject: [PATCH] LoongArch: Fix ICE caused by function
+ add_stmt_cost[PR121542].
+
+	PR target/121542
+
+gcc/ChangeLog:
+
+	* config/loongarch/loongarch.cc
+	(loongarch_vector_costs::add_stmt_cost): When using vectype,
+	first determine whether it is NULL.
+
+gcc/testsuite/ChangeLog:
+
+	* gcc.target/loongarch/pr121542.c: New test.
+
+(cherry picked from commit d1c207a65d25b50e851ab53956271c91e0281ae0)
+---
+ gcc/config/loongarch/loongarch.cc             |  1 +
+ gcc/testsuite/gcc.target/loongarch/pr121542.c | 54 +++++++++++++++++++
+ 2 files changed, 55 insertions(+)
+ create mode 100644 gcc/testsuite/gcc.target/loongarch/pr121542.c
+
+diff --git a/gcc/config/loongarch/loongarch.cc b/gcc/config/loongarch/loongarch.cc
+index 734a3cccc58a..49d95374396f 100644
+--- a/gcc/config/loongarch/loongarch.cc
++++ b/gcc/config/loongarch/loongarch.cc
+@@ -4390,6 +4390,7 @@ loongarch_vector_costs::add_stmt_cost (int count, vect_cost_for_stmt kind,
+ 	    break;
+ 	  }
+       else if (TARGET_RECIP_VEC_DIV
++	       && vectype
+ 	       && gimple_code (stmt_info->stmt) == GIMPLE_ASSIGN)
+ 	{
+ 	  machine_mode mode = TYPE_MODE (vectype);
+diff --git a/gcc/testsuite/gcc.target/loongarch/pr121542.c b/gcc/testsuite/gcc.target/loongarch/pr121542.c
+new file mode 100644
+index 000000000000..51a5e3c44800
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/loongarch/pr121542.c
+@@ -0,0 +1,54 @@
++/* { dg-do compile } */
++/* { dg-options "-mrecip=all  -mfrecipe -mabi=lp64d -march=loongarch64 -mfpu=64 -msimd=lasx -Ofast" } */
++
++typedef long unsigned int STRLEN;
++typedef struct sv SV;
++struct sv
++{
++  void *sv_any;
++  unsigned int sv_refcnt;
++  unsigned int sv_flags;
++};
++typedef struct xpv XPV;
++struct xpv
++{
++  char *xpv_pv;
++  STRLEN xpv_cur;
++  STRLEN xpv_len;
++};
++typedef unsigned long UV;
++extern char *PL_bufend;
++extern char *d;
++SV *Perl_newSV (STRLEN len);
++
++char *
++S_scan_const (char *start)
++{
++  register char *send = PL_bufend;
++  SV *sv = Perl_newSV (send - start);
++  register char *s = start;
++  UV uv;
++
++  while (s < send)
++    {
++      if (!(((UV)(uv)) < 0x80))
++        {
++          int hicount = 0;
++          unsigned char *c;
++          for (c = (unsigned char *)((XPV *)(sv)->sv_any)->xpv_pv;
++               c < (unsigned char *)d; c++)
++            {
++              if (!(((UV)(*c)) < 0x80))
++                {
++                  hicount++;
++                }
++            }
++          d += hicount;
++          *d++ = (char)uv;
++        }
++
++      s++;
++    }
++
++  return s;
++}
+-- 
+2.43.7
+
+

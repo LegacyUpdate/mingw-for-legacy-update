@@ -1,0 +1,52 @@
+From 1be9c04058b52c2d0e5c4c3af1da1d38868a8537 Mon Sep 17 00:00:00 2001
+From: LIU Hao <lh_mouse@126.com>
+Date: Sat, 25 Oct 2025 17:19:34 +0800
+Subject: [PATCH] x86-64: Use `movsxd` to perform SI-to-DI extension in Intel
+ syntax
+
+Although there's no possibility of ambiguity, Intel manual says the mnemonic
+for DWORD-to-QWORD sign-extension operation should be MOVSXD. Some assemblers
+(GNU AS, NASM) also overload MOVSX, but some others don't accept MOVSX (LLVM,
+MASM, YASM in NASM mode) and require MOVSXD.
+
+This mnemonic was introduced in r0-34259-g123bf9e3f4056d in 2001, and has not
+been updated ever since.
+
+gcc/ChangeLog:
+
+	PR target/119079
+	* config/i386/i386.md: Use `movsxd` to perform SI-to-DI extension in Intel
+	syntax.
+
+Signed-off-by: LIU Hao <lh_mouse@126.com>
+(cherry picked from commit 66b38349273525dfb86f0f74d6c928abdbf7154f)
+---
+ gcc/config/i386/i386.md | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/gcc/config/i386/i386.md b/gcc/config/i386/i386.md
+index 6ba7e4bdbee3..bfd77ead1de3 100644
+--- a/gcc/config/i386/i386.md
++++ b/gcc/config/i386/i386.md
+@@ -4983,7 +4983,7 @@
+   "TARGET_64BIT"
+   "@
+    {cltq|cdqe}
+-   movs{lq|x}\t{%1, %0|%0, %1}"
++   movs{lq|xd}\t{%1, %0|%0, %1}"
+   [(set_attr "type" "imovx")
+    (set_attr "mode" "DI")
+    (set_attr "prefix_0f" "0")
+@@ -27625,7 +27625,7 @@
+ {
+   output_asm_insn ("mov{<imodesuffix>}\t{%3, %<k>1|%<k>1, %3}", operands);
+   output_asm_insn ("mov{<imodesuffix>}\t{%<k>1, %0|%0, %<k>1}", operands);
+-  return "movs{lq|x}\t{%2, %1|%1, %2}";
++  return "movs{lq|xd}\t{%2, %1|%1, %2}";
+ }
+   [(set_attr "type" "multi")
+    (set_attr "length" "24")])
+-- 
+2.43.7
+
+

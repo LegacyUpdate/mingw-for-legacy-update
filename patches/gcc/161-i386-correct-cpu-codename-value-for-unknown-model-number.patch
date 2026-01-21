@@ -1,0 +1,63 @@
+From 9a9470a34f6e90d8330117c93065a1929890fc7d Mon Sep 17 00:00:00 2001
+From: Haochen Jiang <haochen.jiang@intel.com>
+Date: Tue, 21 Oct 2025 11:21:45 +0800
+Subject: [PATCH] i386: Correct cpu codename value for unknown model number
+
+There are several changes for features enabled on cpus. r16-1666 disabled
+CLDEMOTE on clients. r16-2224 removed Key locker since Panther Lake and
+Clearwater forest. r16-4436 disabled PREFETCHI on Panther Lake.
+
+The patches caused the current return guess value not aligned for
+host_detect_local_cpu meeting the unknown model number. Correct the
+logic according to the features enabled.
+
+This patch will also backport to GCC14 and GCC15.
+
+gcc/ChangeLog:
+
+	* config/i386/driver-i386.cc (host_detect_local_cpu): Correct
+	the logic for unknown model number cpu guess value.
+---
+ gcc/config/i386/driver-i386.cc | 20 +++++++++++++-------
+ 1 file changed, 13 insertions(+), 7 deletions(-)
+
+diff --git a/gcc/config/i386/driver-i386.cc b/gcc/config/i386/driver-i386.cc
+index 915a33127090..6f2fcbe5f779 100644
+--- a/gcc/config/i386/driver-i386.cc
++++ b/gcc/config/i386/driver-i386.cc
+@@ -666,18 +666,24 @@ const char *host_detect_local_cpu (int argc, const char **argv)
+ 		}
+ 	      else if (has_feature (FEATURE_AVX))
+ 		{
+-		  /* Assume Panther Lake.  */
+-		  if (has_feature (FEATURE_PREFETCHI))
+-		    cpu = "pantherlake";
+ 		  /* Assume Clearwater Forest.  */
+-		  else if (has_feature (FEATURE_USER_MSR))
++		  if (has_feature (FEATURE_USER_MSR))
+ 		    cpu = "clearwaterforest";
+-		  /* Assume Arrow Lake S.  */
+ 		  else if (has_feature (FEATURE_SM3))
+-		    cpu = "arrowlake-s";
++		    {
++			if (has_feature (FEATURE_KL))
++			  /* Assume Arrow Lake S.  */
++			  cpu = "arrowlake-s";
++			else
++			  /* Assume Panther Lake.  */
++			  cpu = "pantherlake";
++		    }
+ 		  /* Assume Sierra Forest.  */
+-		  else if (has_feature (FEATURE_AVXVNNIINT8))
++		  else if (has_feature (FEATURE_CLDEMOTE))
+ 		    cpu = "sierraforest";
++		  /* Assume Arrow Lake.  */
++		  else if (has_feature (FEATURE_AVXVNNIINT8))
++		    cpu = "arrowlake";
+ 		  /* Assume Alder Lake.  */
+ 		  else if (has_feature (FEATURE_SERIALIZE))
+ 		    cpu = "alderlake";
+-- 
+2.43.7
+
+

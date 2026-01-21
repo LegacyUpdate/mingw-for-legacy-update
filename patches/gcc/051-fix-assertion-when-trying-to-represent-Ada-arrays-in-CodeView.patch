@@ -1,0 +1,62 @@
+From 908dead9114a840ca155c67afc831fbff376b8df Mon Sep 17 00:00:00 2001
+From: Mark Harmstone <mark@harmstone.com>
+Date: Fri, 29 Aug 2025 20:43:57 +0100
+Subject: [PATCH] Fix assertion when trying to represent Ada arrays in CodeView
+
+The LF_ARRAY CodeView type represents a C- or C++-style array, which a
+length known at compile time. We were crashing when using -gcodeview
+with Ada (bug #121157), as the DW_AT_upper_bound value is not an
+unsigned integer but something more complicated:
+
+0x00000123:   DW_TAG_array_type
+                DW_AT_type      (0x0000014d "character")
+                DW_AT_sibling   (0x00000142)
+
+0x0000012c:     DW_TAG_subrange_type
+                  DW_AT_type    (0x00000142 "integer")
+                  DW_AT_lower_bound     (DW_OP_push_object_address, DW_OP_plus_uconst 0x8, DW_OP_deref, DW_OP_deref_size 0x4)
+                  DW_AT_upper_bound     (DW_OP_push_object_address, DW_OP_plus_uconst 0x8, DW_OP_deref, DW_OP_plus_uconst 0x4, DW_OP_deref_size 0x4)
+
+It doesn't look like we can represent Ada arrays in CodeView, so return
+0 in get_type_num_array_type so that they come through as an unknown
+type.
+
+gcc/
+	* dwarf2codeview.cc (get_type_num_array_type): Don't try to
+	encode non-C-style arrays.
+---
+ gcc/dwarf2codeview.cc | 13 +++++++++++++
+ 1 file changed, 13 insertions(+)
+
+diff --git a/gcc/dwarf2codeview.cc b/gcc/dwarf2codeview.cc
+index d98b50c73c3c..154cd9475dd6 100644
+--- a/gcc/dwarf2codeview.cc
++++ b/gcc/dwarf2codeview.cc
+@@ -6748,10 +6748,23 @@ get_type_num_array_type (dw_die_ref type, bool in_struct)
+   c = first_child;
+   do
+     {
++      dw_attr_node *upper_bound;
++
+       c = dw_get_die_sib (c);
+       if (dw_get_die_tag (c) != DW_TAG_subrange_type)
+ 	continue;
+ 
++      /* Check that each DW_TAG_subrange_type DIE has a DW_AT_upper_bound
++	 attribute that's an unsigned integer.  This is the case for C and
++	 C++, but not for other languages such as Ada.  */
++      upper_bound = get_AT (c, DW_AT_upper_bound);
++      if (!upper_bound)
++	return 0;
++
++      if (AT_class (upper_bound) != dw_val_class_unsigned_const
++	  && AT_class (upper_bound) != dw_val_class_unsigned_const_implicit)
++	return 0;
++
+       dimensions++;
+     }
+   while (c != first_child);
+-- 
+2.43.7
+
+

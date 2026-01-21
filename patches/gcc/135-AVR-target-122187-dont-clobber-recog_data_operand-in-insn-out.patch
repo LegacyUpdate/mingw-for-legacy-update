@@ -1,0 +1,102 @@
+From e4f5a5b494ef66edf5b59bf822d08583f41d7e52 Mon Sep 17 00:00:00 2001
+From: Georg-Johann Lay <avr@gjlay.de>
+Date: Tue, 7 Oct 2025 17:50:34 +0200
+Subject: [PATCH] AVR: target/122187 - Don't clobber recog_data.operand[] in
+ insn out.
+
+avr.cc::avr_out_extr() and avr.cc::avr_out_extr_not()
+changed xop for output, which spoiled the operand for
+the next invokation, running into an assertion.
+
+This patch makes a local copy of the operands.
+
+	PR target/122187
+gcc/
+	* config/avr/avr.cc (avr_out_extr, avr_out_extr_not):
+	Make a local copy of the passed rtx[] operands.
+
+gcc/testsuite/
+	* gcc.target/avr/torture/pr122187.c: New test.
+
+(cherry picked from commit 3cbd43d640d6384df85c171a0245488f0adc3145)
+---
+ gcc/config/avr/avr.cc                          | 18 ++++++++++--------
+ .../gcc.target/avr/torture/pr122187.c          | 17 +++++++++++++++++
+ 2 files changed, 27 insertions(+), 8 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.target/avr/torture/pr122187.c
+
+diff --git a/gcc/config/avr/avr.cc b/gcc/config/avr/avr.cc
+index 9bfacae14adc..cf80d5a15551 100644
+--- a/gcc/config/avr/avr.cc
++++ b/gcc/config/avr/avr.cc
+@@ -10212,16 +10212,17 @@ avr_out_insv (rtx_insn *insn, rtx xop[], int *plen)
+ }
+ 
+ 
+-/* Output instructions to extract a bit to 8-bit register XOP[0].
+-   The input XOP[1] is a register or an 8-bit MEM in the lower I/O range.
+-   XOP[2] is the const_int bit position.  Return "".
++/* Output instructions to extract a bit to 8-bit register OP[0].
++   The input OP[1] is a register or an 8-bit MEM in the lower I/O range.
++   OP[2] is the const_int bit position.  Return "".
+ 
+    PLEN != 0: Set *PLEN to the code length in words.  Don't output anything.
+    PLEN == 0: Output instructions.  */
+ 
+ const char *
+-avr_out_extr (rtx_insn *insn, rtx xop[], int *plen)
++avr_out_extr (rtx_insn *insn, rtx op[], int *plen)
+ {
++  rtx xop[] = { op[0], op[1], op[2] };
+   rtx dest = xop[0];
+   rtx src = xop[1];
+   int bit = INTVAL (xop[2]);
+@@ -10279,16 +10280,17 @@ avr_out_extr (rtx_insn *insn, rtx xop[], int *plen)
+ }
+ 
+ 
+-/* Output instructions to extract a negated bit to 8-bit register XOP[0].
+-   The input XOP[1] is an 8-bit register or MEM in the lower I/O range.
+-   XOP[2] is the const_int bit position.  Return "".
++/* Output instructions to extract a negated bit to 8-bit register OP[0].
++   The input OP[1] is an 8-bit register or MEM in the lower I/O range.
++   OP[2] is the const_int bit position.  Return "".
+ 
+    PLEN != 0: Set *PLEN to the code length in words.  Don't output anything.
+    PLEN == 0: Output instructions.  */
+ 
+ const char *
+-avr_out_extr_not (rtx_insn * /* insn */, rtx xop[], int *plen)
++avr_out_extr_not (rtx_insn * /* insn */, rtx op[], int *plen)
+ {
++  rtx xop[] = { op[0], op[1], op[2] };
+   rtx dest = xop[0];
+   rtx src = xop[1];
+   int bit = INTVAL (xop[2]);
+diff --git a/gcc/testsuite/gcc.target/avr/torture/pr122187.c b/gcc/testsuite/gcc.target/avr/torture/pr122187.c
+new file mode 100644
+index 000000000000..0f781eb1a64d
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/avr/torture/pr122187.c
+@@ -0,0 +1,17 @@
++/* { dg-do compile } */
++/* { dg-additional-options { -std=c99 } } */
++
++typedef __UINT32_TYPE__ uint32_t;
++typedef __UINT16_TYPE__ uint16_t;
++typedef __UINT8_TYPE__ uint8_t;
++
++#define PINB (*(volatile uint8_t*) (13 + __AVR_SFR_OFFSET__))
++#define PB1 1
++
++uint16_t fun (void)
++{
++    uint16_t h = 0;
++    for (uint32_t s = 0; s < 0x10000; ++s)
++        h += (PINB >> PB1) & 1;
++    return h;
++}
+-- 
+2.43.7
+
+

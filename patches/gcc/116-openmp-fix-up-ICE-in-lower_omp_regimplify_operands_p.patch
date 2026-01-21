@@ -1,0 +1,67 @@
+From 62d6b0f65fad1e3281b6ba53cdb56fb2c1976bb6 Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Thu, 18 Sep 2025 16:41:32 +0200
+Subject: [PATCH] openmp: Fix up ICE in lower_omp_regimplify_operands_p
+ [PR121977]
+
+The following testcase ICEs in functions called from
+lower_omp_regimplify_operands_p, because maybe_lookup_decl returns
+NULL for this (on the outer taskloop context) when regimplifying the
+taskloop pre body.  If it isn't found in current context, we should
+look in outer ones.
+
+2025-09-18  Jakub Jelinek  <jakub@redhat.com>
+
+	PR c++/121977
+	* omp-low.cc (lower_omp_regimplify_operands_p): If maybe_lookup_decl
+	returns NULL, use maybe_lookup_decl_in_outer_ctx as fallback.
+
+	* g++.dg/gomp/pr121977.C: New test.
+
+(cherry picked from commit b49f1dad54d3638384780c11ed17ab43f6d5d86f)
+---
+ gcc/omp-low.cc                       |  2 ++
+ gcc/testsuite/g++.dg/gomp/pr121977.C | 17 +++++++++++++++++
+ 2 files changed, 19 insertions(+)
+ create mode 100644 gcc/testsuite/g++.dg/gomp/pr121977.C
+
+diff --git a/gcc/omp-low.cc b/gcc/omp-low.cc
+index e1036adab288..7462f414bcd2 100644
+--- a/gcc/omp-low.cc
++++ b/gcc/omp-low.cc
+@@ -14708,6 +14708,8 @@ lower_omp_regimplify_operands_p (tree *tp, int *walk_subtrees,
+       lower_omp_regimplify_operands_data *ldata
+ 	= (lower_omp_regimplify_operands_data *) wi->info;
+       tree o = maybe_lookup_decl (t, ldata->ctx);
++      if (o == NULL_TREE)
++	o = maybe_lookup_decl_in_outer_ctx (t, ldata->ctx);
+       if (o != t)
+ 	{
+ 	  ldata->decls->safe_push (DECL_VALUE_EXPR (*tp));
+diff --git a/gcc/testsuite/g++.dg/gomp/pr121977.C b/gcc/testsuite/g++.dg/gomp/pr121977.C
+new file mode 100644
+index 000000000000..223ea3c0b236
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/gomp/pr121977.C
+@@ -0,0 +1,17 @@
++// PR c++/121977
++// { dg-do compile }
++// { dg-additional-options "-ftrivial-auto-var-init=zero" }
++
++struct T { T () {}; virtual ~T () {}; int t; };
++struct S : virtual public T { int a; void foo (); };
++
++void
++S::foo ()
++{
++#pragma omp parallel
++  {
++    #pragma omp taskloop firstprivate (a, t) lastprivate (t)
++    for (int i = 0; i < a; i++)
++      t++;
++  }
++}
+-- 
+2.43.7
+
+

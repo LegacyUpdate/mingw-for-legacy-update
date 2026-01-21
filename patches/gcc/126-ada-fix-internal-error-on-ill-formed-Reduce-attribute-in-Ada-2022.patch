@@ -1,0 +1,84 @@
+From 2cd87a774d39baecae4dab22a9704fb4651da705 Mon Sep 17 00:00:00 2001
+From: Eric Botcazou <ebotcazou@adacore.com>
+Date: Tue, 30 Sep 2025 11:55:18 +0200
+Subject: [PATCH] Ada: Fix internal error on ill-formed Reduce attribute in Ada
+ 2022
+
+This is an internal error on the new Reduce attribute of Ada 2022 when the
+programmer swaps its arguments(!)  The change makes it so that the compiler
+gives an error message instead.
+
+gcc/ada/
+	PR ada/117517
+	* sem_attr.adb (Resolve_Attribute) <Attribute_Reduce>: Try to
+	resolve the reducer first.  Fix casing of error message.
+
+gcc/testsuite/
+	* gnat.dg/reduce1.adb: New test.
+---
+ gcc/ada/sem_attr.adb              | 13 ++++++++++---
+ gcc/testsuite/gnat.dg/reduce1.adb | 14 ++++++++++++++
+ 2 files changed, 24 insertions(+), 3 deletions(-)
+ create mode 100644 gcc/testsuite/gnat.dg/reduce1.adb
+
+diff --git a/gcc/ada/sem_attr.adb b/gcc/ada/sem_attr.adb
+index 08da29a21984..ca9d7c13b91f 100644
+--- a/gcc/ada/sem_attr.adb
++++ b/gcc/ada/sem_attr.adb
+@@ -12723,7 +12723,10 @@ package body Sem_Attr is
+                end Proper_Op;
+ 
+             begin
+-               Resolve (Init_Value_Exp, Typ);
++               --  First try to resolve the reducer and then, if this succeeds,
++               --  resolve the initial value.  This nicely deals with confused
++               --  programmers who swap the two items.
++
+                if Is_Overloaded (Reducer_Subp_Name) then
+                   Outer :
+                   for Retry in Boolean loop
+@@ -12745,14 +12748,18 @@ package body Sem_Attr is
+                then
+                   Op := Reducer_Subp_Name;
+ 
+-               elsif Proper_Op (Entity (Reducer_Subp_Name)) then
++               elsif Is_Entity_Name (Reducer_Subp_Name)
++                 and then Proper_Op (Entity (Reducer_Subp_Name))
++               then
+                   Op := Entity (Reducer_Subp_Name);
+                   Set_Etype (N, Typ);
+                end if;
+ 
+                if No (Op) then
+-                  Error_Msg_N ("No suitable reducer subprogram found",
++                  Error_Msg_N ("no suitable reducer subprogram found",
+                     Reducer_Subp_Name);
++               else
++                  Resolve (Init_Value_Exp, Typ);
+                end if;
+             end;
+ 
+diff --git a/gcc/testsuite/gnat.dg/reduce1.adb b/gcc/testsuite/gnat.dg/reduce1.adb
+new file mode 100644
+index 000000000000..601be4bcbcb0
+--- /dev/null
++++ b/gcc/testsuite/gnat.dg/reduce1.adb
+@@ -0,0 +1,14 @@
++-- { dg-do compile }
++-- { dg-options "-gnat2022" }
++
++procedure Reduce1 is
++
++  type Arr is array (Positive range <>) of Positive;
++
++  A: Arr := (2, 87);
++
++  B: Positive := A'Reduce (1, Positive'Max); -- { dg-error "no suitable" }
++
++begin
++  null;
++end;
+-- 
+2.43.7
+
+

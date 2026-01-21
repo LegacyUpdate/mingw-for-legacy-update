@@ -1,0 +1,309 @@
+From 7da4b62f960cf06dd6b8a3352ec507e3e8ab742c Mon Sep 17 00:00:00 2001
+From: =?utf8?q?Torbj=C3=B6rn=20SVENSSON?= <torbjorn.svensson@foss.st.com>
+Date: Wed, 27 Aug 2025 16:25:14 +0200
+Subject: [PATCH] testsuite: arm: Simplify fp16-aapcs tests
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf8
+Content-Transfer-Encoding: 8bit
+
+Reduce fp16-aapcs testcases to return value testing since parameter
+passing are already tested in aapcs/vfp*.c
+
+gcc/testsuite/ChangeLog:
+	* gcc.target/arm/fp16-aapcs.c: New test.
+	* gcc.target/arm/fp16-aapcs-1.c: Removed.
+	* gcc.target/arm/fp16-aapcs-2.c: Likewise.
+	* gcc.target/arm/fp16-aapcs-3.c: Likewise.
+	* gcc.target/arm/fp16-aapcs-4.c: Likewise.
+
+Signed-off-by: TorbjÃ¶rn SVENSSON <torbjorn.svensson@foss.st.com>
+(cherry picked from commit 1cf8cb45d872a5f09d65c63c891c091710c37432)
+---
+ gcc/testsuite/gcc.target/arm/fp16-aapcs-1.c | 65 ---------------------
+ gcc/testsuite/gcc.target/arm/fp16-aapcs-2.c | 44 --------------
+ gcc/testsuite/gcc.target/arm/fp16-aapcs-3.c | 65 ---------------------
+ gcc/testsuite/gcc.target/arm/fp16-aapcs-4.c | 44 --------------
+ gcc/testsuite/gcc.target/arm/fp16-aapcs.c   | 24 ++++++++
+ 5 files changed, 24 insertions(+), 218 deletions(-)
+ delete mode 100644 gcc/testsuite/gcc.target/arm/fp16-aapcs-1.c
+ delete mode 100644 gcc/testsuite/gcc.target/arm/fp16-aapcs-2.c
+ delete mode 100644 gcc/testsuite/gcc.target/arm/fp16-aapcs-3.c
+ delete mode 100644 gcc/testsuite/gcc.target/arm/fp16-aapcs-4.c
+ create mode 100644 gcc/testsuite/gcc.target/arm/fp16-aapcs.c
+
+diff --git a/gcc/testsuite/gcc.target/arm/fp16-aapcs-1.c b/gcc/testsuite/gcc.target/arm/fp16-aapcs-1.c
+deleted file mode 100644
+index b18d7cda65c8..000000000000
+--- a/gcc/testsuite/gcc.target/arm/fp16-aapcs-1.c
++++ /dev/null
+@@ -1,65 +0,0 @@
+-/* { dg-do compile }  */
+-/* { dg-require-effective-target arm_hard_vfp_ok }  */
+-/* { dg-require-effective-target arm_fp16_ok } */
+-/* { dg-options "-O2" }  */
+-/* { dg-add-options arm_fp16_ieee } */
+-/* { dg-final { check-function-bodies "**" "" "" } } */
+-
+-/* Test __fp16 arguments and return value in registers (hard-float).  */
+-
+-void
+-swap (__fp16, __fp16);
+-
+-/*
+-** F:
+-** ...
+-** (
+-
+-Below block is for non-armv8.1
+-** (
+-**	vmov\.f32	(s[3-9]|s1[0-5]), s0
+-** ...
+-**	vmov\.f32	s0, s1
+-** ...
+-**	vmov\.f32	s1, \1
+-** |
+-**	vmov\.f32	(s[3-9]|s1[0-5]), s1
+-** ...
+-**	vmov\.f32	s1, s0
+-** ...
+-**	vmov\.f32	s0, \2
+-** )
+-**	vstr\.32	s2, \[sp, #4\]	@ int
+-**	bl	swap
+-**	vldr\.32	s2, \[sp, #4\]	@ int
+-**	vmov\.f32	s0, s2
+-
+-** |
+-
+-Below block is for armv8.1
+-** (
+-**	vmov	(s[3-9]|s1[0-5]), s0	@ __fp16
+-** ...
+-**	vmov	s0, s1	@ __fp16
+-** ...
+-**	vmov	s1, \3	@ __fp16
+-** |
+-**	vmov	(s[3-9]|s1[0-5]), s1	@ __fp16
+-** ...
+-**	vmov	s1, s0	@ __fp16
+-** ...
+-**	vmov	s0, \4	@ __fp16
+-** )
+-**	vstr\.32	s2, \[sp, #4\]	@ int
+-**	bl	swap
+-**	vldr\.16	s0, \[sp, #4\]
+-
+-** )
+-** ...
+-*/
+-__fp16
+-F (__fp16 a, __fp16 b, __fp16 c)
+-{
+-  swap (b, a);
+-  return c;
+-}
+diff --git a/gcc/testsuite/gcc.target/arm/fp16-aapcs-2.c b/gcc/testsuite/gcc.target/arm/fp16-aapcs-2.c
+deleted file mode 100644
+index 48510e895368..000000000000
+--- a/gcc/testsuite/gcc.target/arm/fp16-aapcs-2.c
++++ /dev/null
+@@ -1,44 +0,0 @@
+-/* { dg-do compile }  */
+-/* { dg-require-effective-target arm_fp16_ok } */
+-/* { dg-options "-mfloat-abi=softfp -O2 -mno-long-calls" }  */
+-/* { dg-add-options arm_fp16_ieee } */
+-/* { dg-skip-if "incompatible float-abi" { arm*-*-* } { "-mfloat-abi=hard" } } */
+-/* { dg-final { check-function-bodies "**" "" "" } } */
+-
+-/* Test __fp16 arguments and return value in registers (softfp).  */
+-
+-void
+-swap (__fp16, __fp16);
+-
+-/*
+-** F:
+-** ...
+-** (
+-**	mov	r3, r0	@ __fp16
+-** ...
+-**	mov	r0, r1	@ __fp16
+-** ...
+-**	mov	r1, r3	@ __fp16
+-** |
+-**	mov	r3, r1	@ __fp16
+-** ...
+-**	mov	r1, r0	@ __fp16
+-** ...
+-**	mov	r0, r3	@ __fp16
+-** )
+-** ...
+-*/
+-/*
+-** F: { target arm_little_endian }
+-** ...
+-**	str	r2, \[sp, #4\]
+-**	bl	swap
+-**	ldrh	r0, \[sp, #4\]	@ __fp16
+-** ...
+-*/
+-__fp16
+-F (__fp16 a, __fp16 b, __fp16 c)
+-{
+-  swap (b, a);
+-  return c;
+-}
+diff --git a/gcc/testsuite/gcc.target/arm/fp16-aapcs-3.c b/gcc/testsuite/gcc.target/arm/fp16-aapcs-3.c
+deleted file mode 100644
+index 7238ef3a02e0..000000000000
+--- a/gcc/testsuite/gcc.target/arm/fp16-aapcs-3.c
++++ /dev/null
+@@ -1,65 +0,0 @@
+-/* { dg-do compile }  */
+-/* { dg-require-effective-target arm_hard_vfp_ok }  */
+-/* { dg-require-effective-target arm_fp16_alternative_ok } */
+-/* { dg-options "-O2" }  */
+-/* { dg-add-options arm_fp16_alternative } */
+-/* { dg-final { check-function-bodies "**" "" "" } } */
+-
+-/* Test __fp16 arguments and return value in registers (hard-float).  */
+-
+-void
+-swap (__fp16, __fp16);
+-
+-/*
+-** F:
+-** ...
+-** (
+-
+-Below block is for non-armv8.1
+-** (
+-**	vmov\.f32	(s[3-9]|s1[0-5]), s0
+-** ...
+-**	vmov\.f32	s0, s1
+-** ...
+-**	vmov\.f32	s1, \1
+-** |
+-**	vmov\.f32	(s[3-9]|s1[0-5]), s1
+-** ...
+-**	vmov\.f32	s1, s0
+-** ...
+-**	vmov\.f32	s0, \2
+-** )
+-**	vstr\.32	s2, \[sp, #4\]	@ int
+-**	bl	swap
+-**	vldr\.32	s2, \[sp, #4\]	@ int
+-**	vmov\.f32	s0, s2
+-
+-** |
+-
+-Below block is for armv8.1
+-** (
+-**	vmov	(s[3-9]|s1[0-5]), s0
+-** ...
+-**	vmov	s0, s1
+-** ...
+-**	vmov	s1, \3
+-** |
+-**	vmov	(s[3-9]|s1[0-5]), s1
+-** ...
+-**	vmov	s1, s0
+-** ...
+-**	vmov	s0, \4
+-** )
+-**	vstr\.32	s2, \[sp, #4\]	@ int
+-**	bl	swap
+-**	vldr\.16	s0, \[sp, #4\]
+-
+-** )
+-** ...
+-*/
+-__fp16
+-F (__fp16 a, __fp16 b, __fp16 c)
+-{
+-  swap (b, a);
+-  return c;
+-}
+diff --git a/gcc/testsuite/gcc.target/arm/fp16-aapcs-4.c b/gcc/testsuite/gcc.target/arm/fp16-aapcs-4.c
+deleted file mode 100644
+index 13f08d8afa32..000000000000
+--- a/gcc/testsuite/gcc.target/arm/fp16-aapcs-4.c
++++ /dev/null
+@@ -1,44 +0,0 @@
+-/* { dg-do compile }  */
+-/* { dg-require-effective-target arm_fp16_alternative_ok } */
+-/* { dg-options "-mfloat-abi=softfp -O2" }  */
+-/* { dg-add-options arm_fp16_alternative } */
+-/* { dg-skip-if "incompatible float-abi" { arm*-*-* } { "-mfloat-abi=hard" } } */
+-/* { dg-final { check-function-bodies "**" "" "" } } */
+-
+-/* Test __fp16 arguments and return value in registers (softfp).  */
+-
+-void
+-swap (__fp16, __fp16);
+-
+-/*
+-** F:
+-** ...
+-** (
+-**	mov	r3, r0	@ __fp16
+-** ...
+-**	mov	r0, r1	@ __fp16
+-** ...
+-**	mov	r1, r3	@ __fp16
+-** |
+-**	mov	r3, r1	@ __fp16
+-** ...
+-**	mov	r1, r0	@ __fp16
+-** ...
+-**	mov	r0, r3	@ __fp16
+-** )
+-** ...
+-*/
+-/*
+-** F: { target arm_little_endian }
+-** ...
+-**	str	r2, \[sp, #4\]
+-**	bl	swap
+-**	ldrh	r0, \[sp, #4\]	@ __fp16
+-** ...
+-*/
+-__fp16
+-F (__fp16 a, __fp16 b, __fp16 c)
+-{
+-  swap (b, a);
+-  return c;
+-}
+diff --git a/gcc/testsuite/gcc.target/arm/fp16-aapcs.c b/gcc/testsuite/gcc.target/arm/fp16-aapcs.c
+new file mode 100644
+index 000000000000..8c87d5dde313
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/arm/fp16-aapcs.c
+@@ -0,0 +1,24 @@
++/* { dg-do compile }  */
++/* { dg-require-effective-target arm_fp16_alternative_ok } */
++/* { dg-options "-O2" }  */
++/* { dg-add-options arm_fp16_alternative } */
++/* { dg-final { check-function-bodies "**" "" "" } } */
++
++/* Test __fp16 arguments and return value in registers.  */
++
++__fp16 f();
++void g(__fp16);
++void h();
++
++/*
++** test:
++** ...
++**	bl	f
++**	bl	g
++** ...
++*/
++int test()
++{
++    g(f());
++    h();
++}
+-- 
+2.43.7
+
+

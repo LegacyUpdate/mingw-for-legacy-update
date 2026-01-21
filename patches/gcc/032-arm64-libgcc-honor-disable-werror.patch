@@ -1,0 +1,136 @@
+From ed47725094a2d67822445670b5adb6b1a8cd13de Mon Sep 17 00:00:00 2001
+From: Christophe Lyon <christophe.lyon@linaro.org>
+Date: Fri, 8 Aug 2025 12:55:07 +0000
+Subject: [PATCH] aarch64: libgcc: Honor disable-werror [PR117600]
+
+In commit r15-4417-g71c7b446b98aa5, I made -werror mandatory when
+building libgcc for aarch64.
+
+While it achieved its goal (make us fix problems unnoticed so far),
+there has a been a lot of debate because it couldn't be disabled
+easily.
+
+This patch adds support for --enable-werror/--disable-werror in
+libgcc, defaulting to --enable-werror for aarch64.
+
+Tested on non-bootstrap builds on aarch64-linux-gnu (with
+-Wno-prio-ctor-dtor removed in order to get an error).
+
+libgcc/ChangeLog:
+
+	PR libgcc/117600
+	* Makefile.in (WERROR): New.
+	* config/aarch64/t-aarch64: Handle WERROR.
+	* configure: Regenerate.
+	* configure.ac: Add support for --enable-werror.
+
+(cherry picked from commit fdc560aaaedfcf4e3a88379856badd7a153f41cf)
+---
+ libgcc/Makefile.in              |  1 +
+ libgcc/config/aarch64/t-aarch64 |  2 +-
+ libgcc/configure                | 19 +++++++++++++++++++
+ libgcc/configure.ac             | 14 ++++++++++++++
+ 4 files changed, 35 insertions(+), 1 deletion(-)
+
+diff --git a/libgcc/Makefile.in b/libgcc/Makefile.in
+index 0719fd0615d3..edb6cce01f75 100644
+--- a/libgcc/Makefile.in
++++ b/libgcc/Makefile.in
+@@ -87,6 +87,7 @@ CC = @CC@
+ CFLAGS = @CFLAGS@
+ RANLIB = @RANLIB@
+ LN_S = @LN_S@
++WERROR = @WERROR@
+ 
+ PWD_COMMAND = $${PWDCMD-pwd}
+ 
+diff --git a/libgcc/config/aarch64/t-aarch64 b/libgcc/config/aarch64/t-aarch64
+index d4c59227386c..c7d83c718435 100644
+--- a/libgcc/config/aarch64/t-aarch64
++++ b/libgcc/config/aarch64/t-aarch64
+@@ -30,4 +30,4 @@ LIB2ADDEH += \
+ 	$(srcdir)/config/aarch64/__arm_za_disable.S
+ 
+ SHLIB_MAPFILES += $(srcdir)/config/aarch64/libgcc-sme.ver
+-LIBGCC2_CFLAGS += -Werror -Wno-prio-ctor-dtor
++LIBGCC2_CFLAGS += $(WERROR) -Wno-prio-ctor-dtor
+diff --git a/libgcc/configure b/libgcc/configure
+index 18418336c9b5..d5e80d227ff6 100755
+--- a/libgcc/configure
++++ b/libgcc/configure
+@@ -586,6 +586,7 @@ ac_unique_file="static-object.mk"
+ ac_includes_default='/* none */'
+ ac_subst_vars='LTLIBOBJS
+ LIBOBJS
++WERROR
+ md_unwind_header
+ md_unwind_def_header
+ unwind_header
+@@ -720,6 +721,7 @@ enable_tm_clone_registry
+ with_glibc_version
+ enable_tls
+ with_gcc_major_version_only
++enable_werror
+ '
+       ac_precious_vars='build_alias
+ host_alias
+@@ -1362,6 +1364,7 @@ Optional Features:
+                           installations without PT_GNU_EH_FRAME support
+   --disable-tm-clone-registry    disable TM clone registry
+   --enable-tls            Use thread-local storage [default=yes]
++  --enable-werror         build with -Werror for selected targets
+ 
+ Optional Packages:
+   --with-PACKAGE[=ARG]    use PACKAGE [ARG=yes]
+@@ -5789,6 +5792,22 @@ fi
+ 
+ 
+ 
++# Check whether --enable-werror was given.
++if test "${enable_werror+set}" = set; then :
++  enableval=$enable_werror;
++case ${enable_werror} in
++  no) WERROR="" ;;
++  *) WERROR="-Werror" ;;
++esac
++
++else
++
++WERROR="-Werror"
++
++fi
++
++
++
+ # We need multilib support.
+ ac_config_files="$ac_config_files Makefile"
+ 
+diff --git a/libgcc/configure.ac b/libgcc/configure.ac
+index 85e4f1bc48b0..65cd3c6aa1a5 100644
+--- a/libgcc/configure.ac
++++ b/libgcc/configure.ac
+@@ -733,6 +733,20 @@ AC_SUBST(md_unwind_header)
+ AC_SUBST(sfp_machine_header)
+ AC_SUBST(thread_header)
+ 
++AC_ARG_ENABLE(werror,
++[AS_HELP_STRING([--enable-werror],
++		[build with -Werror for selected targets])],
++[
++case ${enable_werror} in
++  no) WERROR="" ;;
++  *) WERROR="-Werror" ;;
++esac
++],
++[
++WERROR="-Werror"
++])
++AC_SUBST(WERROR)
++
+ # We need multilib support.
+ AC_CONFIG_FILES([Makefile])
+ AC_CONFIG_COMMANDS([default],
+-- 
+2.43.7
+
+

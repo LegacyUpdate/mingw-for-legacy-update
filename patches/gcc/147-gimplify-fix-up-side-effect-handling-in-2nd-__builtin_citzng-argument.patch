@@ -1,0 +1,97 @@
+From 363edb309df35b0f4d9a4eb21288fae64d021648 Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Thu, 9 Oct 2025 18:06:39 +0200
+Subject: [PATCH] gimplify: Fix up side-effect handling in 2nd
+ __builtin_c[lt]zg argument [PR122188]
+
+The patch from yesterday made me think about side-effects in the second
+argument of __builtin_c[lt]zg.  When we change
+__builtin_c[lt]zg (x, y)
+when y is not INTEGER_CST into
+x ? __builtin_c[lt]zg (x) : y
+with evaluating x only once, we omit the side-effects in y unless x is not
+0.  That looks undesirable, we should evaluate side-effects in y
+unconditionally.
+
+2025-10-09  Jakub Jelinek  <jakub@redhat.com>
+
+	PR c/122188
+	* c-gimplify.cc (c_gimplify_expr): Also gimplify the second operand
+	before the COND_EXPR and use in COND_EXPR result of gimplification.
+
+	* gcc.dg/torture/pr122188.c: New test.
+
+(cherry picked from commit 579de8f5295b05573d05f6e4102f1428f35c9f17)
+---
+ gcc/c-family/c-gimplify.cc              |  6 ++++-
+ gcc/testsuite/gcc.dg/torture/pr122188.c | 33 +++++++++++++++++++++++++
+ 2 files changed, 38 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/gcc.dg/torture/pr122188.c
+
+diff --git a/gcc/c-family/c-gimplify.cc b/gcc/c-family/c-gimplify.cc
+index 0aad93e618cb..8fbf6e495096 100644
+--- a/gcc/c-family/c-gimplify.cc
++++ b/gcc/c-family/c-gimplify.cc
+@@ -1013,6 +1013,10 @@ c_gimplify_expr (tree *expr_p, gimple_seq *pre_p ATTRIBUTE_UNUSED,
+ 	    if (gimplify_expr (&a, pre_p, post_p, is_gimple_val, fb_rvalue)
+ 		== GS_ERROR)
+ 	      return GS_ERROR;
++	    tree b = CALL_EXPR_ARG (*expr_p, 1);
++	    if (gimplify_expr (&b, pre_p, post_p, is_gimple_val, fb_rvalue)
++		== GS_ERROR)
++	      return GS_ERROR;
+ 	    tree c = build_call_expr_loc (EXPR_LOCATION (*expr_p),
+ 					  fndecl, 1, a);
+ 	    *expr_p = build3_loc (EXPR_LOCATION (*expr_p), COND_EXPR,
+@@ -1020,7 +1024,7 @@ c_gimplify_expr (tree *expr_p, gimple_seq *pre_p ATTRIBUTE_UNUSED,
+ 				  build2_loc (EXPR_LOCATION (*expr_p),
+ 					      NE_EXPR, boolean_type_node, a,
+ 					      build_zero_cst (TREE_TYPE (a))),
+-				  c, CALL_EXPR_ARG (*expr_p, 1));
++				  c, b);
+ 	    return GS_OK;
+ 	  }
+ 	break;
+diff --git a/gcc/testsuite/gcc.dg/torture/pr122188.c b/gcc/testsuite/gcc.dg/torture/pr122188.c
+new file mode 100644
+index 000000000000..2c549630f9de
+--- /dev/null
++++ b/gcc/testsuite/gcc.dg/torture/pr122188.c
+@@ -0,0 +1,33 @@
++/* PR c/122188 */
++/* { dg-do run } */
++
++int
++foo (unsigned x, int y)
++{
++  unsigned a = x;
++  int b = y;
++  int ret = __builtin_ctzg (x++, y++);
++  if (x != a + 1 || y != b + 1)
++    __builtin_abort ();
++  return ret;
++}
++
++int
++bar (unsigned x, int y)
++{
++  unsigned a = x;
++  int b = y;
++  int ret = __builtin_clzg (x++, y++);
++  if (x != a + 1 || y != b + 1)
++    __builtin_abort ();
++  return ret;
++}
++
++int
++main ()
++{
++  if (foo (0, 42) != 42 || foo (1, 5) != 0 || foo (4, 17) != 2)
++    __builtin_abort ();
++  if (bar (0, 42) != 42 || bar (~0U, 5) != 0 || bar (~0U >> 4, 17) != 4)
++    __builtin_abort ();
++}
+-- 
+2.43.7
+
+

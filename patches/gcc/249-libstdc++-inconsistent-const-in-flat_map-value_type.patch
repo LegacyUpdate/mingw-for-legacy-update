@@ -1,0 +1,101 @@
+From 0a52c19d7307043a867606b0d9416bee540647fd Mon Sep 17 00:00:00 2001
+From: Patrick Palka <ppalka@redhat.com>
+Date: Mon, 1 Dec 2025 17:08:01 -0500
+Subject: [PATCH] libstdc++: Inconsistent const in flat_map's value_type
+ [PR122921]
+
+flat_map's value_type is pair<key_type, mapped_type>, which we correctly
+define within the container but incorrectly within the iterator.
+
+	PR libstdc++/122921
+
+libstdc++-v3/ChangeLog:
+
+	* include/std/flat_map (_Flat_map_impl::_Iterator::value_type):
+	Remove const from key_type to make consistent with the
+	container's value_type.
+	* testsuite/23_containers/flat_map/1.cc (test09): New test.
+	* testsuite/23_containers/flat_multimap/1.cc (test09): New test.
+
+Reported-by: Vincent X
+Reviewed-by: Jonathan Wakely <jwakely@redhat.com>
+(cherry picked from commit 3e02f86cd13c787331281ab098901f8a67381945)
+---
+ libstdc++-v3/include/std/flat_map                    |  2 +-
+ libstdc++-v3/testsuite/23_containers/flat_map/1.cc   | 12 ++++++++++++
+ .../testsuite/23_containers/flat_multimap/1.cc       | 12 ++++++++++++
+ 3 files changed, 25 insertions(+), 1 deletion(-)
+
+diff --git a/libstdc++-v3/include/std/flat_map b/libstdc++-v3/include/std/flat_map
+index de006ad1c533..e48c3eae07fd 100644
+--- a/libstdc++-v3/include/std/flat_map
++++ b/libstdc++-v3/include/std/flat_map
+@@ -953,7 +953,7 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
+     public:
+       using iterator_category = input_iterator_tag;
+       using iterator_concept  = random_access_iterator_tag;
+-      using value_type        = pair<const key_type, mapped_type>;
++      using value_type        = pair<key_type, mapped_type>;
+       using reference         = pair<const key_type&,
+ 				     ranges::__maybe_const_t<_Const, mapped_type>&>;
+       using difference_type   = ptrdiff_t;
+diff --git a/libstdc++-v3/testsuite/23_containers/flat_map/1.cc b/libstdc++-v3/testsuite/23_containers/flat_map/1.cc
+index d7f27a05a878..2f4ffa2d1bd4 100644
+--- a/libstdc++-v3/testsuite/23_containers/flat_map/1.cc
++++ b/libstdc++-v3/testsuite/23_containers/flat_map/1.cc
+@@ -261,6 +261,17 @@ test08()
+   m[k] = 0;
+ }
+ 
++void
++test09()
++{
++  // PR libstdc++/122921 - The value_type of flat_map's iterator should be
++  // pair<Key, T> instead of pair<const Key, T>
++  using type = std::flat_map<int, int>;
++  using value_type = std::ranges::range_value_t<type>;
++  using value_type = type::value_type;
++  using value_type = std::pair<int, int>;
++}
++
+ int
+ main()
+ {
+@@ -275,4 +286,5 @@ main()
+   test06();
+   test07();
+   test08();
++  test09();
+ }
+diff --git a/libstdc++-v3/testsuite/23_containers/flat_multimap/1.cc b/libstdc++-v3/testsuite/23_containers/flat_multimap/1.cc
+index 001095587f4b..caeb81bb3432 100644
+--- a/libstdc++-v3/testsuite/23_containers/flat_multimap/1.cc
++++ b/libstdc++-v3/testsuite/23_containers/flat_multimap/1.cc
+@@ -230,6 +230,17 @@ test07()
+   VERIFY( std::ranges::equal(m, (std::pair<int,int>[]){{3,4},{3,3}}) );
+ }
+ 
++void
++test09()
++{
++  // PR libstdc++/122921 - The value_type of flat_map's iterator should be
++  // pair<Key, T> instead of pair<const Key, T>
++  using type = std::flat_multimap<int, int>;
++  using value_type = std::ranges::range_value_t<type>;
++  using value_type = type::value_type;
++  using value_type = std::pair<int, int>;
++}
++
+ int
+ main()
+ {
+@@ -243,4 +254,5 @@ main()
+   test05();
+   test06();
+   test07();
++  test09();
+ }
+-- 
+2.43.7
+
+

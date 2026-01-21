@@ -1,0 +1,88 @@
+From 912022628b14008def4a1a6bd723293cb710bea8 Mon Sep 17 00:00:00 2001
+From: Georg-Johann Lay <avr@gjlay.de>
+Date: Thu, 9 Oct 2025 15:27:16 +0200
+Subject: [PATCH] AVR: target/122220 - Let (int32_t) -0x1p31L return INT32_MIN.
+
+	PR target/122220
+libgcc/config/avr/libf7/
+	* libf7-asm.sx (to_integer): Return 0x80... on negative overflow.
+
+gcc/testsuite/
+	* gcc.target/avr/pr122220.c: New test.
+
+(cherry picked from commit 3ea09e4d43278aa8d7b088a5f5438d921c48c411)
+---
+ gcc/testsuite/gcc.target/avr/pr122220.c | 23 +++++++++++++++++++++++
+ libgcc/config/avr/libf7/libf7-asm.sx    | 18 ++----------------
+ 2 files changed, 25 insertions(+), 16 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.target/avr/pr122220.c
+
+diff --git a/gcc/testsuite/gcc.target/avr/pr122220.c b/gcc/testsuite/gcc.target/avr/pr122220.c
+new file mode 100644
+index 000000000000..2a8b83932a84
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/avr/pr122220.c
+@@ -0,0 +1,23 @@
++/* { dg-do run { target { ! avr_tiny } } } */
++/* { dg-additional-options { -std=gnu99 -Os -mcall-prologues } } */
++
++#if __SIZEOF_LONG_DOUBLE__ == 8
++
++typedef long double D;
++typedef __INT32_TYPE__ int32_t;
++
++D dd = -0x1p31L;
++  
++int main (void)
++{
++  if ((int32_t) dd != -0x7fffffff - 1)
++    __builtin_abort();
++
++  return 0;
++}
++#else
++int main (void)
++{
++  return 0;
++}
++#endif
+diff --git a/libgcc/config/avr/libf7/libf7-asm.sx b/libgcc/config/avr/libf7/libf7-asm.sx
+index 4b42947e2ed6..a0f9bacf5fe1 100644
+--- a/libgcc/config/avr/libf7/libf7-asm.sx
++++ b/libgcc/config/avr/libf7/libf7-asm.sx
+@@ -618,21 +618,7 @@ DEFUN to_integer
+ .Lsaturate.T:
+ 
+ #if F7_HAVE_Inf
+-    brtc .Lset_0x7fff
+-    ;; -Inf  =>  return 1 + INTxx_MIN
+-    mov     ZL,     Flags
+-    .global __clr_8
+-    XCALL   __clr_8
+-    ldi     C6,     0x80
+-
+-    ldi     CA+0,   0x01
+-
+-    sbrs    Mask,   5
+-    ldi     CA+4,   0x01
+-
+-    sbrs    Mask,   4
+-    ldi     CA+6,   0x01
+-    ret
++    brts .Lset_0x8000
+ 
+ .Lset_0x7fff:
+     ;; +Inf  =>  return INTxx_MAX
+@@ -644,7 +630,7 @@ DEFUN to_integer
+ #endif /* F7_HAVE_Inf */
+ 
+ .Lset_0x8000:
+-    ;; NaN  =>  return INTxx_MIN
++    ;; NaN  or -Inf =>  return INTxx_MIN
+     .global __clr_8
+     XCALL   __clr_8
+     ldi     C6,     0x80
+-- 
+2.43.7
+
+

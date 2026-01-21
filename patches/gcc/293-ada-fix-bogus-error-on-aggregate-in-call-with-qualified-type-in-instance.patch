@@ -1,0 +1,222 @@
+From f3ab0ca58a87e1ad2a05c623ca5b650c4068f59e Mon Sep 17 00:00:00 2001
+From: Eric Botcazou <ebotcazou@gcc.gnu.org>
+Date: Fri, 26 Dec 2025 14:52:32 +0100
+Subject: [PATCH] Ada: Fix bogus error on aggregate in call with qualified type
+ in instance
+
+This happens with a container aggregate in the testcase, although this can
+very likely happen with a record aggregate as well.  The trick used in the
+Save_Global_References procedure for aggregates loses the qualification of
+the type of the formal for which the aggregate is the actual.
+
+gcc/ada/
+	PR ada/123302
+	* sem_ch12.adb (Save_Global_Reference.Save_References_In_Aggregate):
+	Recurse on the scope of the type to find one that is visible, in the
+	case of an actual in a subprogram call with a local type.
+
+gcc/testsuite/
+	* gnat.dg/aggr34.adb: New test.
+	* gnat.dg/aggr34_pkg1.ads, gnat.dg/aggr34_pkg1.adb: New helper.
+	* gnat.dg/aggr34_pkg2.ads, gnat.dg/aggr34_pkg2.adb: Likewise.
+	* gnat.dg/aggr34_pkg3.ads: Likewise.
+---
+ gcc/ada/sem_ch12.adb                  | 57 +++++++++++++++++----------
+ gcc/testsuite/gnat.dg/aggr34.adb      | 15 +++++++
+ gcc/testsuite/gnat.dg/aggr34_pkg1.adb |  6 +++
+ gcc/testsuite/gnat.dg/aggr34_pkg1.ads |  9 +++++
+ gcc/testsuite/gnat.dg/aggr34_pkg2.adb |  9 +++++
+ gcc/testsuite/gnat.dg/aggr34_pkg2.ads |  7 ++++
+ gcc/testsuite/gnat.dg/aggr34_pkg3.ads |  8 ++++
+ 7 files changed, 90 insertions(+), 21 deletions(-)
+ create mode 100644 gcc/testsuite/gnat.dg/aggr34.adb
+ create mode 100644 gcc/testsuite/gnat.dg/aggr34_pkg1.adb
+ create mode 100644 gcc/testsuite/gnat.dg/aggr34_pkg1.ads
+ create mode 100644 gcc/testsuite/gnat.dg/aggr34_pkg2.adb
+ create mode 100644 gcc/testsuite/gnat.dg/aggr34_pkg2.ads
+ create mode 100644 gcc/testsuite/gnat.dg/aggr34_pkg3.ads
+
+diff --git a/gcc/ada/sem_ch12.adb b/gcc/ada/sem_ch12.adb
+index 5a9a38cb4921..bde56723e4e6 100644
+--- a/gcc/ada/sem_ch12.adb
++++ b/gcc/ada/sem_ch12.adb
+@@ -17384,7 +17384,6 @@ package body Sem_Ch12 is
+          ----------------------------------
+ 
+          procedure Save_References_In_Aggregate (N : Node_Id) is
+-            Nam   : Node_Id;
+             Qual  : Node_Id   := Empty;
+             Typ   : Entity_Id := Empty;
+ 
+@@ -17440,16 +17439,16 @@ package body Sem_Ch12 is
+                   end;
+                end if;
+ 
+-               --  If the aggregate is an actual in a call, it has been
+-               --  resolved in the current context, to some local type. The
++               --  If the aggregate is an actual in a subprogram call, it has
++               --  been resolved in the current context to some local type. The
+                --  enclosing call may have been disambiguated by the aggregate,
+                --  and this disambiguation might fail at instantiation time
+                --  because the type to which the aggregate did resolve is not
+                --  preserved. In order to preserve some of this information,
+                --  wrap the aggregate in a qualified expression, using the id
+                --  of its type. For further disambiguation we qualify the type
+-               --  name with its scope (if visible and not hidden by a local
+-               --  homograph) because both id's will have corresponding
++               --  name with its scope recursively (if visible and not hidden
++               --  by a local homograph) because both will have corresponding
+                --  entities in an instance. This resolves most of the problems
+                --  with missing type information on aggregates in instances.
+ 
+@@ -17459,24 +17458,40 @@ package body Sem_Ch12 is
+                  and then Present (Typ)
+                  and then Comes_From_Source (Typ)
+                then
+-                  Nam := Make_Identifier (Loc, Chars (Typ));
++                  declare
++                     function Qualify_Name (S, E : Entity_Id) return Node_Id is
++                       (if E = S
++                        then Make_Identifier (Loc, Chars (E))
++                        else Make_Selected_Component (Loc,
++                               Prefix        => Qualify_Name (S, Scope (E)),
++                               Selector_Name =>
++                                 Make_Identifier (Loc, Chars (E))));
++                     --  Return the qualified name of E up to scope S
++
++                     Nam : Node_Id;
++                     S   : Entity_Id;
+ 
+-                  if Is_Immediately_Visible (Scope (Typ))
+-                    and then
+-                      (not In_Open_Scopes (Scope (Typ))
+-                         or else Current_Entity (Scope (Typ)) = Scope (Typ))
+-                  then
+-                     Nam :=
+-                       Make_Selected_Component (Loc,
+-                         Prefix        =>
+-                           Make_Identifier (Loc, Chars (Scope (Typ))),
+-                         Selector_Name => Nam);
+-                  end if;
++                  begin
++                     S := Scope (Typ);
++                     while not Is_Immediately_Visible (S) loop
++                        S := Scope (S);
++                        exit when Is_Generic_Unit (S);
++                     end loop;
+ 
+-                  Qual :=
+-                    Make_Qualified_Expression (Loc,
+-                      Subtype_Mark => Nam,
+-                      Expression   => Relocate_Node (N));
++                     if not Is_Generic_Unit (S)
++                       and then (not In_Open_Scopes (S)
++                                  or else Current_Entity (S) = S)
++                     then
++                        Nam := Qualify_Name (S, Typ);
++                     else
++                        Nam := Make_Identifier (Loc, Chars (Typ));
++                     end if;
++
++                     Qual :=
++                       Make_Qualified_Expression (Loc,
++                         Subtype_Mark => Nam,
++                         Expression   => Relocate_Node (N));
++                  end;
+                end if;
+ 
+             --  For a full aggregate, if the type is global and a derived
+diff --git a/gcc/testsuite/gnat.dg/aggr34.adb b/gcc/testsuite/gnat.dg/aggr34.adb
+new file mode 100644
+index 000000000000..41c324e87b9d
+--- /dev/null
++++ b/gcc/testsuite/gnat.dg/aggr34.adb
+@@ -0,0 +1,15 @@
++-- PR ada/123302
++-- { dg-do link }
++-- { dg-options "-gnat2022" }
++
++with Aggr34_Pkg3;
++with Aggr34_Pkg1;
++
++procedure Aggr34 is
++
++  package My_Pkg3 is new Aggr34_Pkg3;
++  package My_Pkg1 is new Aggr34_Pkg1 (My_Pkg3);
++
++begin
++  My_Pkg1.Proc;
++end;
+diff --git a/gcc/testsuite/gnat.dg/aggr34_pkg1.adb b/gcc/testsuite/gnat.dg/aggr34_pkg1.adb
+new file mode 100644
+index 000000000000..e930de0db619
+--- /dev/null
++++ b/gcc/testsuite/gnat.dg/aggr34_pkg1.adb
+@@ -0,0 +1,6 @@
++-- { dg-do compile }
++-- { dg-options "-gnat2022" }
++
++package body Aggr34_Pkg1 is
++   procedure Proc is null;
++end Aggr34_Pkg1;
+diff --git a/gcc/testsuite/gnat.dg/aggr34_pkg1.ads b/gcc/testsuite/gnat.dg/aggr34_pkg1.ads
+new file mode 100644
+index 000000000000..6febc51ceb1f
+--- /dev/null
++++ b/gcc/testsuite/gnat.dg/aggr34_pkg1.ads
+@@ -0,0 +1,9 @@
++with Aggr34_Pkg3;
++with Aggr34_Pkg2;
++
++generic
++   with package My_Config is new Aggr34_Pkg3;
++package Aggr34_Pkg1 is
++   package My_Module_Basic_Config is new Aggr34_Pkg2 (My_Config);
++   procedure Proc;
++end Aggr34_Pkg1;
+diff --git a/gcc/testsuite/gnat.dg/aggr34_pkg2.adb b/gcc/testsuite/gnat.dg/aggr34_pkg2.adb
+new file mode 100644
+index 000000000000..6775627938ab
+--- /dev/null
++++ b/gcc/testsuite/gnat.dg/aggr34_pkg2.adb
+@@ -0,0 +1,9 @@
++-- { dg-do compile }
++-- { dg-options "-gnat2022" }
++
++package body Aggr34_Pkg2 is
++   procedure Disable_Prunt is
++   begin
++      My_Config.Set (["a", "b"]);
++   end Disable_Prunt;
++end Aggr34_Pkg2;
+diff --git a/gcc/testsuite/gnat.dg/aggr34_pkg2.ads b/gcc/testsuite/gnat.dg/aggr34_pkg2.ads
+new file mode 100644
+index 000000000000..176a7a6aa4db
+--- /dev/null
++++ b/gcc/testsuite/gnat.dg/aggr34_pkg2.ads
+@@ -0,0 +1,7 @@
++with Aggr34_Pkg3;
++
++generic
++   with package My_Config is new Aggr34_Pkg3;
++package Aggr34_Pkg2 is
++   procedure Disable_Prunt;
++end Aggr34_Pkg2;
+diff --git a/gcc/testsuite/gnat.dg/aggr34_pkg3.ads b/gcc/testsuite/gnat.dg/aggr34_pkg3.ads
+new file mode 100644
+index 000000000000..5f7960f99c6d
+--- /dev/null
++++ b/gcc/testsuite/gnat.dg/aggr34_pkg3.ads
+@@ -0,0 +1,8 @@
++with Ada.Containers.Indefinite_Vectors;
++
++generic
++package Aggr34_Pkg3 is
++   package Config_Data_Paths is new
++     Ada.Containers.Indefinite_Vectors (Positive, String);
++   procedure Set (Path : Config_Data_Paths.Vector) is null;
++end Aggr34_Pkg3;
+-- 
+2.43.7
+
+

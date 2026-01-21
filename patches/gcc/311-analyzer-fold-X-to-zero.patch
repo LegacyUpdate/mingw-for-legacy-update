@@ -1,0 +1,76 @@
+From e869244a134c84ef9f5ba15d8005bf66f9f2048c Mon Sep 17 00:00:00 2001
+From: David Malcolm <dmalcolm@redhat.com>
+Date: Mon, 15 Dec 2025 11:48:49 -0500
+Subject: [PATCH] analyzer: fold X + (-X) to zero [PR122975]
+
+gcc/analyzer/ChangeLog:
+	PR analyzer/122975
+	* region-model-manager.cc (region_model_manager::maybe_fold_binop): Fold
+	X + (-X) to zero.
+
+gcc/testsuite/ChangeLog:
+	PR analyzer/122975
+	* c-c++-common/analyzer/arith-1.c: New test.
+	* c-c++-common/analyzer/infinite-recursion-pr122975.c: New test.
+
+Signed-off-by: David Malcolm <dmalcolm@redhat.com>
+
+(cherry picked from commit c48970fc4a4d1747a50e6abd1634757212420c04)
+---
+ gcc/analyzer/region-model-manager.cc                |  5 +++++
+ gcc/testsuite/c-c++-common/analyzer/arith-1.c       | 13 +++++++++++++
+ .../analyzer/infinite-recursion-pr122975.c          |  5 +++++
+ 3 files changed, 23 insertions(+)
+ create mode 100644 gcc/testsuite/c-c++-common/analyzer/arith-1.c
+ create mode 100644 gcc/testsuite/c-c++-common/analyzer/infinite-recursion-pr122975.c
+
+diff --git a/gcc/analyzer/region-model-manager.cc b/gcc/analyzer/region-model-manager.cc
+index dfce420065d4..b5722f565acd 100644
+--- a/gcc/analyzer/region-model-manager.cc
++++ b/gcc/analyzer/region-model-manager.cc
+@@ -698,6 +698,11 @@ region_model_manager::maybe_fold_binop (tree type, enum tree_code op,
+       /* (VAL + 0) -> VAL.  */
+       if (cst1 && zerop (cst1))
+ 	return get_or_create_cast (type, arg0);
++      /* X + (-X) -> 0.  */
++      if (const unaryop_svalue *unary_op = arg1->dyn_cast_unaryop_svalue ())
++	if (unary_op->get_op () == NEGATE_EXPR
++	    && unary_op->get_arg () == arg0)
++	  return get_or_create_int_cst (type, 0);
+       break;
+     case MINUS_EXPR:
+       /* (VAL - 0) -> VAL.  */
+diff --git a/gcc/testsuite/c-c++-common/analyzer/arith-1.c b/gcc/testsuite/c-c++-common/analyzer/arith-1.c
+new file mode 100644
+index 000000000000..af58466c7bc7
+--- /dev/null
++++ b/gcc/testsuite/c-c++-common/analyzer/arith-1.c
+@@ -0,0 +1,13 @@
++#include "analyzer-decls.h"
++
++static int __attribute__((noipa))
++negate_int (int x)
++{
++  return -x;
++}
++
++void
++test_1 (int a)
++{
++  __analyzer_eval (a + negate_int (a) == 0); /* { dg-warning "TRUE" } */
++}
+diff --git a/gcc/testsuite/c-c++-common/analyzer/infinite-recursion-pr122975.c b/gcc/testsuite/c-c++-common/analyzer/infinite-recursion-pr122975.c
+new file mode 100644
+index 000000000000..c241f4169f7f
+--- /dev/null
++++ b/gcc/testsuite/c-c++-common/analyzer/infinite-recursion-pr122975.c
+@@ -0,0 +1,5 @@
++void fun(int x, int y)
++{
++  if (x + y != 0) 
++    fun(x, -x); /* { dg-bogus "infinite recursion" } */
++}
+-- 
+2.43.7
+
+

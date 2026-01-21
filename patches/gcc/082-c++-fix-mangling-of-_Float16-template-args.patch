@@ -1,0 +1,78 @@
+From 16493194f21210480bd39c43f17b4e98417052c1 Mon Sep 17 00:00:00 2001
+From: Matthias Kretz <m.kretz@gsi.de>
+Date: Fri, 5 Sep 2025 12:16:34 +0200
+Subject: [PATCH] c++: Fix mangling of _Float16 template args [PR121801]
+
+Signed-off-by: Matthias Kretz <m.kretz@gsi.de>
+
+gcc/testsuite/ChangeLog:
+
+	PR c++/121801
+	* g++.dg/abi/pr121801.C: New test.
+
+gcc/cp/ChangeLog:
+
+	PR c++/121801
+	* mangle.cc (write_real_cst): Handle 16-bit real and assert
+	that reals have 16 bits or a multiple of 32 bits.
+
+(cherry picked from commit 19d1c7c28f4fd0557dd868a7a4041b00ceada890)
+---
+ gcc/cp/mangle.cc                    | 15 ++++++++++++++-
+ gcc/testsuite/g++.dg/abi/pr121801.C | 13 +++++++++++++
+ 2 files changed, 27 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/g++.dg/abi/pr121801.C
+
+diff --git a/gcc/cp/mangle.cc b/gcc/cp/mangle.cc
+index 3d5e96b2c944..59c2ca6dabba 100644
+--- a/gcc/cp/mangle.cc
++++ b/gcc/cp/mangle.cc
+@@ -2161,11 +2161,24 @@ write_real_cst (const tree value)
+   int i, limit, dir;
+ 
+   tree type = TREE_TYPE (value);
+-  int words = GET_MODE_BITSIZE (SCALAR_FLOAT_TYPE_MODE (type)) / 32;
++  int bits = GET_MODE_BITSIZE (SCALAR_FLOAT_TYPE_MODE (type));
++  int words = bits / 32;
+ 
+   real_to_target (target_real, &TREE_REAL_CST (value),
+ 		  TYPE_MODE (type));
+ 
++  if (words == 0)
++    {
++      /* _Float16 and std::bfloat16_t are the only supported types smaller than
++	 32 bits.  */
++      gcc_assert (bits == 16);
++      sprintf (buffer, "%04lx", (unsigned long) target_real[0]);
++      write_chars (buffer, 4);
++      return;
++    }
++
++  gcc_assert (bits % 32 == 0);
++
+   /* The value in target_real is in the target word order,
+      so we must write it out backward if that happens to be
+      little-endian.  write_number cannot be used, it will
+diff --git a/gcc/testsuite/g++.dg/abi/pr121801.C b/gcc/testsuite/g++.dg/abi/pr121801.C
+new file mode 100644
+index 000000000000..cd35186d8881
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/abi/pr121801.C
+@@ -0,0 +1,13 @@
++// PR c++/121801
++// { dg-do compile { target { c++20 && float16 } } }
++// { dg-add-options float16 }
++
++template<_Float16 T> void f() {}
++
++void uses() {
++  f<_Float16(1)>();
++  f<_Float16(2)>();
++}
++
++// { dg-final { scan-assembler "_Z1fILDF16_3c00EEvv" } }
++// { dg-final { scan-assembler "_Z1fILDF16_4000EEvv" } }
+-- 
+2.43.7
+
+

@@ -1,0 +1,96 @@
+From 4c662fc1a18220b92b193260bfbbc317bf8b5e4b Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Fri, 9 Jan 2026 12:19:26 +0100
+Subject: [PATCH] i386: Add OPTION_MASK_ISA_64BIT to 4 non-ia32 builtins
+ [PR123489]
+
+The following 4 builtins have corresponding insns guarded with TARGET_64BIT
+and are only used in #ifdef __x86_64__ ... #endif section of an intrin
+header, so when used by hand with -m32 they ICE.
+
+Fixed thusly.
+
+I've additionally verified all the #ifdef __x86_64__ ... #endif guarded
+builtins used in intrinsic headers and checked whether they have
+OPTION_MASK_ISA_64BIT, the only other exception was __builtin_ia32_prefetchi
+but I think that one is fine, as expansion in that case has
+            if (TARGET_64BIT && TARGET_PREFETCHI
+                && local_func_symbolic_operand (op0, GET_MODE (op0)))
+              emit_insn (gen_prefetchi (op0, op2));
+            else
+              {
+                warning (0, "instruction prefetch applies when in 64-bit mode"
+                            " with RIP-relative addressing and"
+                            " option %<-mprefetchi%>;"
+                            " they stay NOPs otherwise");
+                emit_insn (gen_nop ());
+              }
+
+2026-01-09  Jakub Jelinek  <jakub@redhat.com>
+
+	PR target/123489
+	* config/i386/i386-builtin.def (__builtin_ia32_cvttsd2sis64_round,
+	__builtin_ia32_cvttsd2usis64_round, __builtin_ia32_cvttss2sis64_round,
+	__builtin_ia32_cvttss2usis64_round): Require OPTION_MASK_ISA_64BIT.
+
+	* gcc.target/i386/pr123489.c: New test.
+
+(cherry picked from commit 671382d0ac71ae808a10f3cee1bb521a32b9406b)
+---
+ gcc/config/i386/i386-builtin.def         |  8 ++++----
+ gcc/testsuite/gcc.target/i386/pr123489.c | 20 ++++++++++++++++++++
+ 2 files changed, 24 insertions(+), 4 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.target/i386/pr123489.c
+
+diff --git a/gcc/config/i386/i386-builtin.def b/gcc/config/i386/i386-builtin.def
+index a14271140808..9a8e29573c5f 100644
+--- a/gcc/config/i386/i386-builtin.def
++++ b/gcc/config/i386/i386-builtin.def
+@@ -3678,13 +3678,13 @@ BDESC (0, OPTION_MASK_ISA2_AVX10_2, CODE_FOR_avx10_2_vcvttps2qqsv8di_mask_round,
+ BDESC (0, OPTION_MASK_ISA2_AVX10_2, CODE_FOR_avx10_2_vcvttps2udqsv16sf_mask_round, "__builtin_ia32_cvttps2udqs512_mask_round", IX86_BUILTIN_VCVTTPS2UDQS512_MASK_ROUND, UNKNOWN, (int) V16SI_FTYPE_V16SF_V16SI_HI_INT)
+ BDESC (0, OPTION_MASK_ISA2_AVX10_2, CODE_FOR_avx10_2_vcvttps2uqqsv8di_mask_round, "__builtin_ia32_cvttps2uqqs512_mask_round", IX86_BUILTIN_VCVTTPS2UQQS512_MASK_ROUND, UNKNOWN, (int) V8DI_FTYPE_V8SF_V8DI_QI_INT)
+ BDESC (0, OPTION_MASK_ISA2_AVX10_2, CODE_FOR_avx10_2_vcvttsd2sissi_round, "__builtin_ia32_cvttsd2sis32_round", IX86_BUILTIN_VCVTTSD2SIS32_ROUND, UNKNOWN, (int) INT_FTYPE_V2DF_INT)
+-BDESC (0, OPTION_MASK_ISA2_AVX10_2, CODE_FOR_avx10_2_vcvttsd2sisdi_round, "__builtin_ia32_cvttsd2sis64_round", IX86_BUILTIN_VCVTTSD2SIS64_ROUND, UNKNOWN, (int) INT64_FTYPE_V2DF_INT)
++BDESC (OPTION_MASK_ISA_64BIT, OPTION_MASK_ISA2_AVX10_2, CODE_FOR_avx10_2_vcvttsd2sisdi_round, "__builtin_ia32_cvttsd2sis64_round", IX86_BUILTIN_VCVTTSD2SIS64_ROUND, UNKNOWN, (int) INT64_FTYPE_V2DF_INT)
+ BDESC (0, OPTION_MASK_ISA2_AVX10_2, CODE_FOR_avx10_2_vcvttsd2usissi_round, "__builtin_ia32_cvttsd2usis32_round", IX86_BUILTIN_VCVTTSD2USIS32_ROUND, UNKNOWN, (int) INT_FTYPE_V2DF_INT)
+-BDESC (0, OPTION_MASK_ISA2_AVX10_2, CODE_FOR_avx10_2_vcvttsd2usisdi_round, "__builtin_ia32_cvttsd2usis64_round", IX86_BUILTIN_VCVTTSD2USIS64_ROUND, UNKNOWN, (int) INT64_FTYPE_V2DF_INT)
++BDESC (OPTION_MASK_ISA_64BIT, OPTION_MASK_ISA2_AVX10_2, CODE_FOR_avx10_2_vcvttsd2usisdi_round, "__builtin_ia32_cvttsd2usis64_round", IX86_BUILTIN_VCVTTSD2USIS64_ROUND, UNKNOWN, (int) INT64_FTYPE_V2DF_INT)
+ BDESC (0, OPTION_MASK_ISA2_AVX10_2, CODE_FOR_avx10_2_vcvttss2sissi_round, "__builtin_ia32_cvttss2sis32_round", IX86_BUILTIN_VCVTTSS2SIS32_ROUND, UNKNOWN, (int) INT_FTYPE_V4SF_INT)
+-BDESC (0, OPTION_MASK_ISA2_AVX10_2, CODE_FOR_avx10_2_vcvttss2sisdi_round, "__builtin_ia32_cvttss2sis64_round", IX86_BUILTIN_VCVTTSS2SIS64_ROUND, UNKNOWN, (int) INT64_FTYPE_V4SF_INT)
++BDESC (OPTION_MASK_ISA_64BIT, OPTION_MASK_ISA2_AVX10_2, CODE_FOR_avx10_2_vcvttss2sisdi_round, "__builtin_ia32_cvttss2sis64_round", IX86_BUILTIN_VCVTTSS2SIS64_ROUND, UNKNOWN, (int) INT64_FTYPE_V4SF_INT)
+ BDESC (0, OPTION_MASK_ISA2_AVX10_2, CODE_FOR_avx10_2_vcvttss2usissi_round, "__builtin_ia32_cvttss2usis32_round", IX86_BUILTIN_VCVTTSS2USIS32_ROUND, UNKNOWN, (int) INT_FTYPE_V4SF_INT)
+-BDESC (0, OPTION_MASK_ISA2_AVX10_2, CODE_FOR_avx10_2_vcvttss2usisdi_round, "__builtin_ia32_cvttss2usis64_round", IX86_BUILTIN_VCVTTSS2USIS64_ROUND, UNKNOWN, (int) INT64_FTYPE_V4SF_INT)
++BDESC (OPTION_MASK_ISA_64BIT, OPTION_MASK_ISA2_AVX10_2, CODE_FOR_avx10_2_vcvttss2usisdi_round, "__builtin_ia32_cvttss2usis64_round", IX86_BUILTIN_VCVTTSS2USIS64_ROUND, UNKNOWN, (int) INT64_FTYPE_V4SF_INT)
+ BDESC (0, OPTION_MASK_ISA2_AVX10_2, CODE_FOR_avx10_2_minmaxpv8df_mask_round, "__builtin_ia32_minmaxpd512_mask_round", IX86_BUILTIN_MINMAXPD512_MASK_ROUND, UNKNOWN, (int) V8DF_FTYPE_V8DF_V8DF_INT_V8DF_UQI_INT)
+ BDESC (0, OPTION_MASK_ISA2_AVX10_2, CODE_FOR_avx10_2_minmaxpv32hf_mask_round, "__builtin_ia32_minmaxph512_mask_round", IX86_BUILTIN_MINMAXPH512_MASK_ROUND, UNKNOWN, (int) V32HF_FTYPE_V32HF_V32HF_INT_V32HF_USI_INT)
+ BDESC (0, OPTION_MASK_ISA2_AVX10_2, CODE_FOR_avx10_2_minmaxpv16sf_mask_round, "__builtin_ia32_minmaxps512_mask_round", IX86_BUILTIN_MINMAXPS512_MASK_ROUND, UNKNOWN, (int) V16SF_FTYPE_V16SF_V16SF_INT_V16SF_UHI_INT)
+diff --git a/gcc/testsuite/gcc.target/i386/pr123489.c b/gcc/testsuite/gcc.target/i386/pr123489.c
+new file mode 100644
+index 000000000000..26d7e8d0b1e6
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/i386/pr123489.c
+@@ -0,0 +1,20 @@
++/* PR target/123489 */
++/* { dg-do compile } */
++/* { dg-options "-mavx10.2" } */
++
++typedef double v2df __attribute__((__vector_size__(16)));
++typedef float v4sf __attribute__((__vector_size__(16)));
++
++long long
++foo ()
++{
++  return __builtin_ia32_cvttsd2sis64_round ((v2df) {}, 8)	/* { dg-error "implicit declaration of function" "" { target ia32 } } */
++	 + __builtin_ia32_cvttsd2usis64_round ((v2df) {}, 8);	/* { dg-error "implicit declaration of function" "" { target ia32 } } */
++}
++
++long long
++bar ()
++{
++  return __builtin_ia32_cvttss2sis64_round ((v4sf) {}, 8)	/* { dg-error "implicit declaration of function" "" { target ia32 } } */
++	 + __builtin_ia32_cvttss2usis64_round ((v4sf) {}, 8);	/* { dg-error "implicit declaration of function" "" { target ia32 } } */
++}
+-- 
+2.43.7
+
+

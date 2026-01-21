@@ -1,0 +1,109 @@
+From 83020b996e06f894066bb79d26ad4307755d7bd8 Mon Sep 17 00:00:00 2001
+From: Jonathan Wakely <jwakely@redhat.com>
+Date: Thu, 27 Nov 2025 15:54:44 +0000
+Subject: [PATCH] libstdc++: Fix nodiscard warnings in performance tests
+
+libstdc++-v3/ChangeLog:
+
+	* testsuite/performance/23_containers/sort_search/list.cc: Cast
+	results to void to suppress -Wunused-result warnings from
+	nodiscard functions.
+	* testsuite/performance/25_algorithms/equal_deque_iterators.cc:
+	Likewise.
+	* testsuite/performance/25_algorithms/search_n.cc: Likewise.
+
+(cherry picked from commit 7f355b11db1c83158a8f7d8c323c4920bee21ce8)
+---
+ .../performance/23_containers/sort_search/list.cc      |  2 +-
+ .../performance/25_algorithms/equal_deque_iterators.cc | 10 +++++-----
+ .../testsuite/performance/25_algorithms/search_n.cc    |  4 ++--
+ 3 files changed, 8 insertions(+), 8 deletions(-)
+
+diff --git a/libstdc++-v3/testsuite/performance/23_containers/sort_search/list.cc b/libstdc++-v3/testsuite/performance/23_containers/sort_search/list.cc
+index 525d37aad234..efb6e6a572e6 100644
+--- a/libstdc++-v3/testsuite/performance/23_containers/sort_search/list.cc
++++ b/libstdc++-v3/testsuite/performance/23_containers/sort_search/list.cc
+@@ -34,7 +34,7 @@ template<typename Container, int Iter>
+ 
+ 	//Search for random values that may or may not belong to the list.
+ 	for (int i = 0; i < 50; ++i)
+-	  std::find(obj.begin(), obj.end(), rand() % 100001);
++	  (void) std::find(obj.begin(), obj.end(), rand() % 100001);
+       
+ 	obj.sort();
+       
+diff --git a/libstdc++-v3/testsuite/performance/25_algorithms/equal_deque_iterators.cc b/libstdc++-v3/testsuite/performance/25_algorithms/equal_deque_iterators.cc
+index 1f97adb06deb..58166676110e 100644
+--- a/libstdc++-v3/testsuite/performance/25_algorithms/equal_deque_iterators.cc
++++ b/libstdc++-v3/testsuite/performance/25_algorithms/equal_deque_iterators.cc
+@@ -34,7 +34,7 @@ int main()
+   start_counters(time, resource);
+   for (int i = 0; i < 1000; ++i)
+     for (int j = 0; j < 3000; ++j)
+-      std::equal(data.begin(), data.begin() + j, d.begin());
++      (void) std::equal(data.begin(), data.begin() + j, d.begin());
+   stop_counters(time, resource);
+   report_performance(__FILE__, "deque vs deque", time, resource);
+   clear_counters(time, resource);
+@@ -44,7 +44,7 @@ int main()
+   start_counters(time, resource);
+   for (int i = 0; i < 1000; ++i)
+     for (int j = 0; j < 3000; ++j)
+-      std::equal(data.begin(), data.begin() + j, v.begin());
++      (void) std::equal(data.begin(), data.begin() + j, v.begin());
+   stop_counters(time, resource);
+   report_performance(__FILE__, "deque vs vector", time, resource);
+   clear_counters(time, resource);
+@@ -54,7 +54,7 @@ int main()
+   start_counters(time, resource);
+   for (int i = 0; i < 1000; ++i)
+     for (int j = 0; j < 3000; ++j)
+-      std::equal(v.begin(), v.begin() + j, d.begin());
++      (void) std::equal(v.begin(), v.begin() + j, d.begin());
+   stop_counters(time, resource);
+   report_performance(__FILE__, "vector vs deque", time, resource);
+   clear_counters(time, resource);
+@@ -64,7 +64,7 @@ int main()
+   start_counters(time, resource);
+   for (int i = 0; i < 1000; ++i)
+     for (int j = 0; j < 3000; ++j)
+-      std::equal(data.begin(), data.begin() + j, cv.begin());
++      (void) std::equal(data.begin(), data.begin() + j, cv.begin());
+   stop_counters(time, resource);
+   report_performance(__FILE__, "int deque vs char vector", time, resource);
+   clear_counters(time, resource);
+@@ -74,7 +74,7 @@ int main()
+   start_counters(time, resource);
+   for (int i = 0; i < 1000; ++i)
+     for (int j = 0; j < 3000; ++j)
+-      std::equal(cv.begin(), cv.begin() + j, d.begin());
++      (void) std::equal(cv.begin(), cv.begin() + j, d.begin());
+   stop_counters(time, resource);
+   report_performance(__FILE__, "char vector vs int deque", time, resource);
+ 
+diff --git a/libstdc++-v3/testsuite/performance/25_algorithms/search_n.cc b/libstdc++-v3/testsuite/performance/25_algorithms/search_n.cc
+index 3f3585a65104..6218c1ed59ca 100644
+--- a/libstdc++-v3/testsuite/performance/25_algorithms/search_n.cc
++++ b/libstdc++-v3/testsuite/performance/25_algorithms/search_n.cc
+@@ -47,7 +47,7 @@ main(void)
+   __gnu_test::test_container<int, forward_iterator_wrapper> fcon(ary, ary + length);
+   start_counters(time, resource);
+   for(int i = 0; i < 100; i++)
+-    search_n(fcon.begin(), fcon.end(), 10, 1);
++    (void) search_n(fcon.begin(), fcon.end(), 10, 1);
+   stop_counters(time, resource);
+   report_performance(__FILE__, "forward iterator", time, resource);
+   clear_counters(time, resource);
+@@ -55,7 +55,7 @@ main(void)
+   __gnu_test::test_container<int, random_access_iterator_wrapper> rcon(ary, ary + length);
+   start_counters(time, resource);
+   for(int i = 0; i < 100; i++)
+-    search_n(rcon.begin(), rcon.end(), 10, 1);
++    (void) search_n(rcon.begin(), rcon.end(), 10, 1);
+   stop_counters(time, resource);
+   report_performance(__FILE__, "random access iterator", time, resource);
+   clear_counters(time, resource);
+-- 
+2.43.7
+
+

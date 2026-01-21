@@ -1,0 +1,288 @@
+From 1f158f0951ac7380dd18a2c9d0468051b8b5adce Mon Sep 17 00:00:00 2001
+From: Tamar Christina <tamar.christina@arm.com>
+Date: Mon, 22 Dec 2025 12:15:37 +0000
+Subject: [PATCH] vect: don't hoist conditional loads above their condition
+ [PR122868]
+
+The example in the PR
+
+#include <vector>
+
+std::vector<bool> x, y;
+int main() { return x == y; }
+
+now vectorizes but the attributes on std::vector indicate that the vector is
+aligned to the natural vector alignment.  In C this is equivalent to the
+testcase
+
+int f (int a[12], int b[12], int n)
+{
+    a = __builtin_assume_aligned (a, 16);
+    b = __builtin_assume_aligned (b, 16);
+    for (int i = 0; i < n; i++)
+      {
+        if (b[i] == 0)
+          return 0;
+        if (a[0] > b[i])
+          return 1;
+      }
+    return 2;
+}
+
+Here the load a[0] is loop invariant, and the vectorizer hoists this out of the
+loop into the pre-header.  For early break this isn't safe to do as a[0] is
+conditionally valid based on the conditions in the block preceding it.  As such
+we need some guarantee that the load is valid before we can hoist it or the load
+needs to be unconditional (e.g. in the loop header block).
+
+Conceptually alignment peeling can provide this guarantee since making it
+through the prologue means the invariant value was loaded at least once and so
+we know the address is valid.  At the moment however there's no real defined
+order between how GCC inserts conditions in the pre-header, so having tried to
+change the order a few times the load always ends up before the prologue.  So
+for now I marked it as a missed optimization.
+
+Since we still can hoist invariant loads if in the header, I didn't change
+LOOP_VINFO_NO_DATA_DEPENDENCIES since that would be global and instead I
+modified the usage site of LOOP_VINFO_NO_DATA_DEPENDENCIES.
+
+gcc/ChangeLog:
+
+	PR tree-optimization/122868
+	* tree-vect-stmts.cc (vectorizable_load): Don't hoist loop invariant
+	conditional loads unless in header.
+
+gcc/testsuite/ChangeLog:
+
+	PR tree-optimization/122868
+	* gcc.dg/vect/vect-early-break_140-pr122868_1.c: New test.
+	* gcc.dg/vect/vect-early-break_140-pr122868_2.c: New test.
+	* gcc.dg/vect/vect-early-break_140-pr122868_3.c: New test.
+	* gcc.dg/vect/vect-early-break_140-pr122868_4.c: New test.
+---
+ .../vect/vect-early-break_140-pr122868_1.c    | 39 +++++++++++++++++++
+ .../vect/vect-early-break_140-pr122868_2.c    | 31 +++++++++++++++
+ .../vect/vect-early-break_140-pr122868_3.c    | 39 +++++++++++++++++++
+ .../vect/vect-early-break_140-pr122868_4.c    | 31 +++++++++++++++
+ gcc/tree-vect-stmts.cc                        | 36 ++++++++++++++++-
+ 5 files changed, 174 insertions(+), 2 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.dg/vect/vect-early-break_140-pr122868_1.c
+ create mode 100644 gcc/testsuite/gcc.dg/vect/vect-early-break_140-pr122868_2.c
+ create mode 100644 gcc/testsuite/gcc.dg/vect/vect-early-break_140-pr122868_3.c
+ create mode 100644 gcc/testsuite/gcc.dg/vect/vect-early-break_140-pr122868_4.c
+
+diff --git a/gcc/testsuite/gcc.dg/vect/vect-early-break_140-pr122868_1.c b/gcc/testsuite/gcc.dg/vect/vect-early-break_140-pr122868_1.c
+new file mode 100644
+index 000000000000..80264bd4f31c
+--- /dev/null
++++ b/gcc/testsuite/gcc.dg/vect/vect-early-break_140-pr122868_1.c
+@@ -0,0 +1,39 @@
++/* { dg-add-options vect_early_break } */
++/* { dg-require-effective-target vect_sizes_16B_8B } */
++/* { dg-require-effective-target vect_early_break_hw } */
++/* { dg-require-effective-target vect_int } */
++
++/* { dg-final { scan-tree-dump "LOOP VECTORIZED" "vect" } } */
++
++#include "tree-vect.h"
++
++__attribute__ ((noipa))
++int f (int a[12], int b[12], int n)
++{
++#ifdef __arm__
++    a = __builtin_assume_aligned (a, 8);
++    b = __builtin_assume_aligned (b, 8);
++#else
++    a = __builtin_assume_aligned (a, 16);
++    b = __builtin_assume_aligned (b, 16);
++#endif
++    for (int i = 0; i < n; i++)
++      {
++        if (b[i] == 0)
++          return 0;
++        if (a[0] > b[i])
++          return 1;
++      }
++    return 2;
++}
++
++int main ()
++{
++   check_vect ();
++
++   int *a = 0;
++   int b[12] = {0};
++   return f (a, b, 10);
++}
++
++/* { dg-final { scan-tree-dump "not hoisting invariant load due to early break" "vect" } } */
+diff --git a/gcc/testsuite/gcc.dg/vect/vect-early-break_140-pr122868_2.c b/gcc/testsuite/gcc.dg/vect/vect-early-break_140-pr122868_2.c
+new file mode 100644
+index 000000000000..90222fcffd7c
+--- /dev/null
++++ b/gcc/testsuite/gcc.dg/vect/vect-early-break_140-pr122868_2.c
+@@ -0,0 +1,31 @@
++/* { dg-add-options vect_early_break } */
++/* { dg-require-effective-target vect_early_break_hw } */
++/* { dg-require-effective-target vect_int } */
++
++/* { dg-final { scan-tree-dump "LOOP VECTORIZED" "vect" } } */
++
++#include "tree-vect.h"
++
++__attribute__ ((noipa))
++int f (int a[12], int b[12], int n)
++{
++    for (int i = 0; i < n; i++)
++      {
++        if (b[i] == 0)
++          return 0;
++        if (a[0] > b[i])
++          return 1;
++      }
++    return 2;
++}
++
++int main ()
++{
++   check_vect ();
++
++   int *a = 0;
++   int b[12] = {0};
++   return f (a, b, 10);
++}
++
++/* { dg-final { scan-tree-dump-times "not hoisting invariant load due to early break" 0 "vect" { xfail *-*-* } } } */
+diff --git a/gcc/testsuite/gcc.dg/vect/vect-early-break_140-pr122868_3.c b/gcc/testsuite/gcc.dg/vect/vect-early-break_140-pr122868_3.c
+new file mode 100644
+index 000000000000..670804f8ce53
+--- /dev/null
++++ b/gcc/testsuite/gcc.dg/vect/vect-early-break_140-pr122868_3.c
+@@ -0,0 +1,39 @@
++/* { dg-add-options vect_early_break } */
++/* { dg-require-effective-target vect_sizes_16B_8B } */
++/* { dg-require-effective-target vect_early_break_hw } */
++/* { dg-require-effective-target vect_int } */
++
++/* { dg-final { scan-tree-dump "LOOP VECTORIZED" "vect" } } */
++
++#include "tree-vect.h"
++
++__attribute__ ((noipa))
++int f (int a[12], int b[12], int n)
++{
++#ifdef __arm__
++    a = __builtin_assume_aligned (a, 8);
++    b = __builtin_assume_aligned (b, 8);
++#else
++    a = __builtin_assume_aligned (a, 16);
++    b = __builtin_assume_aligned (b, 16);
++#endif
++    for (int i = 0; i < n; i++)
++      {
++        if (a[0] > b[i])
++          return 0;
++        if (b[i] == 0)
++          return 1;
++      }
++    return 2;
++}
++
++int main ()
++{
++   check_vect ();
++
++   int a[12] = {1};
++   int b[12] = {0};
++   return f (a, b, 10);
++}
++
++/* { dg-final { scan-tree-dump-times "not hoisting invariant load due to early break" 0 "vect" } } */
+diff --git a/gcc/testsuite/gcc.dg/vect/vect-early-break_140-pr122868_4.c b/gcc/testsuite/gcc.dg/vect/vect-early-break_140-pr122868_4.c
+new file mode 100644
+index 000000000000..de2aff287f4f
+--- /dev/null
++++ b/gcc/testsuite/gcc.dg/vect/vect-early-break_140-pr122868_4.c
+@@ -0,0 +1,31 @@
++/* { dg-add-options vect_early_break } */
++/* { dg-require-effective-target vect_early_break_hw } */
++/* { dg-require-effective-target vect_int } */
++
++/* { dg-final { scan-tree-dump "LOOP VECTORIZED" "vect" } } */
++
++#include "tree-vect.h"
++
++__attribute__ ((noipa))
++int f (int a[12], int b[12], int n)
++{
++    for (int i = 0; i < n; i++)
++      {
++        if (a[0] > b[i])
++          return 0;
++        if (b[i] == 0)
++          return 0;
++      }
++    return 2;
++}
++
++int main ()
++{
++   check_vect ();
++
++   int a[12] = {1};
++   int b[12] = {0};
++   return f (a, b, 10);
++}
++
++/* { dg-final { scan-tree-dump-times "not hoisting invariant load due to early break" 0 "vect" } } */
+diff --git a/gcc/tree-vect-stmts.cc b/gcc/tree-vect-stmts.cc
+index c1d34503fab2..e711f940173d 100644
+--- a/gcc/tree-vect-stmts.cc
++++ b/gcc/tree-vect-stmts.cc
+@@ -10708,8 +10708,40 @@ vectorizable_load (vec_info *vinfo,
+ 	 once at analysis time, remembered and used in the
+ 	 transform time.  */
+       bool hoist_p = (LOOP_VINFO_NO_DATA_DEPENDENCIES (loop_vinfo)
+-		      && !nested_in_vect_loop
+-		      && hoist_defs_of_uses (stmt_info->stmt, loop, false));
++		      && !nested_in_vect_loop);
++
++      for (stmt_vec_info sinfo : SLP_TREE_SCALAR_STMTS (slp_node))
++	{
++	  /* It is unsafe to hoist a conditional load over the conditions that
++	     make it valid.  When early break this means that any invariant load
++	     can't be hoisted unless it's in the loop header or if we know
++	     something else has verified the load is valid to do.  Alignment
++	     peeling would do this since getting through the prologue means the
++	     load was done at least once and so the vector main body is free to
++	     hoist it.  However today GCC will hoist the load above the PFA
++	     loop.  As such that makes it still invalid and so we can't allow it
++	     today.  */
++	  if (LOOP_VINFO_EARLY_BREAKS (loop_vinfo)
++	      && !DR_SCALAR_KNOWN_BOUNDS (STMT_VINFO_DR_INFO (sinfo))
++	      && gimple_bb (STMT_VINFO_STMT (vect_orig_stmt (sinfo)))
++		  != loop->header)
++	    {
++	      if (LOOP_VINFO_PEELING_FOR_ALIGNMENT (loop_vinfo)
++		  && dump_enabled_p ())
++		dump_printf_loc (MSG_MISSED_OPTIMIZATION, vect_location,
++			     "not hoisting invariant load due to early break"
++			     "constraints\n");
++	      else if (dump_enabled_p ())
++	       dump_printf_loc (MSG_NOTE, vect_location,
++			     "not hoisting invariant load due to early break"
++			     "constraints\n");
++	      hoist_p = false;
++	      break;
++	    }
++
++	  hoist_p = hoist_p && hoist_defs_of_uses (sinfo->stmt, loop, false);
++	}
++
+       if (costing_p)
+ 	{
+ 	  enum vect_cost_model_location cost_loc
+-- 
+2.43.7
+
+

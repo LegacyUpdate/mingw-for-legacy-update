@@ -1,0 +1,53 @@
+From 29ef01494e39110344d36e5df0918761a6a8c92e Mon Sep 17 00:00:00 2001
+From: Georg-Johann Lay <avr@gjlay.de>
+Date: Sat, 6 Sep 2025 13:38:48 +0200
+Subject: [PATCH] AVR: Disable tree-switch-conversion per default.
+
+There are at least two cases where tree-switch-conversion leads
+to unpleasant resource allocation:
+
+PR49857
+    The lookup table lives in RAM.  This is the case for all
+    devices that locate .rodata in RAM, which is for almost
+    all AVR devices.
+
+PR81540
+    Code is bloated for 64-bit inputs.
+
+As far as PR49857 is concerned, a target hook that may add an
+address-space qualifier to the lookup table is the obvious
+solution, though a respective patch has always been rejected by
+global maintainers for non-technical reasons.
+
+gcc/
+	PR target/81540
+	PR target/49857
+	* common/config/avr/avr-common.cc: Disable -ftree-switch-conversion.
+
+(cherry picked from commit 912159d2b5429c3126756b56723dd4f32dd56bdd)
+---
+ gcc/common/config/avr/avr-common.cc | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/gcc/common/config/avr/avr-common.cc b/gcc/common/config/avr/avr-common.cc
+index d8b982c4fa6f..914b7417fdad 100644
+--- a/gcc/common/config/avr/avr-common.cc
++++ b/gcc/common/config/avr/avr-common.cc
+@@ -29,6 +29,13 @@
+ /* Implement TARGET_OPTION_OPTIMIZATION_TABLE.  */
+ static const struct default_options avr_option_optimization_table[] =
+   {
++    // The lookup table from tree-swicth-conversion.cc lives in .rodata
++    // and hence consumes RAM on almost all devices.  As PR49857 has
++    // been rejected several times for non-technical reasons, just
++    // disable -ftree-switch-conversion by default.  But even with PR49857
++    // in place there remains PR81540, which cannot be filtered out since
++    // the pass has no way to hook in.
++    { OPT_LEVELS_ALL, OPT_ftree_switch_conversion, NULL, 0 },
+     // The only effect of -fcaller-saves might be that it triggers
+     // a frame without need when it tries to be smart around calls.
+     { OPT_LEVELS_ALL, OPT_fcaller_saves, NULL, 0 },
+-- 
+2.43.7
+
+ 

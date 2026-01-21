@@ -1,0 +1,138 @@
+From f8f8e79c8139465bf09aa86952bd64bd93364ec3 Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Wed, 22 Oct 2025 13:11:52 +0200
+Subject: [PATCH] c++: Fix up RAW_DATA_CST handling in braced_list_to_string
+ [PR122302]
+
+The following testcase is miscompiled, because a RAW_DATA_CST tree
+node is shared by multiple CONSTRUCTORs and when the braced_list_to_string
+function changes one to extend the RAW_DATA_CST over the single preceding
+and single succeeding INTEGER_CST, it changes the RAW_DATA_CST in
+the other CONSTRUCTOR where the elts around it are still present.
+
+Fixed by tweaking a copy of it instead, like we handle it in other spots.
+
+2025-10-22  Jakub Jelinek  <jakub@redhat.com>
+
+	PR c++/122302
+	* c-common.cc (braced_list_to_string): Call copy_node on RAW_DATA_CST
+	before changing RAW_DATA_POINTER and RAW_DATA_LENGTH on it.
+
+	* g++.dg/cpp0x/pr122302.C: New test.
+	* g++.dg/cpp/embed-27.C: New test.
+
+(cherry picked from commit 79b49977b1894a0a5eea3d2125eb6546b9d0cf02)
+---
+ gcc/c-family/c-common.cc              |  1 +
+ gcc/testsuite/g++.dg/cpp/embed-27.C   | 38 +++++++++++++++++++++++++
+ gcc/testsuite/g++.dg/cpp0x/pr122302.C | 40 +++++++++++++++++++++++++++
+ 3 files changed, 79 insertions(+)
+ create mode 100644 gcc/testsuite/g++.dg/cpp/embed-27.C
+ create mode 100644 gcc/testsuite/g++.dg/cpp0x/pr122302.C
+
+diff --git a/gcc/c-family/c-common.cc b/gcc/c-family/c-common.cc
+index 65478c3c37a8..9e873e11d211 100644
+--- a/gcc/c-family/c-common.cc
++++ b/gcc/c-family/c-common.cc
+@@ -10245,6 +10245,7 @@ braced_list_to_string (tree type, tree ctor, bool member)
+ 		    j = i - start;
+ 		  else
+ 		    j -= start;
++		  value = copy_node (value);
+ 		  RAW_DATA_POINTER (value) -= start;
+ 		  RAW_DATA_LENGTH (value) += start + end;
+ 		  i += end;
+diff --git a/gcc/testsuite/g++.dg/cpp/embed-27.C b/gcc/testsuite/g++.dg/cpp/embed-27.C
+new file mode 100644
+index 000000000000..dffb8b981a19
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/cpp/embed-27.C
+@@ -0,0 +1,38 @@
++// PR c++/122302
++// { dg-do run { target c++11 } }
++// { dg-options "-O2" }
++
++unsigned char b[] = {
++#embed "embed-27.C"
++};
++
++struct A {
++  unsigned char a[sizeof (b)] = { 
++#embed "embed-27.C"
++  };
++};
++
++void
++foo ()
++{
++  A a;
++  for (int i = 0; i < sizeof (b); ++i)
++    if (a.a[i] != b[i])
++      __builtin_abort ();
++}
++
++void
++bar ()
++{
++  A a;
++  for (int i = 0; i < sizeof (b); ++i)
++    if (a.a[i] != b[i])
++      __builtin_abort ();
++}
++
++int
++main ()
++{
++  foo ();
++  bar ();
++}
+diff --git a/gcc/testsuite/g++.dg/cpp0x/pr122302.C b/gcc/testsuite/g++.dg/cpp0x/pr122302.C
+new file mode 100644
+index 000000000000..248b6a4f7898
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/cpp0x/pr122302.C
+@@ -0,0 +1,40 @@
++// PR c++/122302
++// { dg-do run { target c++11 } }
++// { dg-options "-O2" }
++
++struct A {
++  unsigned char a[130] = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,
++			   1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,
++			   1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,
++			   1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,
++			   1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,
++			   1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,
++			   1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,
++			   1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,
++			   1, 2 };
++};
++
++void
++foo ()
++{
++  A a;
++  for (int i = 0; i < 130; ++i)
++    if (a.a[i] != (i & 15) + 1)
++      __builtin_abort ();
++}
++
++void
++bar ()
++{
++  A a;
++  for (int i = 0; i < 130; ++i)
++    if (a.a[i] != (i & 15) + 1)
++      __builtin_abort ();
++}
++
++int
++main ()
++{
++  foo ();
++  bar ();
++}
+-- 
+2.43.7
+
+

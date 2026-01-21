@@ -1,0 +1,76 @@
+From 44eb6711f9b38e84d0e3721aa8356b8ffc5d5939 Mon Sep 17 00:00:00 2001
+From: Patrick Palka <ppalka@redhat.com>
+Date: Wed, 19 Nov 2025 11:10:38 -0500
+Subject: [PATCH] c++: current inst name lookup within noexcept-spec [PR122668]
+
+Since we don't implement deferred noexcept-spec parsing of a friend
+declaration, the r15-2117 change diagnosing name lookup failure for the
+current instantiation ahead of time needs to be suppressed in this case.
+
+	PR c++/122668
+	PR c++/114764
+
+gcc/cp/ChangeLog:
+
+	* pt.cc (dependentish_scope_p): Return true for the current
+	instantiation from within an immediately parsed noexcept-spec.
+
+gcc/testsuite/ChangeLog:
+
+	* g++.dg/cpp0x/noexcept91.C: New test.
+
+Reviewed-by: Jason Merrill <jason@redhat.com>
+(cherry picked from commit 6b7f4b587b5cb95ea3ed2f543841a3d1ed6f580d)
+---
+ gcc/cp/pt.cc                            | 11 ++++++++++-
+ gcc/testsuite/g++.dg/cpp0x/noexcept91.C | 15 +++++++++++++++
+ 2 files changed, 25 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/g++.dg/cpp0x/noexcept91.C
+
+diff --git a/gcc/cp/pt.cc b/gcc/cp/pt.cc
+index 79195d5b78d8..9398cabfd068 100644
+--- a/gcc/cp/pt.cc
++++ b/gcc/cp/pt.cc
+@@ -28755,7 +28755,16 @@ dependent_scope_p (tree scope)
+ bool
+ dependentish_scope_p (tree scope)
+ {
+-  return dependent_scope_p (scope) || any_dependent_bases_p (scope);
++  return dependent_scope_p (scope) || any_dependent_bases_p (scope)
++    /* A noexcept-spec is a complete-class context, so this should never hold.
++       But since we don't implement deferred noexcept-spec parsing of a friend
++       declaration (PR114764) we compensate by treating the current
++       instantiation as dependent to avoid bogus name lookup failures in this
++       case (PR122668).  */
++    || (cp_noexcept_operand
++	&& CLASS_TYPE_P (scope)
++	&& TYPE_BEING_DEFINED (scope)
++	&& dependent_type_p (scope));
+ }
+ 
+ /* T is a SCOPE_REF.  Return whether it represents a non-static member of
+diff --git a/gcc/testsuite/g++.dg/cpp0x/noexcept91.C b/gcc/testsuite/g++.dg/cpp0x/noexcept91.C
+new file mode 100644
+index 000000000000..590dfa6162a3
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/cpp0x/noexcept91.C
+@@ -0,0 +1,15 @@
++// PR c++/122668
++// { dg-do compile { target c++11 } }
++
++template<class T>
++struct A {
++  friend void f1(A& a) noexcept(noexcept(a.g(0))) { }
++  friend void f2(A& a) noexcept(noexcept(A::g(0))) { }
++  static void g(int) noexcept;
++};
++
++int main() {
++  A<int> a;
++  static_assert(noexcept(f1(a)), "");
++  static_assert(noexcept(f2(a)), "");
++}
+-- 
+2.43.7
+
+

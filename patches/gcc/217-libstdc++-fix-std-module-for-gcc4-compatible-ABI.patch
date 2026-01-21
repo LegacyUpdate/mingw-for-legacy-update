@@ -1,0 +1,113 @@
+From e46321811a95faebb38a3996cec7317df3fa248a Mon Sep 17 00:00:00 2001
+From: Jonathan Wakely <jwakely@redhat.com>
+Date: Mon, 17 Nov 2025 14:33:50 +0000
+Subject: [PATCH] libstdc++: Fix std module for gcc4-compatible ABI
+
+Add preprocessor checks to std.cc.in for features which are not
+supported with the old string ABI.
+
+The COW std::string doesn't properly support C++11 allocators, so the
+aliases such as std::pmr::string, std::pmr::u8string etc. are not
+defined for the old string ABI.
+
+The std::syncbuf type uses std::string and is not defined for the old
+string ABI.
+
+libstdc++-v3/ChangeLog:
+
+	* src/c++23/std.cc.in [!__cpp_lib_syncbuf]: Disable exports for
+	<syncstream> contents when not defined.
+	[!_GLIBCXX_USE_CXX11_ABI]: Disable exports for pmr aliases in
+	<string> when not defined.
+
+(cherry picked from commit edde0ae2b5299aeef5555346788d9059de45d813)
+---
+ libstdc++-v3/src/c++23/std.cc.in | 16 +++++++++++++---
+ 1 file changed, 13 insertions(+), 3 deletions(-)
+
+diff --git a/libstdc++-v3/src/c++23/std.cc.in b/libstdc++-v3/src/c++23/std.cc.in
+index 5df25bb646af..36e4361e2a3f 100644
+--- a/libstdc++-v3/src/c++23/std.cc.in
++++ b/libstdc++-v3/src/c++23/std.cc.in
+@@ -1575,15 +1575,17 @@ export namespace std
+   using std::u32streampos;
+   using std::u8streampos;
+   using std::wstreampos;
+-  using std::basic_osyncstream;
+-  using std::basic_syncbuf;
+   using std::istreambuf_iterator;
+   using std::ostreambuf_iterator;
++  using std::fpos;
++#ifdef __cpp_lib_syncbuf
++  using std::basic_osyncstream;
++  using std::basic_syncbuf;
+   using std::osyncstream;
+   using std::syncbuf;
+   using std::wosyncstream;
+   using std::wsyncbuf;
+-  using std::fpos;
++#endif
+ }
+ 
+ // <iostream>
+@@ -2116,9 +2118,11 @@ export namespace std
+   using std::ostream;
+   using std::wostream;
+   using std::operator<<;
++#ifdef __cpp_lib_syncbuf
+   using std::emit_on_flush;
+   using std::noemit_on_flush;
+   using std::flush_emit;
++#endif
+ }
+ 
+ // <print>
+@@ -2559,11 +2563,13 @@ export namespace std
+   using std::wsregex_token_iterator;
+   namespace pmr
+   {
++#if _GLIBCXX_USE_CXX11_ABI
+     using std::pmr::cmatch;
+     using std::pmr::match_results;
+     using std::pmr::smatch;
+     using std::pmr::wcmatch;
+     using std::pmr::wsmatch;
++#endif
+   }
+ }
+ 
+@@ -2789,12 +2795,14 @@ export namespace std
+   using std::wstring;
+   namespace pmr
+   {
++#if _GLIBCXX_USE_CXX11_ABI
+     using std::pmr::basic_string;
+     using std::pmr::string;
+     using std::pmr::u16string;
+     using std::pmr::u32string;
+     using std::pmr::u8string;
+     using std::pmr::wstring;
++#endif
+   }
+   using std::hash;
+ }
+@@ -2839,6 +2847,7 @@ export namespace std
+ // <syncstream>
+ export namespace std
+ {
++#ifdef __cpp_lib_syncbuf
+   using std::basic_syncbuf;
+   using std::swap;
+   using std::basic_osyncstream;
+@@ -2846,6 +2855,7 @@ export namespace std
+   using std::syncbuf;
+   using std::wosyncstream;
+   using std::wsyncbuf;
++#endif
+ }
+ 
+ // 19.5 <system_error>
+-- 
+2.43.7
+
+

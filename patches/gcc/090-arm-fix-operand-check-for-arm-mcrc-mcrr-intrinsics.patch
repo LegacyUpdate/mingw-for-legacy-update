@@ -1,0 +1,206 @@
+From 9373c483fc42dfc30667e6467f8c5a8881a75a25 Mon Sep 17 00:00:00 2001
+From: Andre Vieira <andre.simoesdiasvieira@arm.com>
+Date: Mon, 11 Aug 2025 09:49:18 +0100
+Subject: [PATCH] arm: Fix operand check for __arm_{mrrc{2},mcrr{2]} intrinsics
+ [PR 121464]
+
+Fix the bound checking for the opc1  operand of the following intrinsics:
+  __arm_mcrr
+  __arm_mcrr2
+  __arm_mrrc
+  __arm_mrrc2
+
+gcc/ChangeLog:
+
+	PR target/121464
+	* config/arm/arm.md (arm_<mrrc>, arm_<mcrr>): Fix operand check.
+
+gcc/testsuite/ChangeLog:
+
+	PR target/121464
+	* gcc.target/arm/acle/mcrr.c: Update testcase.
+	* gcc.target/arm/acle/mcrr2.c: Likewise.
+	* gcc.target/arm/acle/mrrc.c: Likewise.
+	* gcc.target/arm/acle/mrrc2.c: Likewise.
+
+(cherry picked from commit b29abdc333cce9acbc9537a1df8a4ec09444658f)
+---
+ gcc/config/arm/arm.md                     |  4 ++--
+ gcc/testsuite/gcc.target/arm/acle/mcrr.c  | 21 ++++++++++++++++++--
+ gcc/testsuite/gcc.target/arm/acle/mcrr2.c | 24 +++++++++++++++++++++--
+ gcc/testsuite/gcc.target/arm/acle/mrrc.c  | 20 ++++++++++++++++++-
+ gcc/testsuite/gcc.target/arm/acle/mrrc2.c | 18 ++++++++++++++++-
+ 5 files changed, 79 insertions(+), 8 deletions(-)
+
+diff --git a/gcc/config/arm/arm.md b/gcc/config/arm/arm.md
+index 597ef6725bb7..2880442626fc 100644
+--- a/gcc/config/arm/arm.md
++++ b/gcc/config/arm/arm.md
+@@ -13044,7 +13044,7 @@
+   "arm_coproc_builtin_available (VUNSPEC_<MCRR>)"
+ {
+   arm_const_bounds (operands[0], 0, 16);
+-  arm_const_bounds (operands[1], 0, 8);
++  arm_const_bounds (operands[1], 0, 16);
+   arm_const_bounds (operands[3], 0, (1 << 5));
+   return "<mcrr>\\tp%c0, %1, %Q2, %R2, CR%c3";
+ }
+@@ -13059,7 +13059,7 @@
+   "arm_coproc_builtin_available (VUNSPEC_<MRRC>)"
+ {
+   arm_const_bounds (operands[1], 0, 16);
+-  arm_const_bounds (operands[2], 0, 8);
++  arm_const_bounds (operands[2], 0, 16);
+   arm_const_bounds (operands[3], 0, (1 << 5));
+   return "<mrrc>\\tp%c1, %2, %Q0, %R0, CR%c3";
+ }
+diff --git a/gcc/testsuite/gcc.target/arm/acle/mcrr.c b/gcc/testsuite/gcc.target/arm/acle/mcrr.c
+index 468dd96fb9b6..5081f7153142 100644
+--- a/gcc/testsuite/gcc.target/arm/acle/mcrr.c
++++ b/gcc/testsuite/gcc.target/arm/acle/mcrr.c
+@@ -3,6 +3,7 @@
+ /* { dg-do assemble } */
+ /* { dg-options "-save-temps" } */
+ /* { dg-require-effective-target arm_coproc3_ok } */
++/* { dg-final { check-function-bodies "**" "" "" } } */
+ 
+ #include "arm_acle.h"
+ #if (__ARM_ARCH < 8 || !defined (__ARM_ARCH_ISA_ARM)) \
+@@ -15,6 +16,22 @@ void test_mcrr (uint64_t a)
+   a += 77;
+   __arm_mcrr (10, 5, a, 3);
+ }
++/*
++** test_mcrr:
++** ...
++**	add.*#77
++** ...
++**	mcrr	p10, #5, r[0-9]+, r[0-9]+, CR3
++** ...
++*/
+ 
+-/* { dg-final { scan-assembler "add\[^\n\]*#77\n" } } */
+-/* { dg-final { scan-assembler "mcrr\tp10, #5, r\[r0-9\]*, r\[r0-9\]*, CR3\n" } } */
++void test_mcrr_pr121464 (uint64_t a)
++{
++  __arm_mcrr (7, 11, a, 0);
++}
++/*
++** test_mcrr_pr121464:
++** ...
++**	mcrr	p7, #11, r[0-9]+, r[0-9]+, CR0
++** ...
++*/
+diff --git a/gcc/testsuite/gcc.target/arm/acle/mcrr2.c b/gcc/testsuite/gcc.target/arm/acle/mcrr2.c
+index 1173ad06b533..a0f93cc89155 100644
+--- a/gcc/testsuite/gcc.target/arm/acle/mcrr2.c
++++ b/gcc/testsuite/gcc.target/arm/acle/mcrr2.c
+@@ -3,6 +3,7 @@
+ /* { dg-do assemble } */
+ /* { dg-options "-save-temps" } */
+ /* { dg-require-effective-target arm_coproc4_ok } */
++/* { dg-final { check-function-bodies "**" "" "" } } */
+ 
+ #include "arm_acle.h"
+ #if (__ARM_ARCH < 8 || !defined (__ARM_ARCH_ISA_ARM)) \
+@@ -15,6 +16,25 @@ void test_mcrr2 (uint64_t a)
+   a += 77;
+   __arm_mcrr2 (10, 5, a, 3);
+ }
++/*
++** test_mcrr2:
++** ...
++**	add.*#77
++** ...
++**	mcrr2	p10, #5, r[0-9]+, r[0-9]+, CR3
++** ...
++*/
+ 
+-/* { dg-final { scan-assembler "add\[^\n\]*#77\n" } } */
+-/* { dg-final { scan-assembler "mcrr2\tp10, #5, r\[r0-9\]*, r\[r0-9\]*, CR3\n" } } */
++void test_mcrr2_pr121464 (void)
++{
++  __arm_mcrr2 (3, 12, 49, 4);
++}
++
++/*
++** test_mcrr2_pr121464:
++** ...
++**	mov.*#49
++** ...
++**	mcrr2	p3, #12, r[0-9]+, r[0-9]+, CR4
++** ...
++*/
+diff --git a/gcc/testsuite/gcc.target/arm/acle/mrrc.c b/gcc/testsuite/gcc.target/arm/acle/mrrc.c
+index c004660fadca..54e542bb102d 100644
+--- a/gcc/testsuite/gcc.target/arm/acle/mrrc.c
++++ b/gcc/testsuite/gcc.target/arm/acle/mrrc.c
+@@ -3,6 +3,7 @@
+ /* { dg-do assemble } */
+ /* { dg-options "-save-temps" } */
+ /* { dg-require-effective-target arm_coproc3_ok } */
++/* { dg-final { check-function-bodies "**" "" "" } } */
+ 
+ #include "arm_acle.h"
+ #if (__ARM_ARCH < 8 || !defined (__ARM_ARCH_ISA_ARM)) \
+@@ -15,4 +16,21 @@ uint64_t test_mrrc (void)
+   return __arm_mrrc (10, 5, 3);
+ }
+ 
+-/* { dg-final { scan-assembler "mrrc\tp10, #5, r\[r0-9\]*, r\[r0-9\]*, CR3\n" } } */
++/*
++** test_mrrc:
++** ...
++**	mrrc	p10, #5, r[0-9]+, r[0-9]+, CR3
++** ...
++*/
++
++uint64_t test_mrrc_pr121464 (void)
++{
++  return __arm_mrrc (15, 9, 7);
++}
++
++/*
++** test_mrrc_pr121464:
++** ...
++**	mrrc	p15, #9, r[0-9]+, r[0-9]+, CR7
++** ...
++*/
+diff --git a/gcc/testsuite/gcc.target/arm/acle/mrrc2.c b/gcc/testsuite/gcc.target/arm/acle/mrrc2.c
+index b5d56da8f90b..8d8937adb4e4 100644
+--- a/gcc/testsuite/gcc.target/arm/acle/mrrc2.c
++++ b/gcc/testsuite/gcc.target/arm/acle/mrrc2.c
+@@ -3,6 +3,7 @@
+ /* { dg-do assemble } */
+ /* { dg-options "-save-temps" } */
+ /* { dg-require-effective-target arm_coproc4_ok } */
++/* { dg-final { check-function-bodies "**" "" "" } } */
+ 
+ #include "arm_acle.h"
+ #if (__ARM_ARCH < 8 || !defined (__ARM_ARCH_ISA_ARM)) \
+@@ -14,5 +15,20 @@ uint64_t test_mrrc2 (void)
+ {
+   return __arm_mrrc2 (10, 5, 3);
+ }
++/*
++** test_mrrc2:
++** ...
++**	mrrc2	p10, #5, r[0-9]+, r[0-9]+, CR3
++** ...
++*/
+ 
+-/* { dg-final { scan-assembler "mrrc2\tp10, #5, r\[r0-9\]*, r\[r0-9\]*, CR3\n" } } */
++uint64_t test_mrrc2_pr121464 (void)
++{
++  return __arm_mrrc2 (0, 15, 10);
++}
++/*
++** test_mrrc2_pr121464:
++** ...
++**	mrrc2	p0, #15, r[0-9]+, r[0-9]+, CR10
++** ...
++*/
+-- 
+2.43.7
+
+

@@ -1,0 +1,103 @@
+From 082f98391d92b013e21333fa1b512015fcb0e84f Mon Sep 17 00:00:00 2001
+From: Iain Sandoe <iain@sandoe.co.uk>
+Date: Wed, 3 Dec 2025 07:44:53 +0000
+Subject: [PATCH] Ada, Darwin: Implement OSLock for Darwin [PR115305].
+
+The generic Posix code does not match the layout of the pthread entities
+in the Darwin _pthread_types.h.  So, let's make a Darwin-specific version
+and use it.
+
+	PR ada/115305
+
+gcc/ada/ChangeLog:
+
+	* Makefile.rtl: Use s-oslock__darwin instead of the Posix version.
+	* libgnat/s-oslock__darwin.ads: New file.
+
+Signed-off-by: Iain Sandoe <iain@sandoe.co.uk>
+---
+ gcc/ada/Makefile.rtl                 |  2 +-
+ gcc/ada/libgnat/s-oslock__darwin.ads | 57 ++++++++++++++++++++++++++++
+ 2 files changed, 58 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/ada/libgnat/s-oslock__darwin.ads
+
+diff --git a/gcc/ada/Makefile.rtl b/gcc/ada/Makefile.rtl
+index 1b9f28c692ee..f9ee2f6d1e55 100644
+--- a/gcc/ada/Makefile.rtl
++++ b/gcc/ada/Makefile.rtl
+@@ -3034,7 +3034,7 @@ ifeq ($(strip $(filter-out darwin%,$(target_os))),)
+     s-inmaop.adb<libgnarl/s-inmaop__posix.adb \
+     s-osinte.adb<libgnarl/s-osinte__darwin.adb \
+     s-osinte.ads<libgnarl/s-osinte__darwin.ads \
+-    s-oslock.ads<libgnat/s-oslock__posix.ads \
++    s-oslock.ads<libgnat/s-oslock__darwin.ads \
+     s-taprop.adb<libgnarl/s-taprop__posix.adb \
+     s-taspri.ads<libgnarl/s-taspri__posix.ads \
+     g-sercom.adb<libgnat/g-sercom__linux.adb \
+diff --git a/gcc/ada/libgnat/s-oslock__darwin.ads b/gcc/ada/libgnat/s-oslock__darwin.ads
+new file mode 100644
+index 000000000000..98b9fa6d282e
+--- /dev/null
++++ b/gcc/ada/libgnat/s-oslock__darwin.ads
+@@ -0,0 +1,57 @@
++------------------------------------------------------------------------------
++--                                                                          --
++--                 GNAT RUN-TIME LIBRARY (GNARL) COMPONENTS                 --
++--                                                                          --
++--                       S Y S T E M . O S _ L O C K S                      --
++--                                                                          --
++--                                 S p e c                                  --
++--                                                                          --
++--              Copyright (C) 2025, Free Software Foundation, Inc.          --
++--                                                                          --
++-- GNAT is free software;  you can  redistribute it  and/or modify it under --
++-- terms of the  GNU General Public License as published  by the Free Soft- --
++-- ware  Foundation;  either version 3,  or (at your option) any later ver- --
++-- sion.  GNAT is distributed in the hope that it will be useful, but WITH- --
++-- OUT ANY WARRANTY;  without even the  implied warranty of MERCHANTABILITY --
++-- or FITNESS FOR A PARTICULAR PURPOSE.                                     --
++--                                                                          --
++-- As a special exception under Section 7 of GPL version 3, you are granted --
++-- additional permissions described in the GCC Runtime Library Exception,   --
++-- version 3.1, as published by the Free Software Foundation.               --
++--                                                                          --
++-- You should have received a copy of the GNU General Public License and    --
++-- a copy of the GCC Runtime Library Exception along with this program;     --
++-- see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see    --
++-- <http://www.gnu.org/licenses/>.                                          --
++--                                                                          --
++-- GNARL was developed by the GNARL team at Florida State University.       --
++-- Extensive contributions were provided by Ada Core Technologies, Inc.     --
++--                                                                          --
++------------------------------------------------------------------------------
++
++--  This is a Darwin version of this package
++
++with Interfaces.C;
++with System.OS_Constants;
++
++package System.OS_Locks is
++   pragma Preelaborate;
++
++   type pthread_mutex_t is limited private;
++
++   subtype RTS_Lock is pthread_mutex_t;
++   --  Should be used inside the runtime system. The difference between Lock
++   --  and the RTS_Lock is that the latter serves only as a semaphore so that
++   --  we do not check for ceiling violations.
++
++private
++
++   subtype char_array is Interfaces.C.char_array;
++
++   type pthread_mutex_t is record
++      Sig  : Interfaces.C.long;
++      Data : char_array (1 .. OS_Constants.PTHREAD_MUTEX_SIZE);
++   end record;
++   pragma Convention (C, pthread_mutex_t);
++
++end System.OS_Locks;
+-- 
+2.43.7
+
+

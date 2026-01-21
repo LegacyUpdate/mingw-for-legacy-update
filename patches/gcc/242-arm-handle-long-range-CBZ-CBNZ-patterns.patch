@@ -1,0 +1,264 @@
+From fc0d96c0db52963eb60230c7bb01ce3ab6322914 Mon Sep 17 00:00:00 2001
+From: Richard Earnshaw <rearnsha@arm.com>
+Date: Tue, 25 Nov 2025 15:47:05 +0000
+Subject: [PATCH] arm: handle long-range CBZ/CBNZ patterns [PR122867]
+
+The CBN?Z instructions have a very small range (just 128 bytes
+forwards).  The compiler knows how to handle cases where we
+exceed that, but only if the range remains within that which
+a condition branch can support.  When compiling some machine
+generated code it is not too difficult to exceed this limit,
+so arrange to fall back to a conditional branch over an
+unconditional one in this extreme case.
+
+gcc/ChangeLog:
+	PR target/122867
+	* config/arm/arm.cc (arm_print_operand): Use %- to
+	emit LOCAL_LABEL_PREFIX.
+	(arm_print_operand_punct_valid_p): Allow %- for punct
+	and make %_ valid for all compilation variants.
+	* config/arm/thumb2.md (*thumb2_cbz): Handle very
+	large branch ranges that exceed the limit of b<cond>.
+	(*thumb2_cbnz): Likewise.
+
+gcc/testsuite/ChangeLog:
+	PR target/122867
+	* gcc.target/arm/cbz-range.c: New test.
+
+(cherry picked from commit e97550a7d0e1a8b31a76b0877c0e90a0163da7ee)
+---
+ gcc/config/arm/arm.cc                    |  11 ++-
+ gcc/config/arm/thumb2.md                 |  38 +++++---
+ gcc/testsuite/gcc.target/arm/cbz-range.c | 114 +++++++++++++++++++++++
+ 3 files changed, 146 insertions(+), 17 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.target/arm/cbz-range.c
+
+diff --git a/gcc/config/arm/arm.cc b/gcc/config/arm/arm.cc
+index 0e87a93bb9e6..b30e360b528c 100644
+--- a/gcc/config/arm/arm.cc
++++ b/gcc/config/arm/arm.cc
+@@ -24231,7 +24231,7 @@ arm_print_condition (FILE *stream)
+ 
+ 
+ /* Globally reserved letters: acln
+-   Puncutation letters currently used: @_|?().!#
++   Puncutation letters currently used: @_-|?().!#
+    Lower case letters currently used: bcdefhimpqtvwxyz
+    Upper case letters currently used: ABCDEFGHIJKLMOPQRSTUV
+    Letters previously used, but now deprecated/obsolete: sNWXYZ.
+@@ -24264,6 +24264,11 @@ arm_print_operand (FILE *stream, rtx x, int code)
+     case '_':
+       fputs (user_label_prefix, stream);
+       return;
++    case '-':
++#ifdef LOCAL_LABEL_PREFIX
++      fputs (LOCAL_LABEL_PREFIX, stream);
++#endif
++      return;
+ 
+     case '|':
+       fputs (REGISTER_PREFIX, stream);
+@@ -25113,9 +25118,9 @@ arm_print_operand_punct_valid_p (unsigned char code)
+ {
+   return (code == '@' || code == '|' || code == '.'
+ 	  || code == '(' || code == ')' || code == '#'
++	  || code == '-' || code == '_'
+ 	  || (TARGET_32BIT && (code == '?'))
+-	  || (TARGET_THUMB2 && (code == '!'))
+-	  || (TARGET_THUMB && (code == '_')));
++	  || (TARGET_THUMB2 && (code == '!')));
+ }
+ 
+ /* Target hook for assembling integer objects.  The ARM version needs to
+diff --git a/gcc/config/arm/thumb2.md b/gcc/config/arm/thumb2.md
+index 9d2c071e71e5..50cf21474d5c 100644
+--- a/gcc/config/arm/thumb2.md
++++ b/gcc/config/arm/thumb2.md
+@@ -1465,19 +1465,24 @@
+ 	      (pc)))
+    (clobber (reg:CC CC_REGNUM))]
+   "TARGET_THUMB2"
+-  "*
+-  if (get_attr_length (insn) == 2)
+-    return \"cbz\\t%0, %l1\";
+-  else
+-    return \"cmp\\t%0, #0\;beq\\t%l1\";
+-  "
++  {
++    int offset = (INSN_ADDRESSES (INSN_UID (operands[1]))
++		  - INSN_ADDRESSES (INSN_UID (insn)));
++    if (get_attr_length (insn) == 2)
++      return "cbz\t%0, %l1";
++    else if (offset >= -1048564 && offset <= 1048576)
++      return "cmp\t%0, #0\;beq\t%l1";
++    else if (which_alternative == 0)
++      return "cbnz\t%0, %-LCB%=\;b\t%l1\n%-LCB%=:";
++    return "cmp\t%0, #0\;bne\t%-LCB%=\;b\t%l1\n%-LCB%=:";
++  }
+   [(set (attr "length")
+         (if_then_else
+ 	    (and (ge (minus (match_dup 1) (pc)) (const_int 2))
+ 	         (le (minus (match_dup 1) (pc)) (const_int 128))
+ 	         (not (match_test "which_alternative")))
+ 	    (const_int 2)
+-	    (const_int 8)))
++	    (const_int 10)))
+    (set_attr "type" "branch,multiple")]
+ )
+ 
+@@ -1489,19 +1494,24 @@
+ 	      (pc)))
+    (clobber (reg:CC CC_REGNUM))]
+   "TARGET_THUMB2"
+-  "*
+-  if (get_attr_length (insn) == 2)
+-    return \"cbnz\\t%0, %l1\";
+-  else
+-    return \"cmp\\t%0, #0\;bne\\t%l1\";
+-  "
++  {
++    int offset = (INSN_ADDRESSES (INSN_UID (operands[1]))
++		  - INSN_ADDRESSES (INSN_UID (insn)));
++    if (get_attr_length (insn) == 2)
++      return "cbnz\t%0, %l1";
++    else if (offset >= -1048564 && offset <= 1048576)
++      return "cmp\t%0, #0\;bne\t%l1";
++    else if (which_alternative == 0)
++      return "cbz\t%0, %-LCB%=\;b\t%l1\n%-LCB%=:";
++    return "cmp\t%0, #0\;beq\t%-LCB%=\;b\t%l1\n%-LCB%=:";
++  }
+   [(set (attr "length")
+         (if_then_else
+ 	    (and (ge (minus (match_dup 1) (pc)) (const_int 2))
+ 	         (le (minus (match_dup 1) (pc)) (const_int 128))
+ 	         (not (match_test "which_alternative")))
+ 	    (const_int 2)
+-	    (const_int 8)))
++	    (const_int 10)))
+    (set_attr "type" "branch,multiple")]
+ )
+ 
+diff --git a/gcc/testsuite/gcc.target/arm/cbz-range.c b/gcc/testsuite/gcc.target/arm/cbz-range.c
+new file mode 100644
+index 000000000000..3b23888a42a9
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/arm/cbz-range.c
+@@ -0,0 +1,114 @@
++/* { dg-do assemble } */
++/* { dg-require-effective-target arm_arch_v7a_ok } */
++/* { dg-options "-O -mthumb" } */
++/* { dg-add-options arm_arch_v7a } */
++
++#define f "movw r0, #0;movw r0, #0;movw r0, #0;"
++#define f2 f f
++#define f4 f2 f2
++#define f8 f4 f4
++#define f16 f8 f8
++#define f32 f16 f16
++#define f64 f32 f32
++#define f128 f64 f64
++#define f256 f128 f128
++#define f512 f256 f256
++#define f1024 f512 f512
++#define f2048 f1024 f1024
++#define f4096 f2048 f2048
++#define f8192 f4096 f4096
++#define f16384 f8192 f8192
++#define f32768 f16384 f16384
++#define f65536 f32768 f32768
++#define f131072 f65536 f65536
++int a;
++
++int cbz1(int g)
++{
++  if (g)
++    asm(f8);
++  return a;
++}
++
++int cbz2(int g)
++{
++  asm ("": "+h"(g));
++  if (g)
++    asm(f8);
++  return a;
++}
++
++int cbz3(int g)
++{
++  if (g)
++    asm(f16);
++  return a;
++}
++
++int cbz4(int g)
++{
++  asm ("": "+h"(g));
++  if (g)
++    asm(f16);
++  return a;
++}
++
++int cbz5(int g)
++{
++  if (g)
++    asm(f131072);
++  return a;
++}
++
++int cbz6(int g)
++{
++  asm ("": "+h"(g));
++  if (g)
++    asm(f131072);
++  return a;
++}
++
++int cbnz1(int g)
++{
++  if (!g)
++    asm(f8);
++  return a;
++}
++
++int cbnz2(int g)
++{
++  asm ("": "+h"(g));
++  if (!g)
++    asm(f8);
++  return a;
++}
++
++int cbnz3(int g)
++{
++  if (!g)
++    asm(f16);
++  return a;
++}
++
++int cbnz4(int g)
++{
++  asm ("": "+h"(g));
++  if (!g)
++    asm(f16);
++  return a;
++}
++
++int cbnz5(int g)
++{
++  if (!g)
++    asm(f131072);
++  return a;
++}
++
++int cbnz6(int g)
++{
++  asm ("": "+h"(g));
++  if (!g)
++    asm(f131072);
++  return a;
++}
+-- 
+2.43.7
+
+

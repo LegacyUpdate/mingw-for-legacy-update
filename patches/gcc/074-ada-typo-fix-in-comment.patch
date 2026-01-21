@@ -1,0 +1,29 @@
+From a635f97159adf135684c93d71e82c87ebc374768 Mon Sep 17 00:00:00 2001
+From: =?utf8?q?Marc=20Poulhi=C3=A8s?= <poulhies@adacore.com>
+Date: Fri, 1 Aug 2025 16:46:10 +0200
+Subject: [PATCH] ada: Typo fix in comment
+
+gcc/ada/ChangeLog:
+
+	* s-pack.adb.tmpl: Typo fix in comment.
+---
+ gcc/ada/s-pack.adb.tmpl | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/gcc/ada/s-pack.adb.tmpl b/gcc/ada/s-pack.adb.tmpl
+index e54f3befd4f1..b21d4129257c 100644
+--- a/gcc/ada/s-pack.adb.tmpl
++++ b/gcc/ada/s-pack.adb.tmpl
+@@ -37,7 +37,7 @@ package body System.Pack_@@ is
+ 
+    --  The high-level idea of the implementation is to overlay a record
+    --  containing components of the same size as that of the component
+-   --  of the array, in order words @@ bits, and to access the indexed
++   --  of the array, in other words @@ bits, and to access the indexed
+    --  component of the array through the appropriate selected component
+    --  of the record.
+ 
+-- 
+2.43.7
+
+

@@ -1,0 +1,267 @@
+From 9c049f4eb807b46397e6f33b0a7fd8a06b5e2e54 Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Wed, 3 Dec 2025 16:07:29 +0100
+Subject: [PATCH] switchconv: Fix up inbound checks for switch types wider than
+ sizetype [PR122943]
+
+In r14-8302 I've changed switchconv to narrow the CONSTRUCTOR indexes and
+the runtime SSA_NAME indexing into the arrays to at most sizetype for
+types wider than that (__int128, large _BitInt, for -m32 long long too).
+The switchconv partitioning ensures that one partition isn't larger than
+that and having CONSTRUCTOR with _BitInt(1024) indexes was causing all kinds
+of problems.
+
+Unfortunately, as the following testcase shows, while doing that is
+desirable, the later gen_inbound_check call uses the lhs of m_arr_ref_first
+statement to determine the type and value that should be compared for the
+inbound check (against the highest possible bound cast to the lhs type).
+So the PR113491 r14-8302 change broke those inbound checks, instead of
+being done in unsigned type corresponding to the precision of the switch
+expression they are now sometimes done using sizetype.  That is of course
+wrong.
+
+So the following patch fixes it by doing the tidx computation in steps,
+one is the utype subtraction, which has m_arr_ref_first as the last
+instruction, and then if needed there is a cast to sizetype if utype is
+wider than that.  When gen_inbound_check is called, it adds the inbound
+check after the m_arr_ref_first instruction and the additional cast is
+then inside of the guarded block.
+
+So e.g. in bar for -m32 this patch changes:
+ unsigned char bar (long long int val)
+ {
+   unsigned char result;
+-  sizetype _7;
++  sizetype _6;
++  long long unsigned int _7;
+
+   <bb 2> :
+-  _7 = (sizetype) val_3(D);
++  _7 = (long long unsigned int) val_3(D);
+   if (_7 <= 2)
+     goto <bb 4>; [INV]
+   else
+     goto <bb 3>; [INV]
+
+   <bb 3> :
+ <L7>:
+-  result_5 = 1;
++  result_4 = 1;
+   goto <bb 5>; [100.00%]
+
+   <bb 4> :
+ <L8>:
+-  result_6 = CSWTCH.2[_7];
++  _6 = (sizetype) _7;
++  result_5 = CSWTCH.2[_6];
+
+   <bb 5> :
+-  # result_1 = PHI <result_6(4), result_5(3)>
++  # result_1 = PHI <result_5(4), result_4(3)>
+ <L9>:
+ <L6>:
+   return result_1;
+
+ }
+
+2025-12-03  Jakub Jelinek  <jakub@redhat.com>
+
+	PR tree-optimization/122943
+	* tree-switch-conversion.cc (switch_conversion::build_arrays):
+	Always gimplify subtraction in utype without cast to tidxtype
+	and set m_arr_ref_first to the last stmt of that.  Remove unneeded
+	update_stmt call.  If tidxtype is not utype, append after that stmt
+	cast to tidxtype and set tidx to the lhs of that cast.
+
+	* gcc.c-torture/execute/pr122943.c: New test.
+
+(cherry picked from commit 45f3501bdaa4544293e2c391506819c8cff5fcca)
+---
+ .../gcc.c-torture/execute/pr122943.c          | 130 ++++++++++++++++++
+ gcc/tree-switch-conversion.cc                 |  16 ++-
+ 2 files changed, 141 insertions(+), 5 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.c-torture/execute/pr122943.c
+
+diff --git a/gcc/testsuite/gcc.c-torture/execute/pr122943.c b/gcc/testsuite/gcc.c-torture/execute/pr122943.c
+new file mode 100644
+index 000000000000..a41777cb4223
+--- /dev/null
++++ b/gcc/testsuite/gcc.c-torture/execute/pr122943.c
+@@ -0,0 +1,130 @@
++/* PR tree-optimization/122943 */
++
++__attribute__((noipa)) unsigned char
++foo (long long val)
++{
++  unsigned char result = 0;
++  switch (val)
++    {
++    case 0: result = 1; break;
++    case 1: result = 2; break;
++    case 2: result = 3; break;
++    default: break;
++    }
++  return result;
++}
++
++__attribute__((noipa)) unsigned char
++bar (long long val)
++{
++  unsigned char result = 1;
++  switch (val)
++    {
++    case 0: result = 8; break;
++    case 1: result = 31; break;
++    case 2: result = 72; break;
++    default: break;
++    }
++  return result;
++}
++
++#ifdef __SIZEOF_INT128__
++__attribute__((noipa)) unsigned char
++baz (__int128 val)
++{
++  unsigned char result = 0;
++  switch (val)
++    {
++    case 0: result = 1; break;
++    case 1: result = 2; break;
++    case 2: result = 3; break;
++    default: break;
++    }
++  return result;
++}
++
++__attribute__((noipa)) unsigned char
++qux (__int128 val)
++{
++  unsigned char result = 1;
++  switch (val)
++    {
++    case 0: result = 8; break;
++    case 1: result = 31; break;
++    case 2: result = 72; break;
++    default: break;
++    }
++  return result;
++}
++#endif
++
++int
++main ()
++{
++  if (foo (-1) != 0)
++    __builtin_abort ();
++  if (foo (0) != 1)
++    __builtin_abort ();
++  if (foo (1) != 2)
++    __builtin_abort ();
++  if (foo (2) != 3)
++    __builtin_abort ();
++  if (foo (3) != 0)
++    __builtin_abort ();
++  if (foo (-__LONG_LONG_MAX__ - 1) != 0)
++    __builtin_abort ();
++  if (foo (-__LONG_LONG_MAX__) != 0)
++    __builtin_abort ();
++  if (foo (-__LONG_LONG_MAX__ + 1) != 0)
++    __builtin_abort ();
++  if (bar (-1) != 1)
++    __builtin_abort ();
++  if (bar (0) != 8)
++    __builtin_abort ();
++  if (bar (1) != 31)
++    __builtin_abort ();
++  if (bar (2) != 72)
++    __builtin_abort ();
++  if (bar (3) != 1)
++    __builtin_abort ();
++  if (bar (-__LONG_LONG_MAX__ - 1) != 1)
++    __builtin_abort ();
++  if (bar (-__LONG_LONG_MAX__) != 1)
++    __builtin_abort ();
++  if (bar (-__LONG_LONG_MAX__ + 1) != 1)
++    __builtin_abort ();
++#ifdef __SIZEOF_INT128__
++  if (baz (-1) != 0)
++    __builtin_abort ();
++  if (baz (0) != 1)
++    __builtin_abort ();
++  if (baz (1) != 2)
++    __builtin_abort ();
++  if (baz (2) != 3)
++    __builtin_abort ();
++  if (baz (3) != 0)
++    __builtin_abort ();
++  if (baz (((__int128) 1) << 64) != 0)
++    __builtin_abort ();
++  if (baz ((((__int128) 1) << 64) + 1) != 0)
++    __builtin_abort ();
++  if (baz ((((__int128) 1) << 64) + 2) != 0)
++    __builtin_abort ();
++  if (qux (-1) != 1)
++    __builtin_abort ();
++  if (qux (0) != 8)
++    __builtin_abort ();
++  if (qux (1) != 31)
++    __builtin_abort ();
++  if (qux (2) != 72)
++    __builtin_abort ();
++  if (qux (3) != 1)
++    __builtin_abort ();
++  if (qux (((__int128) 1) << 64) != 1)
++    __builtin_abort ();
++  if (qux ((((__int128) 1) << 64) + 1) != 1)
++    __builtin_abort ();
++  if (qux ((((__int128) 1) << 64) + 2) != 1)
++    __builtin_abort ();
++#endif
++}
+diff --git a/gcc/tree-switch-conversion.cc b/gcc/tree-switch-conversion.cc
+index 39a8a893edde..28046f332efe 100644
+--- a/gcc/tree-switch-conversion.cc
++++ b/gcc/tree-switch-conversion.cc
+@@ -1060,7 +1060,7 @@ void
+ switch_conversion::build_arrays ()
+ {
+   tree arr_index_type;
+-  tree tidx, sub, utype, tidxtype;
++  tree tidx, uidx, sub, utype, tidxtype;
+   gimple *stmt;
+   gimple_stmt_iterator gsi;
+   gphi_iterator gpi;
+@@ -1085,19 +1085,25 @@ switch_conversion::build_arrays ()
+     tidxtype = utype;
+ 
+   arr_index_type = build_index_type (m_range_size);
+-  tidx = make_ssa_name (tidxtype);
++  uidx = make_ssa_name (utype);
+   sub = fold_build2_loc (loc, MINUS_EXPR, utype,
+ 			 fold_convert_loc (loc, utype, m_index_expr),
+ 			 fold_convert_loc (loc, utype, m_range_min));
+-  sub = fold_convert (tidxtype, sub);
+   sub = force_gimple_operand_gsi (&gsi, sub,
+ 				  false, NULL, true, GSI_SAME_STMT);
+-  stmt = gimple_build_assign (tidx, sub);
++  stmt = gimple_build_assign (uidx, sub);
+ 
+   gsi_insert_before (&gsi, stmt, GSI_SAME_STMT);
+-  update_stmt (stmt);
+   m_arr_ref_first = stmt;
+ 
++  tidx = uidx;
++  if (tidxtype != utype)
++    {
++      tidx = make_ssa_name (tidxtype);
++      stmt = gimple_build_assign (tidx, NOP_EXPR, uidx);
++      gsi_insert_before (&gsi, stmt, GSI_SAME_STMT);
++    }
++
+   for (gpi = gsi_start_phis (m_final_bb), i = 0;
+        !gsi_end_p (gpi); gsi_next (&gpi))
+     {
+-- 
+2.43.7
+
+

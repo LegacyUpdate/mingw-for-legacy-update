@@ -1,0 +1,58 @@
+From 1e9e8c36d8f35c3256d78d4aa556f0ef4fba998e Mon Sep 17 00:00:00 2001
+From: Jason Merrill <jason@redhat.com>
+Date: Fri, 9 Jan 2026 15:02:53 +0800
+Subject: [PATCH] c++: implicit 'this' in generic lambda [PR122048]
+
+Here template substitution was replacing a reference to the 'this' of X::f
+with the implicit closure parameter of the operator(), which is wrong.  The
+closure parameter is never a suitable replacement for a 'this' parameter.
+
+	PR c++/122048
+
+gcc/cp/ChangeLog:
+
+	* pt.cc (tsubst_expr): Don't use a lambda current_class_ptr.
+
+gcc/testsuite/ChangeLog:
+
+	* g++.dg/cpp1y/lambda-generic-this6.C: New test.
+
+(cherry picked from commit 90ad957406104f9cc04365f6b071521a7c013dda)
+---
+ gcc/cp/pt.cc                                      | 3 ++-
+ gcc/testsuite/g++.dg/cpp1y/lambda-generic-this6.C | 8 ++++++++
+ 2 files changed, 10 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/g++.dg/cpp1y/lambda-generic-this6.C
+
+diff --git a/gcc/cp/pt.cc b/gcc/cp/pt.cc
+index 2c3cb2e7b8e1..e8755a2637d8 100644
+--- a/gcc/cp/pt.cc
++++ b/gcc/cp/pt.cc
+@@ -22023,7 +22023,8 @@ tsubst_expr (tree t, tree args, tsubst_flags_t complain, tree in_decl)
+ 	  if (r == NULL_TREE && TREE_CODE (t) == PARM_DECL)
+ 	    {
+ 	      /* We get here for a use of 'this' in an NSDMI.  */
+-	      if (DECL_NAME (t) == this_identifier && current_class_ptr)
++	      if (DECL_NAME (t) == this_identifier && current_class_ptr
++		  && !LAMBDA_TYPE_P (TREE_TYPE (TREE_TYPE (current_class_ptr))))
+ 		RETURN (current_class_ptr);
+ 
+ 	      /* This can happen for a parameter name used later in a function
+diff --git a/gcc/testsuite/g++.dg/cpp1y/lambda-generic-this6.C b/gcc/testsuite/g++.dg/cpp1y/lambda-generic-this6.C
+new file mode 100644
+index 000000000000..8bbff1d9fd25
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/cpp1y/lambda-generic-this6.C
+@@ -0,0 +1,8 @@
++// PR c++/122048
++// { dg-do compile { target c++14 } }
++
++class X {
++  void f();
++  int i;
++};
++void X::f() {[&](auto) {sizeof i;}(1);}
+-- 
+2.43.7
+
+

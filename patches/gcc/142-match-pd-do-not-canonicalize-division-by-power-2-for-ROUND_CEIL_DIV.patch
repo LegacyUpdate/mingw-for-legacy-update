@@ -1,0 +1,50 @@
+From 20853b80d68cd8788761ee977d96ed8f4a859bc7 Mon Sep 17 00:00:00 2001
+From: Avinash Jayakar <avinashd@linux.ibm.com>
+Date: Mon, 13 Oct 2025 15:17:45 +0530
+Subject: [PATCH] match.pd: Do not canonicalize division by power 2 for {ROUND,
+ CEIL}_DIV
+
+Canonicalization of unsigned division by power of 2 only applies to
+{TRUNC,FLOOR,EXACT}_DIV, therefore remove the same pattern for {CEIL,ROUND}_DIV,
+which was added in a previous commit.
+
+2025-10-13  Avinash Jayakar  <avinashd@linux.ibm.com>
+
+gcc/ChangeLog:
+	PR tree-optimization/122213
+	* match.pd: Canonicalize unsigned pow2 div only for trunk, floor and
+	exact div.
+---
+ gcc/match.pd | 8 +++++---
+ 1 file changed, 5 insertions(+), 3 deletions(-)
+
+diff --git a/gcc/match.pd b/gcc/match.pd
+index 3d1752055b34..0c89447b3376 100644
+--- a/gcc/match.pd
++++ b/gcc/match.pd
+@@ -981,16 +981,18 @@ DEFINE_INT_AND_FLOAT_ROUND_FN (RINT)
+  (if (INTEGRAL_TYPE_P (TREE_TYPE (@0)) && TYPE_UNSIGNED (TREE_TYPE (@0)))
+   (bit_and @0 (negate @1))))
+ 
+-(for div (trunc_div ceil_div floor_div round_div exact_div)
++/* Canonicalize unsigned t / 4 to t >> 2.  */
+ #if GIMPLE
+- /* Canonicalize unsigned t / 4 to t >> 2.  */
++(for div (trunc_div floor_div exact_div)
+  (simplify
+   (div @0 integer_pow2p@1)
+   (if (INTEGRAL_TYPE_P (type)
+        && (TYPE_UNSIGNED (type) || tree_expr_nonnegative_p (@0)))
+    (rshift @0 { build_int_cst (integer_type_node,
+-			       wi::exact_log2 (wi::to_wide (@1))); })))
++			       wi::exact_log2 (wi::to_wide (@1))); }))))
+ #endif
++
++(for div (trunc_div ceil_div floor_div round_div exact_div)
+  /* Simplify (t * u) / u -> t.  */
+  (simplify
+   (div (mult:c @0 @1) @1)
+-- 
+2.43.7
+
+

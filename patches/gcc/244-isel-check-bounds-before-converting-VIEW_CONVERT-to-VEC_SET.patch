@@ -1,0 +1,84 @@
+From 481c3ecd2962f395c5d4e6bfddb414b788238bda Mon Sep 17 00:00:00 2001
+From: Avinash Jayakar <avinashd@linux.ibm.com>
+Date: Sat, 8 Nov 2025 09:57:59 +0530
+Subject: [PATCH] isel: Check bounds before converting VIEW_CONVERT to VEC_SET.
+
+The function gimple_expand_vec_set_expr in the isel pass, converted
+VIEW_CONVERT_EXPR to VEC_SET_EXPR without checking the bounds on the index,
+which cause ICE on targets that supported VEC_SET_EXPR like x86 and powerpc.
+This patch adds a bound check on the index operand and rejects the conversion
+if index is out of bound.
+
+2025-11-08  Avinash Jayakar  <avinashd@linux.ibm.com>
+
+gcc/ChangeLog:
+	PR tree-optimization/122126
+	* gimple-isel.cc (gimple_expand_vec_set_extract_expr): Add bound check.
+
+gcc/testsuite/ChangeLog:
+	PR tree-optimization/122126
+	* gcc.dg/pr122126_vextr.c: New test.
+	* gcc.dg/pr122126_vset.c: New test.
+---
+ gcc/gimple-isel.cc                    | 10 ++++++++++
+ gcc/testsuite/gcc.dg/pr122126_vextr.c |  9 +++++++++
+ gcc/testsuite/gcc.dg/pr122126_vset.c  |  9 +++++++++
+ 3 files changed, 28 insertions(+)
+ create mode 100644 gcc/testsuite/gcc.dg/pr122126_vextr.c
+ create mode 100644 gcc/testsuite/gcc.dg/pr122126_vset.c
+
+diff --git a/gcc/gimple-isel.cc b/gcc/gimple-isel.cc
+index 0d2efcba547d..bae4b4cc24e9 100644
+--- a/gcc/gimple-isel.cc
++++ b/gcc/gimple-isel.cc
+@@ -101,6 +101,16 @@ gimple_expand_vec_set_extract_expr (struct function *fun,
+       tree pos = TREE_OPERAND (ref, 1);
+ 
+       tree view_op0 = TREE_OPERAND (op0, 0);
++
++      tree idx = TREE_OPERAND (ref, 1);
++      // if index is a constant, then check the bounds
++      poly_uint64 idx_poly;
++      if (poly_int_tree_p (idx, &idx_poly))
++	{
++	  poly_uint64 nelts = TYPE_VECTOR_SUBPARTS (TREE_TYPE (view_op0));
++	  if (known_gt (idx_poly, nelts))
++	    return false;
++	}
+       machine_mode outermode = TYPE_MODE (TREE_TYPE (view_op0));
+       machine_mode extract_mode = TYPE_MODE (TREE_TYPE (ref));
+ 
+diff --git a/gcc/testsuite/gcc.dg/pr122126_vextr.c b/gcc/testsuite/gcc.dg/pr122126_vextr.c
+new file mode 100644
+index 000000000000..b598aa01091d
+--- /dev/null
++++ b/gcc/testsuite/gcc.dg/pr122126_vextr.c
+@@ -0,0 +1,9 @@
++/* { dg-do compile } */
++/* { dg-options "-O2" } */
++/* { dg-additional-options "-mavx2" { target avx2 } } */
++
++#define vect16 __attribute__((vector_size(16)))
++void ub_set() {
++  volatile vect16 unsigned BS_VAR_0;
++  unsigned a = BS_VAR_0[12];
++}
+diff --git a/gcc/testsuite/gcc.dg/pr122126_vset.c b/gcc/testsuite/gcc.dg/pr122126_vset.c
+new file mode 100644
+index 000000000000..85b2c68247b6
+--- /dev/null
++++ b/gcc/testsuite/gcc.dg/pr122126_vset.c
+@@ -0,0 +1,9 @@
++/* { dg-do compile } */
++/* { dg-options "-O2" } */
++/* { dg-additional-options "-mavx2" { target avx2 } } */
++
++#define vect16 __attribute__((vector_size(16)))
++void ub_set() {
++  volatile vect16 unsigned BS_VAR_0;
++  BS_VAR_0[12] = 4;
++}
+-- 
+2.43.7
+
+

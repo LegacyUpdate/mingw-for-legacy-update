@@ -1,0 +1,107 @@
+From 2f881d81d613a52b57dab311f0eacc5da11bae7e Mon Sep 17 00:00:00 2001
+From: Harald Anlauf <anlauf@gmx.de>
+Date: Thu, 9 Oct 2025 18:43:22 +0200
+Subject: [PATCH] Fortran: fix "unstable" interfaces of external procedures
+ [PR122206]
+
+In the testcase repeated invocations of a function showed an apparently
+unstable interface.  This was caused by trying to guess an (inappropriate)
+interface of the external procedure after processing of the procedure
+arguments in gfc_conv_procedure_call.  The mis-guessed interface showed up
+in subsequent uses of the procedure symbol in gfc_conv_procedure_call.  The
+solution is to check for an existing interface of an external procedure
+before trying to wildly guess based on just the actual arguments.
+
+	PR fortran/122206
+
+gcc/fortran/ChangeLog:
+
+	* trans-types.cc (gfc_get_function_type): Do not clobber an
+	existing procedure interface.
+
+gcc/testsuite/ChangeLog:
+
+	* gfortran.dg/interface_abstract_6.f90: New test.
+
+(cherry picked from commit c474a50b42ac3f7561f628916cf58810044986b3)
+---
+ gcc/fortran/trans-types.cc                    |  1 +
+ .../gfortran.dg/interface_abstract_6.f90      | 53 +++++++++++++++++++
+ 2 files changed, 54 insertions(+)
+ create mode 100644 gcc/testsuite/gfortran.dg/interface_abstract_6.f90
+
+diff --git a/gcc/fortran/trans-types.cc b/gcc/fortran/trans-types.cc
+index e30b680b0be2..0f76dc5e5b4e 100644
+--- a/gcc/fortran/trans-types.cc
++++ b/gcc/fortran/trans-types.cc
+@@ -3437,6 +3437,7 @@ gfc_get_function_type (gfc_symbol * sym, gfc_actual_arglist *actual_args,
+ 	}
+     }
+   if (sym->backend_decl == error_mark_node && actual_args != NULL
++      && sym->ts.interface == NULL
+       && sym->formal == NULL && (sym->attr.proc == PROC_EXTERNAL
+ 				 || sym->attr.proc == PROC_UNKNOWN))
+     gfc_get_formal_from_actual_arglist (sym, actual_args);
+diff --git a/gcc/testsuite/gfortran.dg/interface_abstract_6.f90 b/gcc/testsuite/gfortran.dg/interface_abstract_6.f90
+new file mode 100644
+index 000000000000..05b9a4e805f2
+--- /dev/null
++++ b/gcc/testsuite/gfortran.dg/interface_abstract_6.f90
+@@ -0,0 +1,53 @@
++! { dg-do compile }
++! { dg-options "-fdump-tree-original" }
++!
++! PR fortran/122206
++!
++! Verify that procedure interfaces are "stable"
++
++module test_example
++  use, intrinsic :: iso_c_binding, only: c_double, c_int
++  implicit none
++
++  abstract interface
++     function simple_interface(iarg1, arg2) bind(c) result(res)
++       import c_double, c_int
++       integer(c_int), value, intent(in) :: iarg1
++       real(c_double), value, intent(in) :: arg2
++       real(c_double) :: res
++     end function simple_interface
++  end interface
++
++  procedure(simple_interface), bind(c,name="simple_function") :: simple_function
++
++  interface
++     function other_interface(iarg1, arg2) result(res)
++       import c_double, c_int
++       integer(c_int), value, intent(in) :: iarg1
++       real(c_double), value, intent(in) :: arg2
++       real(c_double) :: res
++     end function other_interface
++  end interface
++
++  procedure(other_interface) :: other_function
++
++contains
++  subroutine test_example_interface
++    implicit none
++    integer(c_int) :: iarg1 = 2
++    real(c_double) :: arg2  = 10.
++    real(c_double) :: val1, val2
++
++    val1 = simple_function(iarg1, arg2)
++    val2 = simple_function(iarg1, arg2)
++    if (val1 /= val2) stop 1
++
++    val1 = other_function(iarg1, arg2)
++    val2 = other_function(iarg1, arg2)
++    if (val1 /= val2) stop 2
++
++  end subroutine test_example_interface
++end module test_example
++
++! { dg-final { scan-tree-dump-times "simple_function \\(iarg1, arg2\\);" 2 "original"} }
++! { dg-final { scan-tree-dump-times "other_function \\(iarg1, arg2\\);" 2 "original"} }
+-- 
+2.43.7
+
+

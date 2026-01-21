@@ -1,0 +1,157 @@
+From 4028e6c1e66fb10e532fd62fd5a96f90760108b5 Mon Sep 17 00:00:00 2001
+From: Robin Dapp <rdapp.gcc@gmail.com>
+Date: Tue, 2 Dec 2025 13:00:51 -0700
+Subject: [PATCH] [PATCH] RISC-V: Make vlsegff similar to vleff [PR122656].
+
+When we expand
+  void d() { __riscv_vlseg2e32ff_v_i32mf2x2(&a, &c, b); }
+without a destination register we ICE because
+use_exact_insn wrongly adds arguments that we don't need and
+  gcc_assert (opno == insn_data[icode].n_generator_args);
+triggers.
+
+Currently we expand a segmented fault-only-first load via use_exact_insn
+because its insn pattern wants a Pmode register as source.  We can't go
+the use_contiguous_load route because that one adds a vector-mode memory
+operand.
+
+It doesn't need to be like that, though, and this patch makes the
+segmented load similar to the regular FoF load in terms of source
+operand.  Also the patch only adds additional expansion arguments like
+the rounding mode only if the insn needs it and the number of operands is
+less than what we need, not unequal.
+
+Regtested on rv64gcv_zvl512b.
+
+Regards
+ Robin
+
+	PR target/122656
+
+gcc/ChangeLog:
+
+	* config/riscv/riscv-vector-builtins-bases.cc: Use
+	use_contiguous_load for vlsegff.
+	* config/riscv/riscv-vector-builtins.cc (function_expander::use_exact_insn):
+	Only add rounding mode operand if insn requires it and number of
+	arguments is < required.
+	(function_expander::use_ternop_insn): Ditto.
+	(function_expander::use_widen_ternop_insn): Ditto.
+	* config/riscv/vector.md: Use vector-mode source operand.
+
+gcc/testsuite/ChangeLog:
+
+	* gcc.target/riscv/rvv/base/pr122656-1.c: New test.
+	* gcc.target/riscv/rvv/base/pr122656-2.c: New test.`
+
+(cherry picked from commit 5fd09b47d9a75eb235ad46ebd206c4a870d64958)
+---
+ gcc/config/riscv/riscv-vector-builtins-bases.cc      | 3 ++-
+ gcc/config/riscv/riscv-vector-builtins.cc            | 9 ++++++---
+ gcc/config/riscv/vector.md                           | 4 ++--
+ gcc/testsuite/gcc.target/riscv/rvv/base/pr122656-1.c | 7 +++++++
+ gcc/testsuite/gcc.target/riscv/rvv/base/pr122656-2.c | 7 +++++++
+ 5 files changed, 24 insertions(+), 6 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.target/riscv/rvv/base/pr122656-1.c
+ create mode 100644 gcc/testsuite/gcc.target/riscv/rvv/base/pr122656-2.c
+
+diff --git a/gcc/config/riscv/riscv-vector-builtins-bases.cc b/gcc/config/riscv/riscv-vector-builtins-bases.cc
+index 5ccb872df639..28950bad6b73 100644
+--- a/gcc/config/riscv/riscv-vector-builtins-bases.cc
++++ b/gcc/config/riscv/riscv-vector-builtins-bases.cc
+@@ -2129,7 +2129,8 @@ public:
+ 
+   rtx expand (function_expander &e) const override
+   {
+-    return e.use_exact_insn (code_for_pred_fault_load (e.vector_mode ()));
++    return e.use_contiguous_load_insn
++      (code_for_pred_fault_load (e.vector_mode ()));
+   }
+ };
+ 
+diff --git a/gcc/config/riscv/riscv-vector-builtins.cc b/gcc/config/riscv/riscv-vector-builtins.cc
+index 690845a96747..9b491abe01d0 100644
+--- a/gcc/config/riscv/riscv-vector-builtins.cc
++++ b/gcc/config/riscv/riscv-vector-builtins.cc
+@@ -4237,7 +4237,8 @@ function_expander::use_exact_insn (insn_code icode)
+ 
+   /* The RVV floating-point only support dynamic rounding mode in the
+      FRM register.  */
+-  if (opno != insn_data[icode].n_generator_args)
++  if (base->may_require_frm_p ()
++      && opno < insn_data[icode].n_generator_args)
+     add_input_operand (Pmode, gen_int_mode (riscv_vector::FRM_DYN, Pmode));
+ 
+   return generate_insn (icode);
+@@ -4422,7 +4423,8 @@ function_expander::use_ternop_insn (bool vd_accum_p, insn_code icode)
+ 
+   /* The RVV floating-point only support dynamic rounding mode in the
+      FRM register.  */
+-  if (opno != insn_data[icode].n_generator_args)
++  if (base->may_require_frm_p ()
++      && opno < insn_data[icode].n_generator_args)
+     add_input_operand (Pmode, gen_int_mode (riscv_vector::FRM_DYN, Pmode));
+ 
+   return generate_insn (icode);
+@@ -4463,7 +4465,8 @@ function_expander::use_widen_ternop_insn (insn_code icode)
+ 
+   /* The RVV floating-point only support dynamic rounding mode in the
+      FRM register.  */
+-  if (opno != insn_data[icode].n_generator_args)
++  if (base->may_require_frm_p ()
++      && opno < insn_data[icode].n_generator_args)
+     add_input_operand (Pmode, gen_int_mode (riscv_vector::FRM_DYN, Pmode));
+ 
+   return generate_insn (icode);
+diff --git a/gcc/config/riscv/vector.md b/gcc/config/riscv/vector.md
+index 9c2571899ae8..75e709e12e70 100644
+--- a/gcc/config/riscv/vector.md
++++ b/gcc/config/riscv/vector.md
+@@ -8452,7 +8452,7 @@
+ 	     (reg:SI VL_REGNUM)
+ 	     (reg:SI VTYPE_REGNUM)] UNSPEC_VPREDICATE)
+ 	  (unspec:VT
+-	    [(match_operand 3 "pmode_reg_or_0_operand"   "   rJ,    rJ,    rJ")
++	    [(match_operand:VT 3 "memory_operand"	 "    m,     m,     m")
+ 	     (mem:BLK (scratch))] UNSPEC_VLEFF)
+ 	  (match_operand:VT 2 "vector_merge_operand"     "    0,    vu,    vu")))
+    (set (reg:SI VL_REGNUM)
+@@ -8467,7 +8467,7 @@
+ 	        [(match_dup 3) (mem:BLK (scratch))] UNSPEC_VLEFF)
+ 	     (match_dup 2))] UNSPEC_MODIFY_VL))]
+   "TARGET_VECTOR"
+-  "vlseg<nf>e<sew>ff.v\t%0,(%z3)%p1"
++  "vlseg<nf>e<sew>ff.v\t%0,%3%p1"
+   [(set_attr "type" "vlsegdff")
+    (set_attr "mode" "<MODE>")])
+ 
+diff --git a/gcc/testsuite/gcc.target/riscv/rvv/base/pr122656-1.c b/gcc/testsuite/gcc.target/riscv/rvv/base/pr122656-1.c
+new file mode 100644
+index 000000000000..76adbed3f61a
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/riscv/rvv/base/pr122656-1.c
+@@ -0,0 +1,7 @@
++/* { dg-do compile } */
++/* { dg-options "-march=rv64gcv -mabi=lp64d" } */
++
++#include "riscv_vector.h"
++int a;
++long b, c;
++void d() { __riscv_vlseg2e32ff_v_i32mf2x2(&a, &c, b); } /* { dg-error "invalid argument to built-in function" } */
+diff --git a/gcc/testsuite/gcc.target/riscv/rvv/base/pr122656-2.c b/gcc/testsuite/gcc.target/riscv/rvv/base/pr122656-2.c
+new file mode 100644
+index 000000000000..395dc7f38c3d
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/riscv/rvv/base/pr122656-2.c
+@@ -0,0 +1,7 @@
++/* { dg-do compile } */
++/* { dg-options "-march=rv64gcv -mabi=lp64d" } */
++
++#include "riscv_vector.h"
++int a;
++long b, c;
++void d() { vint32mf2x2_t v = __riscv_vlseg2e32ff_v_i32mf2x2(&a, &c, b); }
+-- 
+2.43.7
+
+

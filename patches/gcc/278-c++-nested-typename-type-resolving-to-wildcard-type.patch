@@ -1,0 +1,95 @@
+From bb061a3b815249f2a4f375c3f7c6ea88978b9804 Mon Sep 17 00:00:00 2001
+From: Patrick Palka <ppalka@redhat.com>
+Date: Mon, 15 Dec 2025 14:30:53 -0500
+Subject: [PATCH] c++: nested typename type resolving to wildcard type
+ [PR122752]
+
+Here typename A<S>::VertexSet::size_type within the out-of-line
+declaration is initially parsed at namespace scope, so the LHS
+A<S>::VertexSet is treated as a dependent name and represented as a
+TYPENAME_TYPE with tag_type as class_type.[1]
+
+Once we realize we're parsing a member declarator we call
+maybe_update_decl_type to reprocess the TYPENAME_TYPE relative to the
+class template scope, during which make_typename_type succeeds in
+resolving the lookup and returns the member typedef VertexSet (to the
+TEMPLATE_TYPE_PARM S).  But then the caller tsubst complains that this
+result isn't a class type as per the tag_type.
+
+This patch just relaxes tsubst to allow TYPENAME_TYPE getting resolved
+to a wildcard type regardless of the tag_type.  This does mean we lose
+information about the tag_type during a subsequent tsubst, but that's
+probably harmless (famous last words).
+
+[1]: The tag_type should probably be scope_type.  Changing this seems
+to be a matter of changing cp_parser_qualifying_entity to pass
+scope_type instead of class_type, but I don't feel confident about that
+and it seems risky.  I then got confused as to why that function passes
+none_type in the !type_p case; to me it should use scope_type
+unconditionally, but doing so breaks things.  This approach seems safer
+to backport.
+
+	PR c++/122752
+
+gcc/cp/ChangeLog:
+
+	* pt.cc (tsubst) <case TYPENAME_TYPE>: Allow TYPENAME_TYPE
+	resolving to another wildcard type.
+
+gcc/testsuite/ChangeLog:
+
+	* g++.dg/template/dependent-name19.C: New test.
+
+Reviewed-by: Jason Merrill <jason@redhat.com>
+(cherry picked from commit 2bf057c53e97004034ed1528d850a214372305b8)
+---
+ gcc/cp/pt.cc                                  |  2 +-
+ .../g++.dg/template/dependent-name19.C        | 22 +++++++++++++++++++
+ 2 files changed, 23 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/g++.dg/template/dependent-name19.C
+
+diff --git a/gcc/cp/pt.cc b/gcc/cp/pt.cc
+index 9398cabfd068..2c3cb2e7b8e1 100644
+--- a/gcc/cp/pt.cc
++++ b/gcc/cp/pt.cc
+@@ -17196,7 +17196,7 @@ tsubst (tree t, tree args, tsubst_flags_t complain, tree in_decl)
+ 	    f = TREE_TYPE (f);
+ 	  }
+ 
+-	if (TREE_CODE (f) != TYPENAME_TYPE)
++	if (!WILDCARD_TYPE_P (f))
+ 	  {
+ 	    if (TYPENAME_IS_ENUM_P (t) && TREE_CODE (f) != ENUMERAL_TYPE)
+ 	      {
+diff --git a/gcc/testsuite/g++.dg/template/dependent-name19.C b/gcc/testsuite/g++.dg/template/dependent-name19.C
+new file mode 100644
+index 000000000000..87fe7c7e5c04
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/template/dependent-name19.C
+@@ -0,0 +1,22 @@
++// PR c++/122752
++
++struct set {
++  typedef unsigned size_type;
++  unsigned size() { return 42; }
++};
++
++template<class S>
++struct A {
++  typedef S VertexSet;
++  typename VertexSet::size_type size();
++  VertexSet vertices_;
++};
++
++template<class S>
++inline typename A<S>::VertexSet::size_type A<S>::size()
++{ return vertices_.size(); }
++
++int main() {
++  A<set> a;
++  a.size();
++}
+-- 
+2.43.7
+
+

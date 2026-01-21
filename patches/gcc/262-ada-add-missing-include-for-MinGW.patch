@@ -1,0 +1,49 @@
+From e51d9587f84dbee2ceb3f864c1750a2c63220b8c Mon Sep 17 00:00:00 2001
+From: Eric Botcazou <ebotcazou@adacore.com>
+Date: Mon, 8 Dec 2025 22:34:20 +0100
+Subject: [PATCH] Ada: Add missing #include for MinGW
+
+This adds a missing #include for <stdlib.h> and removes redundant ones.
+
+gcc/ada/
+	PR ada/123037
+	* rtinit.c [__MINGW32__]: Include <stdlib.h> and not <windows.h>.
+	* rtfinal.c [__MINGW32__]: Do not include <windows.h>.
+---
+ gcc/ada/rtfinal.c | 2 --
+ gcc/ada/rtinit.c  | 3 +--
+ 2 files changed, 1 insertion(+), 4 deletions(-)
+
+diff --git a/gcc/ada/rtfinal.c b/gcc/ada/rtfinal.c
+index 88bbb0e3e500..0bd3ce4ace65 100644
+--- a/gcc/ada/rtfinal.c
++++ b/gcc/ada/rtfinal.c
+@@ -46,9 +46,7 @@ extern int __gnat_rt_init_count;
+ /*  see initialize.c  */
+ 
+ #if defined (__MINGW32__)
+-#define WIN32_LEAN_AND_MEAN
+ #include "mingw32.h"
+-#include <windows.h>
+ 
+ extern CRITICAL_SECTION ProcListCS;
+ extern HANDLE ProcListEvt;
+diff --git a/gcc/ada/rtinit.c b/gcc/ada/rtinit.c
+index 6a135529870b..8638f0ac3e88 100644
+--- a/gcc/ada/rtinit.c
++++ b/gcc/ada/rtinit.c
+@@ -70,9 +70,8 @@ int __gnat_rt_init_count = 0;
+    and finalize properly the run-time. */
+ 
+ #if defined (__MINGW32__)
+-#define WIN32_LEAN_AND_MEAN
++#include <stdlib.h>
+ #include "mingw32.h"
+-#include <windows.h>
+ 
+ extern void __gnat_init_float (void);
+ 
+-- 
+2.43.7
+
+

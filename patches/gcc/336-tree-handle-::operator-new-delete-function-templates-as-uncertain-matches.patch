@@ -1,0 +1,117 @@
+From e7a9ede8089b0d344721dc85a4caee6315ac1601 Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Sat, 17 Jan 2026 14:37:30 +0100
+Subject: [PATCH] tree: Handle ::operator {new,delete} function templates as
+ uncertain matches [PR123513]
+
+We have for some reason two different ways to check for matching
+::operator new vs. ::operator delete kind.  One is a dumb one in
+tree.cc (valid_new_delete_pair_p) and another one is in
+gimple-ssa-warn-access.cc (new_delete_mismatch_p).
+The former is used both in the latter and in optimizations,
+the latter only for warnings.
+The former just handles the easy cases, global operator new and
+the latter can handle everything as it uses the demangler.
+The former has essentially a tri-state return even when it has just bool
+return type, it has another bool * optional argument, so can return
+true for this is definitely ok, false with false with this might be
+not matching and false with true for this definitely doesn't match.
+false with false is returned e.g. for the class scope operator new/delete,
+where we definitely need the demangler to figure stuff out.
+false with true is returned for mismatches which are guaranteed, e.g.
+when one mangled name starts with _Znw and the other with _Zda,
+one is ::operator new and the other is ::operator delete[].
+valid_new_delete_pair_p expects that after the _Znw/_Zna/_Zdl/_Zda
+prefix (or two _ at the start instead of one) it sees [jmy] for
+the size_t argument resp. Pv for void* for delete, for delete
+then optionally the same [jmy] for sized deallocation and
+optionally RKSt9nothrow_t after it for nothrow versions or
+also something with St11align_val_t.  If it has some extra arguments
+after it, it also returns false/false.
+
+The following testcase shows another case where I'm afraid we need
+to return the maybe mismatch - when the global operators are function
+templates.
+_ZnwILm1024EEPvmR13BumpAllocatorIXT_EE
+_ZdlILm1024EEvPvR13BumpAllocatorIXT_EE
+where the Ilm1024EE here mean <1024ul> and Pv after it means function
+return type void *.  As valid_new_delete_pair_p needs to find the m
+after it, it would need to know everything about what can appear
+in between I and E for the template arguments (which is a lot) and
+also be able to skip over mangling of arbitrary function return types
+(though perhaps it could hardcode those Pv vs. v cases for those).
+
+So, the following patch just returns false/false instead of false/true
+if known _Z{nw,na,dl,da} is followed by I, i.e. if it is a function
+template.  For optimizations it makes no difference, those care just
+about the return value and not on *pcertain, and for the warning it
+means it will use the demangler which will figure stuff hopefully right.
+
+2026-01-17  Jakub Jelinek  <jakub@redhat.com>
+
+	PR tree-optimization/123513
+	* tree.cc (valid_new_delete_pair_p): If new_name[3] or delete_name[3]
+	is 'I', return false with *pcertain set to false rather than true.
+
+	* g++.dg/warn/Wmismatched-new-delete-10.C: New test.
+
+(cherry picked from commit 9bf2a58cb76531db78391fdc04dc5280dd3a4def)
+---
+ .../g++.dg/warn/Wmismatched-new-delete-10.C   | 25 +++++++++++++++++++
+ gcc/tree.cc                                   |  7 ++++++
+ 2 files changed, 32 insertions(+)
+ create mode 100644 gcc/testsuite/g++.dg/warn/Wmismatched-new-delete-10.C
+
+diff --git a/gcc/testsuite/g++.dg/warn/Wmismatched-new-delete-10.C b/gcc/testsuite/g++.dg/warn/Wmismatched-new-delete-10.C
+new file mode 100644
+index 000000000000..0d8544f19448
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/warn/Wmismatched-new-delete-10.C
+@@ -0,0 +1,25 @@
++// PR tree-optimization/123513
++// { dg-do compile }
++// { dg-options "-Wmismatched-new-delete" }
++
++typedef __SIZE_TYPE__ size_t;
++
++template <size_t N>
++class A {};
++struct B { B (); };
++
++template <size_t N>
++void *operator new (size_t, A <N> &);
++
++template <size_t N>
++void operator delete (void *, A <N> &);
++
++void
++foo (B *, A <1024> &);
++
++void
++bar ()
++{
++  A <1024> a;
++  foo (new (a) B (), a);	// { dg-bogus "called on pointer returned from a mismatched allocation function" }
++}
+diff --git a/gcc/tree.cc b/gcc/tree.cc
+index eccfcc89da40..ddae543d78f4 100644
+--- a/gcc/tree.cc
++++ b/gcc/tree.cc
+@@ -15189,6 +15189,13 @@ valid_new_delete_pair_p (tree new_asm, tree delete_asm,
+   if ((new_name[2] != 'w' || delete_name[2] != 'l')
+       && (new_name[2] != 'a' || delete_name[2] != 'a'))
+     return false;
++  if (new_name[3] == 'I' || delete_name[3] == 'I')
++    {
++      /* When ::operator new or ::operator delete are function templates,
++	 return uncertain mismatch, we need demangler in that case.  */
++      *pcertain = false;
++      return false;
++    }
+   /* 'j', 'm' and 'y' correspond to size_t.  */
+   if (new_name[3] != 'j' && new_name[3] != 'm' && new_name[3] != 'y')
+     return false;
+-- 
+2.43.7
+
+

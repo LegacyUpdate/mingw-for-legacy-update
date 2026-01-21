@@ -1,0 +1,37 @@
+From fc76690abfe6ccad0ead0befbe6068838234442f Mon Sep 17 00:00:00 2001
+From: Ayappan Perumal <ayappap2@in.ibm.com>
+Date: Mon, 1 Sep 2025 08:27:52 -0500
+Subject: [PATCH] Error out stack-protector unavailability on AIX
+
+stack-protector is not supported in GCC on AIX. This patch is to fail the
+compilation if -fstack-protector option is passed.
+
+gcc/ChangeLog:
+
+	* config/rs6000/aix.h (SUBTARGET_DRIVER_SELF_SPECS):
+	Error out when stack-protector option is used in AIX
+	as it is not supported on AIX
+
+	Approved By: Segher Boessenkool <segher@kernel.crashing.org>
+
+(cherry picked from commit dfb7e97dd214f7d8ca0fa970d81ad5ba805aaa8d)
+---
+ gcc/config/rs6000/aix.h | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/gcc/config/rs6000/aix.h b/gcc/config/rs6000/aix.h
+index 9e7edbb2f22c..c83eacefff4f 100644
+--- a/gcc/config/rs6000/aix.h
++++ b/gcc/config/rs6000/aix.h
+@@ -281,4 +281,6 @@
+ #undef SUBTARGET_DRIVER_SELF_SPECS
+ #define SUBTARGET_DRIVER_SELF_SPECS	\
+ "%{m64:-maix64} %<m64",			\
+-"%{m32:-maix32} %<m32"
++"%{m32:-maix32} %<m32",			\
++"%{fstack-protector*: %<fstack-protector* \
++   %estack-protector not supported on AIX}"
+-- 
+2.43.7
+
+

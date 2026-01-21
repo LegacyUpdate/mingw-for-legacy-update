@@ -1,0 +1,66 @@
+From 69f888db1b407ddcfc7695e750162c10014ce826 Mon Sep 17 00:00:00 2001
+From: Jonathan Wakely <jwakely@redhat.com>
+Date: Tue, 2 Sep 2025 22:30:46 +0100
+Subject: [PATCH] libstdc++: Make CTAD ignore pair(const T1&, const T2&)
+ constructor [PR110853]
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf8
+Content-Transfer-Encoding: 8bit
+
+For the pair(T1, T2) explicit deduction type to decay its arguments as
+intended, we need the pair(const T1&, const T2&) constructor to not be
+used for CTAD. Otherwise we try to instantiate pair<T1, T2> without
+decaying, which is ill-formed for function lvalues.
+
+Use std::type_identity_t<T1> to make the constructor unusable for an
+implicit deduction guide.
+
+libstdc++-v3/ChangeLog:
+
+	PR libstdc++/110853
+	* include/bits/stl_pair.h [C++20] (pair(const T1&, const T2&)):
+	Use std::type_identity_t<T1> for first parameter.
+	* testsuite/20_util/pair/cons/110853.cc: New test.
+
+Reviewed-by: Patrick Palka <ppalka@redhat.com>
+Reviewed-by: Tomasz KamiÅski <tkaminsk@redhat.com>
+(cherry picked from commit 0bb0d1d2880d562298eeec8eee4ab4e8ba943260)
+---
+ libstdc++-v3/include/bits/stl_pair.h               |  2 +-
+ libstdc++-v3/testsuite/20_util/pair/cons/110853.cc | 10 ++++++++++
+ 2 files changed, 11 insertions(+), 1 deletion(-)
+ create mode 100644 libstdc++-v3/testsuite/20_util/pair/cons/110853.cc
+
+diff --git a/libstdc++-v3/include/bits/stl_pair.h b/libstdc++-v3/include/bits/stl_pair.h
+index 37547ceac62d..85894fa62615 100644
+--- a/libstdc++-v3/include/bits/stl_pair.h
++++ b/libstdc++-v3/include/bits/stl_pair.h
+@@ -445,7 +445,7 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
+ 
+       /// Constructor accepting lvalues of `first_type` and `second_type`
+       constexpr explicit(!_S_convertible<const _T1&, const _T2&>())
+-      pair(const _T1& __x, const _T2& __y)
++      pair(const type_identity_t<_T1>& __x, const _T2& __y)
+       noexcept(_S_nothrow_constructible<const _T1&, const _T2&>())
+       requires (_S_constructible<const _T1&, const _T2&>())
+       : first(__x), second(__y)
+diff --git a/libstdc++-v3/testsuite/20_util/pair/cons/110853.cc b/libstdc++-v3/testsuite/20_util/pair/cons/110853.cc
+new file mode 100644
+index 000000000000..57ebfb8d7daa
+--- /dev/null
++++ b/libstdc++-v3/testsuite/20_util/pair/cons/110853.cc
+@@ -0,0 +1,10 @@
++// { dg-do compile { target c++17 } }
++// PR libstdc++/110853
++// Bad interaction between deduction guide with decay and constraints
++// (CTAD, std::pair and function lvalue)
++
++#include <utility>
++
++void func() {}
++std::pair p(1, func);
++std::pair<int, void (*)()>& r = p;
+-- 
+2.43.7
+
+

@@ -1,0 +1,193 @@
+From 17eae3d3bfbacd7ac47297b560a2a65a51e94a60 Mon Sep 17 00:00:00 2001
+From: Pengfei Li <Pengfei.Li2@arm.com>
+Date: Thu, 7 Aug 2025 14:52:45 +0000
+Subject: [PATCH] AArch64: Fix invalid immediate offsets in SVE gather/scatter
+ [PR121449]
+
+This patch fixes incorrect constraints in RTL patterns for AArch64 SVE
+gather/scatter with type widening/narrowing and vector-plus-immediate
+addressing. The bug leads to below "immediate offset out of range"
+errors during assembly, eventually causing compilation failures.
+
+/tmp/ccsVqBp1.s: Assembler messages:
+/tmp/ccsVqBp1.s:54: Error: immediate offset out of range 0 to 31 at operand 3 -- `ld1b z1.d,p0/z,[z1.d,#64]'
+
+Current RTL patterns for such instructions incorrectly use vgw or vgd
+constraints for the immediate operand, base on the vector element type
+in Z registers (zN.s or zN.d). However, for gather/scatter with type
+conversions, the immediate range for vector-plus-immediate addressing is
+determined by the element type in memory, which differs from that in
+vector registers. Using the wrong constraint can produce out-of-range
+offset values that cannot be encoded in the instruction.
+
+This patch corrects the constraints used in these patterns. A test case
+that reproduces the issue is also included.
+
+Bootstrapped and regression-tested on aarch64-linux-gnu.
+
+gcc/ChangeLog:
+	PR target/121449
+	* config/aarch64/aarch64-sve.md
+	(mask_gather_load<mode><v_int_container>): Use vg<Vesize>
+	constraints for alternatives with immediate offset.
+	(mask_scatter_store<mode><v_int_container>): Likewise.
+
+gcc/testsuite/ChangeLog:
+	PR target/121449
+	* g++.target/aarch64/sve/pr121449.C: New test.
+---
+ gcc/config/aarch64/aarch64-sve.md             | 64 +++++++++----------
+ .../g++.target/aarch64/sve/pr121449.C         | 44 +++++++++++++
+ 2 files changed, 76 insertions(+), 32 deletions(-)
+ create mode 100644 gcc/testsuite/g++.target/aarch64/sve/pr121449.C
+
+diff --git a/gcc/config/aarch64/aarch64-sve.md b/gcc/config/aarch64/aarch64-sve.md
+index d2bbdc7e1275..ff0638b18963 100644
+--- a/gcc/config/aarch64/aarch64-sve.md
++++ b/gcc/config/aarch64/aarch64-sve.md
+@@ -1506,18 +1506,18 @@
+ 	  UNSPEC_LD1_GATHER))]
+   "TARGET_SVE && TARGET_NON_STREAMING"
+   {@ [cons: =0, 1, 2, 3, 4, 5  ]
+-     [&w, Z,   w, Ui1, Ui1, Upl] ld1<Vesize>\t%0.s, %5/z, [%2.s]
+-     [?w, Z,   0, Ui1, Ui1, Upl] ^
+-     [&w, vgw, w, Ui1, Ui1, Upl] ld1<Vesize>\t%0.s, %5/z, [%2.s, #%1]
+-     [?w, vgw, 0, Ui1, Ui1, Upl] ^
+-     [&w, rk,  w, Z,   Ui1, Upl] ld1<Vesize>\t%0.s, %5/z, [%1, %2.s, sxtw]
+-     [?w, rk,  0, Z,   Ui1, Upl] ^
+-     [&w, rk,  w, Ui1, Ui1, Upl] ld1<Vesize>\t%0.s, %5/z, [%1, %2.s, uxtw]
+-     [?w, rk,  0, Ui1, Ui1, Upl] ^
+-     [&w, rk,  w, Z,   i,   Upl] ld1<Vesize>\t%0.s, %5/z, [%1, %2.s, sxtw %p4]
+-     [?w, rk,  0, Z,   i,   Upl] ^
+-     [&w, rk,  w, Ui1, i,   Upl] ld1<Vesize>\t%0.s, %5/z, [%1, %2.s, uxtw %p4]
+-     [?w, rk,  0, Ui1, i,   Upl] ^
++     [&w, Z,          w, Ui1, Ui1, Upl] ld1<Vesize>\t%0.s, %5/z, [%2.s]
++     [?w, Z,          0, Ui1, Ui1, Upl] ^
++     [&w, vg<Vesize>, w, Ui1, Ui1, Upl] ld1<Vesize>\t%0.s, %5/z, [%2.s, #%1]
++     [?w, vg<Vesize>, 0, Ui1, Ui1, Upl] ^
++     [&w, rk,         w, Z,   Ui1, Upl] ld1<Vesize>\t%0.s, %5/z, [%1, %2.s, sxtw]
++     [?w, rk,         0, Z,   Ui1, Upl] ^
++     [&w, rk,         w, Ui1, Ui1, Upl] ld1<Vesize>\t%0.s, %5/z, [%1, %2.s, uxtw]
++     [?w, rk,         0, Ui1, Ui1, Upl] ^
++     [&w, rk,         w, Z,   i,   Upl] ld1<Vesize>\t%0.s, %5/z, [%1, %2.s, sxtw %p4]
++     [?w, rk,         0, Z,   i,   Upl] ^
++     [&w, rk,         w, Ui1, i,   Upl] ld1<Vesize>\t%0.s, %5/z, [%1, %2.s, uxtw %p4]
++     [?w, rk,         0, Ui1, i,   Upl] ^
+   }
+ )
+ 
+@@ -1536,14 +1536,14 @@
+ 	  UNSPEC_LD1_GATHER))]
+   "TARGET_SVE && TARGET_NON_STREAMING"
+   {@ [cons: =0, 1, 2, 3, 4, 5]
+-     [&w, Z,   w, i, Ui1, Upl] ld1<Vesize>\t%0.d, %5/z, [%2.d]
+-     [?w, Z,   0, i, Ui1, Upl] ^
+-     [&w, vgd, w, i, Ui1, Upl] ld1<Vesize>\t%0.d, %5/z, [%2.d, #%1]
+-     [?w, vgd, 0, i, Ui1, Upl] ^
+-     [&w, rk,  w, i, Ui1, Upl] ld1<Vesize>\t%0.d, %5/z, [%1, %2.d]
+-     [?w, rk,  0, i, Ui1, Upl] ^
+-     [&w, rk,  w, i, i,   Upl] ld1<Vesize>\t%0.d, %5/z, [%1, %2.d, lsl %p4]
+-     [?w, rk,  0, i, i,   Upl] ^
++     [&w, Z,          w, i, Ui1, Upl] ld1<Vesize>\t%0.d, %5/z, [%2.d]
++     [?w, Z,          0, i, Ui1, Upl] ^
++     [&w, vg<Vesize>, w, i, Ui1, Upl] ld1<Vesize>\t%0.d, %5/z, [%2.d, #%1]
++     [?w, vg<Vesize>, 0, i, Ui1, Upl] ^
++     [&w, rk,         w, i, Ui1, Upl] ld1<Vesize>\t%0.d, %5/z, [%1, %2.d]
++     [?w, rk,         0, i, Ui1, Upl] ^
++     [&w, rk,         w, i, i,   Upl] ld1<Vesize>\t%0.d, %5/z, [%1, %2.d, lsl %p4]
++     [?w, rk,         0, i, i,   Upl] ^
+   }
+ )
+ 
+@@ -2435,13 +2435,13 @@
+ 	   (match_operand:SVE_4 4 "register_operand")]
+ 	  UNSPEC_ST1_SCATTER))]
+   "TARGET_SVE && TARGET_NON_STREAMING"
+-  {@ [ cons: 0 , 1 , 2   , 3   , 4 , 5    ]
+-     [ Z       , w , Ui1 , Ui1 , w , Upl  ] st1<Vesize>\t%4.s, %5, [%1.s]
+-     [ vgw     , w , Ui1 , Ui1 , w , Upl  ] st1<Vesize>\t%4.s, %5, [%1.s, #%0]
+-     [ rk      , w , Z   , Ui1 , w , Upl  ] st1<Vesize>\t%4.s, %5, [%0, %1.s, sxtw]
+-     [ rk      , w , Ui1 , Ui1 , w , Upl  ] st1<Vesize>\t%4.s, %5, [%0, %1.s, uxtw]
+-     [ rk      , w , Z   , i   , w , Upl  ] st1<Vesize>\t%4.s, %5, [%0, %1.s, sxtw %p3]
+-     [ rk      , w , Ui1 , i   , w , Upl  ] st1<Vesize>\t%4.s, %5, [%0, %1.s, uxtw %p3]
++  {@ [ cons: 0    , 1 , 2   , 3   , 4 , 5    ]
++     [ Z          , w , Ui1 , Ui1 , w , Upl  ] st1<Vesize>\t%4.s, %5, [%1.s]
++     [ vg<Vesize> , w , Ui1 , Ui1 , w , Upl  ] st1<Vesize>\t%4.s, %5, [%1.s, #%0]
++     [ rk         , w , Z   , Ui1 , w , Upl  ] st1<Vesize>\t%4.s, %5, [%0, %1.s, sxtw]
++     [ rk         , w , Ui1 , Ui1 , w , Upl  ] st1<Vesize>\t%4.s, %5, [%0, %1.s, uxtw]
++     [ rk         , w , Z   , i   , w , Upl  ] st1<Vesize>\t%4.s, %5, [%0, %1.s, sxtw %p3]
++     [ rk         , w , Ui1 , i   , w , Upl  ] st1<Vesize>\t%4.s, %5, [%0, %1.s, uxtw %p3]
+   }
+ )
+ 
+@@ -2458,11 +2458,11 @@
+ 	   (match_operand:SVE_2 4 "register_operand")]
+ 	  UNSPEC_ST1_SCATTER))]
+   "TARGET_SVE && TARGET_NON_STREAMING"
+-  {@ [ cons: 0 , 1 , 3   , 4 , 5    ]
+-     [ Z       , w , Ui1 , w , Upl  ] st1<Vesize>\t%4.d, %5, [%1.d]
+-     [ vgd     , w , Ui1 , w , Upl  ] st1<Vesize>\t%4.d, %5, [%1.d, #%0]
+-     [ rk      , w , Ui1 , w , Upl  ] st1<Vesize>\t%4.d, %5, [%0, %1.d]
+-     [ rk      , w , i   , w , Upl  ] st1<Vesize>\t%4.d, %5, [%0, %1.d, lsl %p3]
++  {@ [ cons: 0    , 1 , 3   , 4 , 5    ]
++     [ Z          , w , Ui1 , w , Upl  ] st1<Vesize>\t%4.d, %5, [%1.d]
++     [ vg<Vesize> , w , Ui1 , w , Upl  ] st1<Vesize>\t%4.d, %5, [%1.d, #%0]
++     [ rk         , w , Ui1 , w , Upl  ] st1<Vesize>\t%4.d, %5, [%0, %1.d]
++     [ rk         , w , i   , w , Upl  ] st1<Vesize>\t%4.d, %5, [%0, %1.d, lsl %p3]
+   }
+ )
+ 
+diff --git a/gcc/testsuite/g++.target/aarch64/sve/pr121449.C b/gcc/testsuite/g++.target/aarch64/sve/pr121449.C
+new file mode 100644
+index 000000000000..b2e13765dfa8
+--- /dev/null
++++ b/gcc/testsuite/g++.target/aarch64/sve/pr121449.C
+@@ -0,0 +1,44 @@
++/* PR target/121449 */
++/* { dg-do assemble { target aarch64_asm_sve_ok } } */
++/* { dg-options "-O3 -save-temps" } */
++
++struct example;
++
++struct array {
++  unsigned length();
++  example *operator[](unsigned i) {
++    example **data = reinterpret_cast<example **>(this);
++    return data[i];
++  }
++};
++
++struct example {
++  int a[16];
++  bool is_even;
++  int version;
++  int count() { return is_even ? 2 : 1; }
++  void fun1(int, long);
++  void fun2(unsigned, unsigned);
++  void process(array &, array &);
++};
++
++bool found;
++
++void example::process(array &a, array &b) {
++  for (unsigned i = 1; a.length(); i++) {
++    long total = 0;
++    for (unsigned k = 0; k <= i; k++) {
++      total += a[k]->count();
++    }
++    for (unsigned j = 0; j < i; j++) {
++      int major = b[j]->version;
++      if (found)
++        major += i;
++      fun1(i + 1, total);
++      fun2(j, major);
++    }
++  }
++}
++
++/* { dg-final { scan-assembler-not {\tld1b\t(z[0-9]+)\.d, p[0-7]/z, \[(z[0-9]+)\.d, #64\]} } } */
++
+-- 
+2.43.7
+
+

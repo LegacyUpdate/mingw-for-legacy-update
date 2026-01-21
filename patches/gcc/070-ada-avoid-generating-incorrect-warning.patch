@@ -1,0 +1,33 @@
+From 2cb64a5a3b49f37e278094405242a8eb0321b623 Mon Sep 17 00:00:00 2001
+From: Steve Baird <baird@adacore.com>
+Date: Mon, 21 Jul 2025 16:23:20 -0700
+Subject: [PATCH] ada: Avoid generating incorrect warning
+
+Do not generate a warning stating that the size of a formal parameter
+is 8 bits unless the size of the formal parameter is 8 bits.
+
+gcc/ada/ChangeLog:
+
+	* freeze.adb (Freeze_Profile): Do not emit a warning stating that
+	a formal parameter's size is 8 if the parameter's size is not 8.
+---
+ gcc/ada/freeze.adb | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/gcc/ada/freeze.adb b/gcc/ada/freeze.adb
+index 00895cd1aae6..0b501f194d69 100644
+--- a/gcc/ada/freeze.adb
++++ b/gcc/ada/freeze.adb
+@@ -4811,6 +4811,8 @@ package body Freeze is
+                  and then Convention (F_Type) = Convention_Ada
+                  and then not Has_Warnings_Off (F_Type)
+                  and then not Has_Size_Clause (F_Type)
++                 and then Present (Esize (F_Type))
++                 and then Esize (F_Type) = 8
+                then
+                   Error_Msg_N
+                     ("& is an 8-bit Ada Boolean?x?", Formal);
+-- 
+2.43.7
+
+

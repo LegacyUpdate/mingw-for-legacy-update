@@ -1,0 +1,50 @@
+From e2b6c1ca1c0b9f857c8b5395a26ba22e11c1239d Mon Sep 17 00:00:00 2001
+From: David Malcolm <dmalcolm@redhat.com>
+Date: Wed, 17 Sep 2025 16:39:31 -0400
+Subject: [PATCH] c++: fix count of z candidates for non-viable candidates,
+ nesting [PR121966]
+
+In r15-6116-gd3dd24acd74605 I updated print_z_candidates to show the
+number of candidates, and a number for each candidate.
+
+PR c++/121966 notes that the printed count is sometimes higher than
+what's actually printed: I missed the case where candidates in the
+list aren't printed due to not being viable.
+
+Fixed thusly.
+
+gcc/cp/ChangeLog:
+	PR c++/121966
+	* call.cc (print_z_candidates): Copy the filtering logic on viable
+	candidates from the printing loop to the counting loop, so that
+	num_candidates matches the number of iterations of the latter
+	loop.
+
+Signed-off-by: David Malcolm <dmalcolm@redhat.com>
+
+(cherry picked from commit c0b21d1f45ac6a249974982c1a7f7515efb78747)
+---
+ gcc/cp/call.cc | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/gcc/cp/call.cc b/gcc/cp/call.cc
+index 70002c02d393..9c7bc50c89e6 100644
+--- a/gcc/cp/call.cc
++++ b/gcc/cp/call.cc
+@@ -4203,7 +4203,11 @@ print_z_candidates (location_t loc, struct z_candidate *candidates,
+ 
+   int num_candidates = 0;
+   for (auto iter = candidates; iter; iter = iter->next)
+-    ++num_candidates;
++    {
++      if (only_viable_p.is_true () && iter->viable != 1)
++	break;
++      ++num_candidates;
++    }
+ 
+   inform_n (loc,
+ 	    num_candidates, "there is %i candidate", "there are %i candidates",
+-- 
+2.43.7
+
+

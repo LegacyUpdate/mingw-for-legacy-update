@@ -1,0 +1,47 @@
+From 1d086cf8e7ee0d4d9995a2491f8f822a2ea1d6df Mon Sep 17 00:00:00 2001
+From: Javier Miranda <miranda@adacore.com>
+Date: Thu, 7 Aug 2025 09:42:15 +0000
+Subject: [PATCH] ada: Spurious error on generalized prefix notation
+
+The compiler reports a spurious error when a primitive function of
+an untagged type that returns an array type is invoked using the
+prefix notation, and the sources are compiled with language
+extensions enabled.
+
+gcc/ada/ChangeLog:
+
+	* sem_util.adb (Needs_One_Actual): Add support for untagged record
+	types when the sources are compiled with Core Extensions allowed.
+---
+ gcc/ada/sem_util.adb | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/gcc/ada/sem_util.adb b/gcc/ada/sem_util.adb
+index d4bfd64483a4..4961c7a7115a 100644
+--- a/gcc/ada/sem_util.adb
++++ b/gcc/ada/sem_util.adb
+@@ -22755,7 +22755,8 @@ package body Sem_Util is
+    begin
+       --  Ada 2005 or later, and formals present. The first formal must be
+       --  of a type that supports prefix notation: a controlling argument,
+-      --  a class-wide type, or an access to such.
++      --  a class-wide type, an access to such, or an untagged record type
++      --  (when compiling with Core_Extensions allowed).
+ 
+       if Ada_Version >= Ada_2005
+         and then Present (First_Formal (E))
+@@ -22763,7 +22764,9 @@ package body Sem_Util is
+         and then
+           (Is_Controlling_Formal (First_Formal (E))
+             or else Is_Class_Wide_Type (Etype (First_Formal (E)))
+-            or else Is_Anonymous_Access_Type (Etype (First_Formal (E))))
++            or else Is_Anonymous_Access_Type (Etype (First_Formal (E)))
++            or else (Core_Extensions_Allowed
++                       and then Is_Record_Type (Etype (First_Formal (E)))))
+       then
+          Formal := Next_Formal (First_Formal (E));
+          while Present (Formal) loop
+-- 
+2.43.7
+
+

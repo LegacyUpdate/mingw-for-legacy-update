@@ -1,0 +1,195 @@
+From 567744aae7b4ace90c1fb6d27f53c179bdd7e33f Mon Sep 17 00:00:00 2001
+From: Georg-Johann Lay <avr@gjlay.de>
+Date: Sat, 1 Nov 2025 17:33:13 +0100
+Subject: [PATCH] AVR: PR122505 - Fix bloated mulpsi3 in the wake of hacking
+ around PR118012.
+
+Since the PR118012 work-around patch, there is an SImode insn also for
+the non-MUL case, but there is no mulpsi3.  This makes the middle-end
+use the mulsi3 insn for 24-bit multipications like in:
+
+__uint24 mul24 (__uint24 a, __uint24 b)
+{
+    return a * b;
+}
+
+which will be compiled to:
+
+mul24:
+    push r28         ;  34  [c=4 l=1]  pushqi1/0
+    push r29         ;  35  [c=4 l=1]  pushqi1/0
+    in r28,__SP_L__  ;  47  [c=4 l=2]  *movhi/7
+    in r29,__SP_H__
+    sbiw r28,8   ;  48  [c=8 l=1]  *addhi3/2
+    in __tmp_reg__,__SREG__  ;  38  [c=8 l=5]  movhi_sp_r/2
+    cli
+    out __SP_H__,r29
+    out __SREG__,__tmp_reg__
+    out __SP_L__,r28
+/* prologue: function */
+/* frame size = 8 */
+/* stack size = 10 */
+    std Y+1,r22  ;  49  [c=4 l=1]  movqi_insn/2
+    std Y+2,r23  ;  50  [c=4 l=1]  movqi_insn/2
+    std Y+3,r24  ;  51  [c=4 l=1]  movqi_insn/2
+    std Y+5,r18  ;  52  [c=4 l=1]  movqi_insn/2
+    std Y+6,r19  ;  53  [c=4 l=1]  movqi_insn/2
+    std Y+7,r20  ;  54  [c=4 l=1]  movqi_insn/2
+    ldd r18,Y+1  ;  55  [c=4 l=1]  movqi_insn/3
+    ldd r19,Y+2  ;  56  [c=4 l=1]  movqi_insn/3
+    ldd r20,Y+3  ;  57  [c=4 l=1]  movqi_insn/3
+    ldd r21,Y+4  ;  58  [c=4 l=1]  movqi_insn/3
+    ldd r22,Y+5  ;  59  [c=4 l=1]  movqi_insn/3
+    ldd r23,Y+6  ;  60  [c=4 l=1]  movqi_insn/3
+    ldd r24,Y+7  ;  61  [c=4 l=1]  movqi_insn/3
+    ldd r25,Y+8  ;  62  [c=4 l=1]  movqi_insn/3
+    call __mulsi3    ;  33  [c=20 l=2]  *mulsi3_call_pr118012
+/* epilogue start */
+    adiw r28,8   ;  63  [c=8 l=1]  *addhi3/2
+    in __tmp_reg__,__SREG__  ;  42  [c=8 l=5]  movhi_sp_r/2
+    cli
+    out __SP_H__,r29
+    out __SREG__,__tmp_reg__
+    out __SP_L__,r28
+    pop r29      ;  43  [c=4 l=1]  popqi
+    pop r28      ;  44  [c=4 l=1]  popqi
+    ret
+
+where the expected code is simply:
+
+mul24:
+    call __mulpsi3   ;  9   [c=20 l=2]  call_value_insn/1
+/* epilogue start */
+    ret      ;  24  [c=0 l=1]  return
+
+The patch just allows the mulpsi3 insn for the non-MUL case, except for
+AVR_TINY which passes the 2nd argument on the stack so no insn can be used.
+
+The change might be beneficial even in the absence of PR118012 because
+the __mulpsi3 footprint is leaner than a libcall.
+
+	PR tree-optimization/118012
+	PR tree-optimization/122505
+gcc/
+	* config/avr/avr.md (mulpsi3): Also allow the insn condition
+	in the case where avropt_pr118012 && !AVR_TINY.
+	(*mulpsi3): Handle split for the !AVR_HAVE_MUL case.
+	(*mulpsi3-nomul.libgcc_split, *mulpsi3-nomul.libgcc): New insns.
+
+(cherry picked from commit ad8de026441c3e57c4761b1c595ace92ed21c254)
+---
+ gcc/config/avr/avr.md | 72 ++++++++++++++++++++++++++++++++++++++-----
+ 1 file changed, 65 insertions(+), 7 deletions(-)
+
+diff --git a/gcc/config/avr/avr.md b/gcc/config/avr/avr.md
+index 3ca0efbbe759..6788e9d82a1d 100644
+--- a/gcc/config/avr/avr.md
++++ b/gcc/config/avr/avr.md
+@@ -4091,9 +4091,17 @@
+                              (match_operand:PSI 2 "nonmemory_operand" "")))
+               (clobber (reg:HI 26))
+               (clobber (reg:DI 18))])]
+-  "AVR_HAVE_MUL"
++  "AVR_HAVE_MUL
++   || (avropt_pr118012
++       /* AVR_TINY passes args on the stack, so we cannot work
++          around PR118012 like this. */
++       && ! AVR_TINY)"
+   {
+-    if (s8_operand (operands[2], PSImode))
++    if (!AVR_HAVE_MUL)
++      {
++        operands[2] = force_reg (PSImode, operands[2]);
++      }
++    else if (s8_operand (operands[2], PSImode))
+       {
+         rtx reg = force_reg (QImode, gen_int_mode (INTVAL (operands[2]), QImode));
+         emit_insn (gen_mulsqipsi3 (operands[0], reg, operands[1]));
+@@ -4198,7 +4206,9 @@
+                   (match_operand:PSI 2 "pseudo_register_or_const_int_operand" "rn")))
+    (clobber (reg:HI 26))
+    (clobber (reg:DI 18))]
+-  "AVR_HAVE_MUL && !reload_completed"
++  "!reload_completed
++   && (AVR_HAVE_MUL
++       || (avropt_pr118012 && !AVR_TINY))"
+   { gcc_unreachable(); }
+   "&& 1"
+   [(set (reg:PSI 18)
+@@ -4208,13 +4218,30 @@
+    (parallel [(set (reg:PSI 22)
+                    (mult:PSI (reg:PSI 22)
+                              (reg:PSI 18)))
+-              (clobber (reg:QI 21))
+-              (clobber (reg:QI 25))
+-              (clobber (reg:HI 26))])
++              (clobber (match_dup 3))
++              (clobber (match_dup 4))
++              (clobber (match_dup 5))])
+    (set (match_dup 0)
+         (reg:PSI 22))]
+   {
+-    if (s8_operand (operands[2], PSImode))
++    if (AVR_HAVE_MUL)
++      {
++        operands[3] = gen_rtx_REG (QImode, REG_21);
++        operands[4] = gen_rtx_REG (QImode, REG_25);
++        operands[5] = gen_rtx_REG (HImode, REG_26);
++      }
++    else
++      {
++        operands[3] = gen_rtx_REG (SImode, REG_18);
++        operands[4] = gen_rtx_SCRATCH (QImode);
++        operands[5] = gen_rtx_SCRATCH (HImode);
++      }
++
++    if (!AVR_HAVE_MUL)
++      {
++        operands[2] = force_reg (PSImode, operands[2]);
++      }
++    else if (s8_operand (operands[2], PSImode))
+       {
+         rtx reg = force_reg (QImode, gen_int_mode (INTVAL (operands[2]), QImode));
+         emit_insn (gen_mulsqipsi3 (operands[0], reg, operands[1]));
+@@ -4273,6 +4300,37 @@
+   "%~call __mulpsi3"
+   [(set_attr "type" "xcall")])
+ 
++(define_insn_and_split "*mulpsi3-nomul.libgcc_split"
++  [(set (reg:PSI 22)
++        (mult:PSI (reg:PSI 22)
++                  (reg:PSI 18)))
++   (clobber (reg:SI 18))
++   (clobber (scratch:QI))
++   (clobber (scratch:HI))]
++  "!AVR_HAVE_MUL && avropt_pr118012 && !AVR_TINY"
++  "#"
++  "&& reload_completed"
++  [(parallel [(set (reg:PSI 22)
++                   (mult:PSI (reg:PSI 22)
++                             (reg:PSI 18)))
++              (clobber (reg:SI 18))
++              (clobber (scratch:QI))
++              (clobber (scratch:HI))
++              (clobber (reg:CC REG_CC))])])
++
++(define_insn "*mulpsi3-nomul.libgcc"
++  [(set (reg:PSI 22)
++        (mult:PSI (reg:PSI 22)
++                  (reg:PSI 18)))
++   (clobber (reg:SI 18))
++   (clobber (scratch:QI))
++   (clobber (scratch:HI))
++   (clobber (reg:CC REG_CC))]
++  "reload_completed
++   && !AVR_HAVE_MUL && avropt_pr118012 && !AVR_TINY"
++  "%~call __mulpsi3"
++  [(set_attr "type" "xcall")])
++
+ 
+ ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+ ;; 24-bit signed/unsigned division and modulo.
+-- 
+2.43.7
+
+

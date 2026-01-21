@@ -1,0 +1,581 @@
+From d3c5366520e52057bed5b3ba6898366c79687c34 Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Fri, 8 Aug 2025 09:20:51 +0200
+Subject: [PATCH] tailc: Handle other forms of finally_tmp.N conditional
+ cleanups after musttail [PR121389]
+
+My earlier r16-1886 PR120608 change incorrectly assumed that the
+finally_tmp.N vars introduced by eh pass will be only initialized
+to values 0 and 1 and there will be only EQ_EXPR/NE_EXPR comparisons
+of those.
+
+The following testcases show that is a bad assumption, the eh pass
+sets finally_tmp.N vars to 0 up to some highest index depending on
+hoiw many different exits there are from the finally region.
+And it emits then switch (finally_tmp.N) statement for all the
+different cases.  So, if it uses more than 0/1 indexes, the lowering
+of the switch can turn it into a series of GIMPLE_CONDs,
+  if (finally_tmp.N_M > 15)
+    goto ...
+  else
+    goto ...
+
+  if (finally_tmp.N_M > 7)
+    goto ...
+  else
+    goto ...
+etc. (and that also means no longer single uses).  And if unlucky,
+we can see a non-lowered GIMPLE_SWITCH as well.
+
+So, the following patch removes the assumption that it has to be 0/1
+and EQ_EXPR/NE_EXPR, allows all the normal integral comparisons
+and handles GIMPLE_SWITCH too.
+
+2025-08-08  Jakub Jelinek  <jakub@redhat.com>
+
+	PR middle-end/121389
+	* tree-tailcall.cc (find_tail_calls): For finally_tmp.N
+	handle not just GIMPLE_CONDs with EQ_EXPR/NE_EXPR and only
+	values 0 and 1, but arbitrary non-negative values, arbitrary
+	comparisons in conditions and also GIMPLE_SWITCH next to
+	GIMPLE_CONDs.
+
+	* c-c++-common/asan/pr121389-1.c: New test.
+	* c-c++-common/asan/pr121389-2.c: New test.
+	* c-c++-common/asan/pr121389-3.c: New test.
+	* c-c++-common/asan/pr121389-4.c: New test.
+
+(cherry picked from commit 18c32a391685256d2fbd6e3e6b2f7f93200bb912)
+---
+ gcc/testsuite/c-c++-common/asan/pr121389-1.c |  23 +++
+ gcc/testsuite/c-c++-common/asan/pr121389-2.c |  37 ++++
+ gcc/testsuite/c-c++-common/asan/pr121389-3.c | 130 ++++++++++++
+ gcc/testsuite/c-c++-common/asan/pr121389-4.c |   6 +
+ gcc/tree-tailcall.cc                         | 207 ++++++++++++++-----
+ 5 files changed, 357 insertions(+), 46 deletions(-)
+ create mode 100644 gcc/testsuite/c-c++-common/asan/pr121389-1.c
+ create mode 100644 gcc/testsuite/c-c++-common/asan/pr121389-2.c
+ create mode 100644 gcc/testsuite/c-c++-common/asan/pr121389-3.c
+ create mode 100644 gcc/testsuite/c-c++-common/asan/pr121389-4.c
+
+diff --git a/gcc/testsuite/c-c++-common/asan/pr121389-1.c b/gcc/testsuite/c-c++-common/asan/pr121389-1.c
+new file mode 100644
+index 000000000000..0116d7a2d73b
+--- /dev/null
++++ b/gcc/testsuite/c-c++-common/asan/pr121389-1.c
+@@ -0,0 +1,23 @@
++// PR middle-end/121389
++// { dg-do compile { target musttail } }
++// { dg-options "-fsanitize=address" }
++
++int foo (void);
++int bar (void);
++int baz (unsigned *);
++
++int
++bar (void)
++{
++  do
++    {
++      unsigned t;
++      int u = baz (&t);
++      if (u == 42)
++	[[gnu::musttail]] return foo ();
++      if (u == -42)
++	break;
++    }
++  while (1);
++  return 42;
++}
+diff --git a/gcc/testsuite/c-c++-common/asan/pr121389-2.c b/gcc/testsuite/c-c++-common/asan/pr121389-2.c
+new file mode 100644
+index 000000000000..02914f885426
+--- /dev/null
++++ b/gcc/testsuite/c-c++-common/asan/pr121389-2.c
+@@ -0,0 +1,37 @@
++// PR middle-end/121389
++// { dg-do compile { target musttail } }
++// { dg-options "-fsanitize=address" }
++
++int foo (void);
++int bar (void);
++int baz (unsigned *);
++
++int
++bar (void)
++{
++  for (int a = 0; a < 420; ++a)
++    {
++      for (int b = 0; b < 420; ++b)
++	{
++	  for (int c = 0; c < 420; ++c)
++	    {
++	      unsigned t;
++	      int u = baz (&t);
++	      if (u == 42)
++		[[gnu::musttail]] return foo ();
++	      if (u == -42)
++		break;
++	      if (u == 16)
++		goto l1;
++	      if (u == 18)
++		goto l2;
++	      if (u == 20)
++		goto l3;
++	    }
++	  l3:;
++	}
++      l2:;
++    }
++  l1:;
++  return 42;
++}
+diff --git a/gcc/testsuite/c-c++-common/asan/pr121389-3.c b/gcc/testsuite/c-c++-common/asan/pr121389-3.c
+new file mode 100644
+index 000000000000..5f71e06e39c1
+--- /dev/null
++++ b/gcc/testsuite/c-c++-common/asan/pr121389-3.c
+@@ -0,0 +1,130 @@
++// PR middle-end/121389
++// { dg-do compile { target musttail } }
++// { dg-options "-fsanitize=address" }
++
++int foo (void);
++int bar (void);
++int baz (unsigned *);
++
++int
++bar (void)
++{
++  for (int a = 0; a < 420; ++a)
++    {
++      for (int b = 0; b < 420; ++b)
++	{
++	  for (int c = 0; c < 420; ++c)
++	    {
++	      unsigned t;
++	      int u = baz (&t);
++	      if (u == 42)
++		[[gnu::musttail]] return foo ();
++	      if (u == -42)
++		break;
++	      if (u == 16)
++		goto l1;
++	      if (u == 18)
++		goto l2;
++	      if (u == 20)
++		goto l3;
++	      switch (u)
++		{
++		case 100: goto l100;
++		case 101: goto l101;
++		case 102: goto l102;
++		case 103: goto l103;
++		case 104: goto l104;
++		case 105: goto l105;
++		case 106: goto l106;
++		case 107: goto l107;
++		case 108: goto l108;
++		case 109: goto l109;
++		case 110: goto l110;
++		case 111: goto l111;
++		case 112: goto l112;
++		case 113: goto l113;
++		case 114: goto l114;
++		case 115: goto l115;
++		case 116: goto l116;
++		case 117: goto l117;
++		case 118: goto l118;
++		case 119: goto l119;
++		case 120: goto l120;
++		case 121: goto l121;
++		case 122: goto l122;
++		case 123: goto l123;
++		case 124: goto l124;
++		case 125: goto l125;
++		case 126: goto l126;
++		case 127: goto l127;
++		case 128: goto l128;
++		case 129: goto l129;
++		}
++	    }
++	  l3:;
++	  foo ();
++	  l100:
++	  foo ();
++	  l101:
++	  foo ();
++	  l102:
++	  foo ();
++	  l103:
++	  foo ();
++	  l104:
++	  foo ();
++	  l105:
++	  foo ();
++	  l106:
++	  foo ();
++	  l107:
++	  foo ();
++	  l108:
++	  foo ();
++	  l109:;
++	}
++      l2:;
++      foo ();
++      l110:
++      foo ();
++      l111:
++      foo ();
++      l112:
++      foo ();
++      l113:
++      foo ();
++      l114:
++      foo ();
++      l115:
++      foo ();
++      l116:
++      foo ();
++      l117:
++      foo ();
++      l118:
++      foo ();
++      l119:;
++    }
++  l1:;
++  foo ();
++  l120:
++  foo ();
++  l121:
++  foo ();
++  l122:
++  foo ();
++  l123:
++  foo ();
++  l124:
++  foo ();
++  l125:
++  foo ();
++  l126:
++  foo ();
++  l127:
++  foo ();
++  l128:
++  foo ();
++  l129:;
++  return 42;
++}
+diff --git a/gcc/testsuite/c-c++-common/asan/pr121389-4.c b/gcc/testsuite/c-c++-common/asan/pr121389-4.c
+new file mode 100644
+index 000000000000..2f7b410a1f4e
+--- /dev/null
++++ b/gcc/testsuite/c-c++-common/asan/pr121389-4.c
+@@ -0,0 +1,6 @@
++// PR middle-end/121389
++// { dg-do compile { target musttail } }
++// { dg-options "-fsanitize=address -fdisable-tree-switchlower_O0" }
++// { dg-skip-if "" { *-*-* } { "*" } { "-O0" } }
++
++#include "pr121389-3.c"
+diff --git a/gcc/tree-tailcall.cc b/gcc/tree-tailcall.cc
+index e8fd7a0df228..7240a3eef87a 100644
+--- a/gcc/tree-tailcall.cc
++++ b/gcc/tree-tailcall.cc
+@@ -605,6 +605,12 @@ find_tail_calls (basic_block bb, edge esucc, struct tailcall **ret,
+ 	  && (stmt = last_nondebug_stmt (bb))
+ 	  && gimple_code (stmt) == GIMPLE_COND)
+ 	;
++      else if (esucc
++	       && cfun->has_musttail
++	       && diag_musttail
++	       && (stmt = last_nondebug_stmt (bb))
++	       && gimple_code (stmt) == GIMPLE_SWITCH)
++	;
+       /* If there is an abnormal edge assume it's the only extra one.
+ 	 Tolerate that case so that we can give better error messages
+ 	 for musttail later.  */
+@@ -668,7 +674,7 @@ find_tail_calls (basic_block bb, edge esucc, struct tailcall **ret,
+ 	   else
+ 	     goto <bb 6>; [INV]
+ 	 When walking backwards, ESUCC is the edge we are coming from,
+-	 depending on its EDGE_TRUE_FLAG, == vs. != for the comparison
++	 depending on its EDGE_TRUE_FLAG, comparison code
+ 	 and value compared against try to find out through which edge
+ 	 we need to go and which edge should be ignored.  The code handles
+ 	 both INTEGER_CST PHI arguments and SSA_NAMEs set to constants
+@@ -677,19 +683,16 @@ find_tail_calls (basic_block bb, edge esucc, struct tailcall **ret,
+ 	  && diag_musttail
+ 	  && esucc
+ 	  && gimple_code (stmt) == GIMPLE_COND
+-	  && (gimple_cond_code (stmt) == EQ_EXPR
+-	      || gimple_cond_code (stmt) == NE_EXPR)
+ 	  && TREE_CODE (gimple_cond_lhs (stmt)) == SSA_NAME
+ 	  && TREE_CODE (gimple_cond_rhs (stmt)) == INTEGER_CST
+ 	  && INTEGRAL_TYPE_P (TREE_TYPE (gimple_cond_lhs (stmt)))
+-	  && (integer_zerop (gimple_cond_rhs (stmt))
+-	      || integer_onep (gimple_cond_rhs (stmt))))
++	  && tree_int_cst_sgn (gimple_cond_rhs (stmt)) >= 0)
+ 	{
+ 	  tree lhs = gimple_cond_lhs (stmt);
+-	  bool rhsv = integer_onep (gimple_cond_rhs (stmt));
+-	  if (((esucc->flags & EDGE_TRUE_VALUE) != 0)
+-	      ^ (gimple_cond_code (stmt) == EQ_EXPR))
+-	    rhsv = !rhsv;
++	  tree_code ccode = gimple_cond_code (stmt);
++	  tree rhsv = gimple_cond_rhs (stmt);
++	  if ((esucc->flags & EDGE_FALSE_VALUE) != 0)
++	    ccode = invert_tree_comparison (ccode, false);
+ 	  if (!ignored_edges)
+ 	    {
+ 	      ignored_edges = new hash_set<edge>;
+@@ -700,8 +703,10 @@ find_tail_calls (basic_block bb, edge esucc, struct tailcall **ret,
+ 	      && (gimple_assign_rhs_code (SSA_NAME_DEF_STMT (lhs))
+ 		  == INTEGER_CST))
+ 	    {
+-	      tree rhs = gimple_assign_rhs1 (SSA_NAME_DEF_STMT (lhs));
+-	      if (rhsv ? integer_onep (rhs) : integer_zerop (rhs))
++	      tree lhsv = gimple_assign_rhs1 (SSA_NAME_DEF_STMT (lhs));
++
++	      if (const_binop (ccode, boolean_type_node, lhsv, rhsv)
++		  == boolean_true_node)
+ 		continue;
+ 	    }
+ 	  else if (gimple_code (SSA_NAME_DEF_STMT (lhs)) == GIMPLE_PHI)
+@@ -712,15 +717,62 @@ find_tail_calls (basic_block bb, edge esucc, struct tailcall **ret,
+ 	      edge_iterator ei;
+ 	      FOR_EACH_EDGE (e, ei, pbb->preds)
+ 		{
+-		  tree rhs = gimple_phi_arg_def_from_edge (phi, e);
+-		  if (TREE_CODE (rhs) == SSA_NAME
+-		      && is_gimple_assign (SSA_NAME_DEF_STMT (rhs))
+-		      && (gimple_assign_rhs_code (SSA_NAME_DEF_STMT (rhs))
++		  tree lhsv = gimple_phi_arg_def_from_edge (phi, e);
++		  if (TREE_CODE (lhsv) == SSA_NAME
++		      && is_gimple_assign (SSA_NAME_DEF_STMT (lhsv))
++		      && (gimple_assign_rhs_code (SSA_NAME_DEF_STMT (lhsv))
+ 			  == INTEGER_CST))
+-		    rhs = gimple_assign_rhs1 (SSA_NAME_DEF_STMT (rhs));
+-		  if (!(rhsv ? integer_onep (rhs) : integer_zerop (rhs)))
++		    lhsv = gimple_assign_rhs1 (SSA_NAME_DEF_STMT (lhsv));
++		  if (TREE_CODE (lhsv) != INTEGER_CST
++		      || const_binop (ccode, boolean_type_node,
++				      lhsv, rhsv) != boolean_true_node)
+ 		    ignored_edges->add (e);
+ 		}
++	      continue;
++	    }
++	}
++      if (cfun->has_musttail
++	  && diag_musttail
++	  && esucc
++	  && gimple_code (stmt) == GIMPLE_SWITCH
++	  && (TREE_CODE (gimple_switch_index (as_a <gswitch *> (stmt)))
++	      == SSA_NAME))
++	{
++	  gswitch *swtch = as_a <gswitch *> (stmt);
++	  tree idx = gimple_switch_index (swtch);
++	  if (!ignored_edges)
++	    {
++	      ignored_edges = new hash_set<edge>;
++	      must_see_bbs = new hash_set<basic_block>;
++	      delete_ignored_edges = true;
++	    }
++	  if (is_gimple_assign (SSA_NAME_DEF_STMT (idx))
++	      && (gimple_assign_rhs_code (SSA_NAME_DEF_STMT (idx))
++		  == INTEGER_CST))
++	    {
++	      tree val = gimple_assign_rhs1 (SSA_NAME_DEF_STMT (idx));
++	      if (find_taken_edge_switch_expr (swtch, val) == esucc)
++		continue;
++	    }
++	  else if (gimple_code (SSA_NAME_DEF_STMT (idx)) == GIMPLE_PHI)
++	    {
++	      gimple *phi = SSA_NAME_DEF_STMT (idx);
++	      basic_block pbb = gimple_bb (phi);
++	      must_see_bbs->add (pbb);
++	      edge_iterator ei;
++	      FOR_EACH_EDGE (e, ei, pbb->preds)
++		{
++		  tree val = gimple_phi_arg_def_from_edge (phi, e);
++		  if (TREE_CODE (val) == SSA_NAME
++		      && is_gimple_assign (SSA_NAME_DEF_STMT (val))
++		      && (gimple_assign_rhs_code (SSA_NAME_DEF_STMT (val))
++			  == INTEGER_CST))
++		    val = gimple_assign_rhs1 (SSA_NAME_DEF_STMT (val));
++		  if (TREE_CODE (val) != INTEGER_CST
++		      || find_taken_edge_switch_expr (swtch, val) != esucc)
++		    ignored_edges->add (e);
++		}
++	      continue;
+ 	    }
+ 	}
+ 
+@@ -1139,47 +1191,67 @@ find_tail_calls (basic_block bb, edge esucc, struct tailcall **ret,
+       if (ignored_edges)
+ 	{
+ 	  if (is_gimple_assign (stmt)
+-	      && gimple_assign_rhs_code (stmt) == INTEGER_CST)
++	      && gimple_assign_rhs_code (stmt) == INTEGER_CST
++	      && tree_int_cst_sgn (gimple_assign_rhs1 (stmt)) >= 0)
+ 	    {
+ 	      use_operand_p use_p;
+-	      gimple *use_stmt;
+-	      if ((integer_zerop (gimple_assign_rhs1 (stmt))
+-		   || integer_onep (gimple_assign_rhs1 (stmt)))
+-		  && single_imm_use (gimple_assign_lhs (stmt), &use_p,
+-				     &use_stmt))
++	      imm_use_iterator imm_iter;
++	      bool bad_p = false;
++	      FOR_EACH_IMM_USE_FAST (use_p, imm_iter,
++				     gimple_assign_lhs (stmt))
+ 		{
+-		  if (gimple_code (use_stmt) == GIMPLE_COND)
+-		    continue;
+-		  if (gimple_code (use_stmt) == GIMPLE_PHI
+-		      && single_imm_use (gimple_phi_result (use_stmt),
+-					 &use_p, &use_stmt)
+-		      && gimple_code (use_stmt) == GIMPLE_COND)
++		  gimple *use_stmt = USE_STMT (use_p);
++		  if (is_gimple_debug (use_stmt)
++		      || gimple_code (use_stmt) == GIMPLE_COND
++		      || gimple_code (use_stmt) == GIMPLE_SWITCH)
+ 		    continue;
++		  if (gimple_code (use_stmt) == GIMPLE_PHI)
++		    {
++		      use_operand_p use_p2;
++		      imm_use_iterator imm_iter2;
++		      FOR_EACH_IMM_USE_FAST (use_p2, imm_iter2,
++					     gimple_phi_result (use_stmt))
++			{
++			  gimple *use_stmt2 = USE_STMT (use_p2);
++			  if (is_gimple_debug (use_stmt2)
++			      || gimple_code (use_stmt2) == GIMPLE_COND
++			      || gimple_code (use_stmt2) == GIMPLE_SWITCH)
++			    continue;
++			  bad_p = true;
++			  break;
++			}
++		      if (bad_p)
++			break;
++		    }
++		  else
++		    {
++		      bad_p = true;
++		      break;
++		    }
+ 		}
++	      if (!bad_p)
++		continue;
+ 	    }
+ 	  if (gimple_code (stmt) == GIMPLE_COND
+-	      && (gimple_cond_code (stmt) == EQ_EXPR
+-		  || gimple_cond_code (stmt) == NE_EXPR)
+ 	      && TREE_CODE (gimple_cond_lhs (stmt)) == SSA_NAME
+ 	      && TREE_CODE (gimple_cond_rhs (stmt)) == INTEGER_CST
+ 	      && INTEGRAL_TYPE_P (TREE_TYPE (gimple_cond_lhs (stmt)))
+-	      && (integer_zerop (gimple_cond_rhs (stmt))
+-		  || integer_onep (gimple_cond_rhs (stmt))))
++	      && tree_int_cst_sgn (gimple_cond_rhs (stmt)) >= 0)
+ 	    {
+ 	      edge e = NULL, et, ef;
++	      enum tree_code ccode = gimple_cond_code (stmt);
+ 	      tree lhs = gimple_cond_lhs (stmt);
+-	      bool rhsv = integer_onep (gimple_cond_rhs (stmt));
+-	      if (gimple_cond_code (stmt) == NE_EXPR)
+-		rhsv = !rhsv;
++	      tree rhsv = gimple_cond_rhs (stmt);
+ 	      extract_true_false_edges_from_block (gimple_bb (stmt), &et, &ef);
+ 	      if (is_gimple_assign (SSA_NAME_DEF_STMT (lhs))
+ 		  && (gimple_assign_rhs_code (SSA_NAME_DEF_STMT (lhs))
+ 		      == INTEGER_CST))
+ 		{
+-		  tree rhs = gimple_assign_rhs1 (SSA_NAME_DEF_STMT (lhs));
+-		  if (rhsv ? integer_onep (rhs) : integer_zerop (rhs))
++		  tree lhsv = gimple_assign_rhs1 (SSA_NAME_DEF_STMT (lhs));
++		  tree r = const_binop (ccode, boolean_type_node, lhsv, rhsv);
++		  if (r == boolean_true_node)
+ 		    e = et;
+-		  else if (rhsv ? integer_zerop (rhs) : integer_onep (rhs))
++		  else if (r == boolean_false_node)
+ 		    e = ef;
+ 		}
+ 	      else if (gimple_code (SSA_NAME_DEF_STMT (lhs)) == GIMPLE_PHI)
+@@ -1189,16 +1261,17 @@ find_tail_calls (basic_block bb, edge esucc, struct tailcall **ret,
+ 		  for (edge e2 : edges)
+ 		    if (e2->dest == pbb)
+ 		      {
+-			tree rhs = gimple_phi_arg_def_from_edge (phi, e2);
+-			if (TREE_CODE (rhs) == SSA_NAME)
+-			  if (gimple *g = SSA_NAME_DEF_STMT (rhs))
++			tree lhsv = gimple_phi_arg_def_from_edge (phi, e2);
++			if (TREE_CODE (lhsv) == SSA_NAME)
++			  if (gimple *g = SSA_NAME_DEF_STMT (lhsv))
+ 			    if (is_gimple_assign (g)
+ 				&& gimple_assign_rhs_code (g) == INTEGER_CST)
+-			      rhs = gimple_assign_rhs1 (g);
+-			if (rhsv ? integer_onep (rhs) : integer_zerop (rhs))
++			      lhsv = gimple_assign_rhs1 (g);
++			tree r = const_binop (ccode, boolean_type_node,
++					      lhsv, rhsv);
++			if (r == boolean_true_node)
+ 			  e = et;
+-			else if (rhsv ? integer_zerop (rhs)
+-				 : integer_onep (rhs))
++			else if (r == boolean_false_node)
+ 			  e = ef;
+ 			break;
+ 		      }
+@@ -1213,6 +1286,48 @@ find_tail_calls (basic_block bb, edge esucc, struct tailcall **ret,
+ 		  goto new_bb;
+ 		}
+ 	    }
++	  if (gimple_code (stmt) == GIMPLE_SWITCH
++	      && (TREE_CODE (gimple_switch_index (as_a <gswitch *> (stmt)))
++		  == SSA_NAME))
++	    {
++	      edge e = NULL;
++	      gswitch *swtch = as_a <gswitch *> (stmt);
++	      tree idx = gimple_switch_index (swtch);
++	      if (is_gimple_assign (SSA_NAME_DEF_STMT (idx))
++		  && (gimple_assign_rhs_code (SSA_NAME_DEF_STMT (idx))
++		      == INTEGER_CST))
++		{
++		  tree val = gimple_assign_rhs1 (SSA_NAME_DEF_STMT (idx));
++		  e = find_taken_edge_switch_expr (swtch, val);
++		}
++	      else if (gimple_code (SSA_NAME_DEF_STMT (idx)) == GIMPLE_PHI)
++		{
++		  gimple *phi = SSA_NAME_DEF_STMT (idx);
++		  basic_block pbb = gimple_bb (phi);
++		  for (edge e2 : edges)
++		    if (e2->dest == pbb)
++		      {
++			tree val = gimple_phi_arg_def_from_edge (phi, e2);
++			if (TREE_CODE (val) == SSA_NAME)
++			  if (gimple *g = SSA_NAME_DEF_STMT (val))
++			    if (is_gimple_assign (g)
++				&& gimple_assign_rhs_code (g) == INTEGER_CST)
++			      val = gimple_assign_rhs1 (g);
++			if (TREE_CODE (val) == INTEGER_CST)
++			  e = find_taken_edge_switch_expr (swtch, val);
++			break;
++		      }
++		}
++	      if (e)
++		{
++		  ass_var = propagate_through_phis (ass_var, e);
++		  if (!ass_var || ignored_edges)
++		    edges.safe_push (e);
++		  abb = e->dest;
++		  agsi = gsi_start_bb (abb);
++		  goto new_bb;
++		}
++	    }
+ 	}
+ 
+       if (gimple_code (stmt) != GIMPLE_ASSIGN)
+-- 
+2.43.7
+
+

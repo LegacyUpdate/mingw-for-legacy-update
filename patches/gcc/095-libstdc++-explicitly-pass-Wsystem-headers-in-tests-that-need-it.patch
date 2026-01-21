@@ -1,0 +1,92 @@
+From 2da81100da46ad89ec8c2dacca8a20632aa1c5de Mon Sep 17 00:00:00 2001
+From: Patrick Palka <ppalka@redhat.com>
+Date: Tue, 16 Sep 2025 20:59:10 -0400
+Subject: [PATCH] libstdc++: Explicitly pass -Wsystem-headers in tests that
+ need it
+
+When running libstdc++ tests using an installed gcc (as opposed to an
+in-tree gcc), we naturally use system stdlib headers instead of the
+in-tree headers.  But warnings from within system headers are suppressed
+by default, so tests that check for such warnings spuriously fail in such
+a setup.  This patch makes us compile such tests with -Wsystem-headers so
+that they consistently pass.
+
+libstdc++-v3/ChangeLog:
+
+	* testsuite/20_util/bind/dangling_ref.cc: Compile with
+	-Wsystem-headers.
+	* testsuite/20_util/ratio/operations/ops_overflow_neg.cc: Likewise.
+	* testsuite/20_util/unique_ptr/lwg4148.cc: Likewise.
+	* testsuite/29_atomics/atomic/operators/pointer_partial_void.cc:
+	Likewise.
+	* testsuite/30_threads/packaged_task/cons/dangling_ref.cc:
+	Likewise.
+
+Reviewed-by: Jonathan Wakely <jwakely@redhat.com>
+(cherry picked from commit e690b97761e18daccb4fff0151c97c1d0115b55f)
+---
+ libstdc++-v3/testsuite/20_util/bind/dangling_ref.cc             | 1 +
+ .../testsuite/20_util/ratio/operations/ops_overflow_neg.cc      | 2 +-
+ libstdc++-v3/testsuite/20_util/unique_ptr/lwg4148.cc            | 1 +
+ .../29_atomics/atomic/operators/pointer_partial_void.cc         | 1 +
+ .../testsuite/30_threads/packaged_task/cons/dangling_ref.cc     | 1 +
+ 5 files changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/libstdc++-v3/testsuite/20_util/bind/dangling_ref.cc b/libstdc++-v3/testsuite/20_util/bind/dangling_ref.cc
+index 17e7b21c45cb..32af0a27b8fe 100644
+--- a/libstdc++-v3/testsuite/20_util/bind/dangling_ref.cc
++++ b/libstdc++-v3/testsuite/20_util/bind/dangling_ref.cc
+@@ -1,4 +1,5 @@
+ // { dg-do compile { target c++11 } }
++// { dg-additional-options "-Wsystem-headers" }
+ #include <functional>
+ 
+ int f();
+diff --git a/libstdc++-v3/testsuite/20_util/ratio/operations/ops_overflow_neg.cc b/libstdc++-v3/testsuite/20_util/ratio/operations/ops_overflow_neg.cc
+index 5eff8e31f82a..368866a63313 100644
+--- a/libstdc++-v3/testsuite/20_util/ratio/operations/ops_overflow_neg.cc
++++ b/libstdc++-v3/testsuite/20_util/ratio/operations/ops_overflow_neg.cc
+@@ -1,6 +1,6 @@
+ // { dg-do compile { target c++11 } }
+ // { dg-require-cstdint "" }
+-
++// { dg-additional-options "-Wsystem-headers" }
+ // 2008-07-03 Chris Fairles <chris.fairles@gmail.com>
+ 
+ // Copyright (C) 2008-2025 Free Software Foundation, Inc.
+diff --git a/libstdc++-v3/testsuite/20_util/unique_ptr/lwg4148.cc b/libstdc++-v3/testsuite/20_util/unique_ptr/lwg4148.cc
+index c70d7a60631b..f5697e4e4021 100644
+--- a/libstdc++-v3/testsuite/20_util/unique_ptr/lwg4148.cc
++++ b/libstdc++-v3/testsuite/20_util/unique_ptr/lwg4148.cc
+@@ -1,4 +1,5 @@
+ // { dg-do compile { target c++11 } }
++// { dg-additional-options "-Wsystem-headers" }
+ 
+ // LWG 4148. unique_ptr::operator* should not allow dangling references
+ 
+diff --git a/libstdc++-v3/testsuite/29_atomics/atomic/operators/pointer_partial_void.cc b/libstdc++-v3/testsuite/29_atomics/atomic/operators/pointer_partial_void.cc
+index e959418a1c3c..1e2f71e9c628 100644
+--- a/libstdc++-v3/testsuite/29_atomics/atomic/operators/pointer_partial_void.cc
++++ b/libstdc++-v3/testsuite/29_atomics/atomic/operators/pointer_partial_void.cc
+@@ -1,6 +1,7 @@
+ // { dg-do run { target { c++11_only || c++14_only } } }
+ // { dg-require-atomic-builtins "" }
+ // { dg-require-effective-target hosted }
++// { dg-additional-options "-Wsystem-headers" }
+ 
+ // Copyright (C) 2012-2025 Free Software Foundation, Inc.
+ //
+diff --git a/libstdc++-v3/testsuite/30_threads/packaged_task/cons/dangling_ref.cc b/libstdc++-v3/testsuite/30_threads/packaged_task/cons/dangling_ref.cc
+index 51c6ade91c36..83411c7024e9 100644
+--- a/libstdc++-v3/testsuite/30_threads/packaged_task/cons/dangling_ref.cc
++++ b/libstdc++-v3/testsuite/30_threads/packaged_task/cons/dangling_ref.cc
+@@ -1,4 +1,5 @@
+ // { dg-do compile { target c++11 } }
++// { dg-additional-options "-Wsystem-headers" }
+ #include <future>
+ 
+ // C++20 [futures.task.members]
+-- 
+2.43.7
+
+

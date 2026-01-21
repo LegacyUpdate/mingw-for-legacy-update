@@ -1,0 +1,53 @@
+From 21866f27110c1d6370f66050b9fa4fafb0a4f01b Mon Sep 17 00:00:00 2001
+From: Andrew Pinski <andrew.pinski@oss.qualcomm.com>
+Date: Tue, 2 Sep 2025 13:57:26 -0700
+Subject: [PATCH] strlen: Fixup load alignment for memcmp
+
+Like the previous commit but for strlen copy so we can backport
+this commit. The loads should have the correct alignment on them
+so we need to create newly aligned types when the alignment of the
+pointer is less than the alignment of the current type.
+
+Pushed as pre-approved by https://gcc.gnu.org/pipermail/gcc-patches/2025-September/694016.html
+after a bootstrap/test on x86_64-linux-gnu.
+
+	PR tree-optimization/121776
+gcc/ChangeLog:
+
+	* tree-ssa-strlen.cc (strlen_pass::handle_builtin_memcmp): Create
+	unaligned types if the alignment of the pointers is less
+	than the alignment of the new type.
+
+Signed-off-by: Andrew Pinski <andrew.pinski@oss.qualcomm.com>
+(cherry picked from commit caa1c2f42691d68af4d894a5c3e700ecd2dba080)
+---
+ gcc/tree-ssa-strlen.cc | 12 ++++++++++--
+ 1 file changed, 10 insertions(+), 2 deletions(-)
+
+diff --git a/gcc/tree-ssa-strlen.cc b/gcc/tree-ssa-strlen.cc
+index c4d64132e538..3cef33bf5b07 100644
+--- a/gcc/tree-ssa-strlen.cc
++++ b/gcc/tree-ssa-strlen.cc
+@@ -4009,8 +4009,16 @@ strlen_pass::handle_builtin_memcmp ()
+ 	  tree ptrtype = build_pointer_type_for_mode (char_type_node,
+ 						      ptr_mode, true);
+ 	  off = build_int_cst (ptrtype, 0);
+-	  arg1 = build2_loc (loc, MEM_REF, type, arg1, off);
+-	  arg2 = build2_loc (loc, MEM_REF, type, arg2, off);
++
++	  /* Create unaligned types if needed. */
++	  tree type1 = type, type2 = type;
++	  if (TYPE_ALIGN (type1) > align1)
++	    type1 = build_aligned_type (type1, align1);
++	  if (TYPE_ALIGN (type2) > align2)
++	    type2 = build_aligned_type (type2, align2);
++
++	  arg1 = build2_loc (loc, MEM_REF, type1, arg1, off);
++	  arg2 = build2_loc (loc, MEM_REF, type2, arg2, off);
+ 	  tree tem1 = fold_const_aggregate_ref (arg1);
+ 	  if (tem1)
+ 	    arg1 = tem1;
+-- 
+2.43.7
+
+

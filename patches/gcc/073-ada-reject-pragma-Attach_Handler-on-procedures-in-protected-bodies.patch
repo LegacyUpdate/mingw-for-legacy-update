@@ -1,0 +1,44 @@
+From 59d8156ed8562fbdd5683b2d0120d1fed4fd7063 Mon Sep 17 00:00:00 2001
+From: Piotr Trojanek <trojanek@adacore.com>
+Date: Thu, 31 Jul 2025 17:07:48 +0200
+Subject: [PATCH] ada: Reject pragma Attach_Handler on procedures in protected
+ bodies
+
+Pragma Attach_Handler and Interrupt_Handler are only legal for procedures
+declared in protected definition. When given for procedures declared in
+protected body, they were wrongly accepted and triggered an odd error message
+from expansion.
+
+gcc/ada/ChangeLog:
+
+	* sem_prag.adb (Check_Interrupt_Or_Attach_Handler): Refine test for
+	protected procedures; fix typo in comment.
+---
+ gcc/ada/sem_prag.adb | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/gcc/ada/sem_prag.adb b/gcc/ada/sem_prag.adb
+index b866dba5e152..2ffabf41e8ac 100644
+--- a/gcc/ada/sem_prag.adb
++++ b/gcc/ada/sem_prag.adb
+@@ -6900,12 +6900,14 @@ package body Sem_Prag is
+          Handler_Proc := Find_Unique_Parameterless_Procedure (Arg1_X, Arg1);
+          Proc_Scope := Scope (Handler_Proc);
+ 
+-         if Ekind (Proc_Scope) /= E_Protected_Type then
++         if Nkind (Parent (Subprogram_Spec (Handler_Proc))) /=
++           N_Protected_Definition
++         then
+             Error_Pragma_Arg
+               ("argument of pragma% must be protected procedure", Arg1);
+          end if;
+ 
+-         --  For pragma case (as opposed to access case), check placement.
++         --  For pragma case (as opposed to aspect case), check placement.
+          --  We don't need to do that for aspects, because we have the
+          --  check that they aspect applies an appropriate procedure.
+ 
+-- 
+2.43.7
+
+

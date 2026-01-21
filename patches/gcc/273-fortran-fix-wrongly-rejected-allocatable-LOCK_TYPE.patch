@@ -1,0 +1,92 @@
+From 0f800bbcd7c0c73e619d4d23832f9f9315567375 Mon Sep 17 00:00:00 2001
+From: Jerry DeLisle <jvdelisle@gcc.gnu.org>
+Date: Wed, 10 Dec 2025 10:38:29 -0800
+Subject: [PATCH] Fortran: Fix wrongly rejected allocatable LOCK_TYPE
+ [PR107406]
+
+	PR fortran/107406
+
+gcc/fortran/ChangeLog:
+
+	* parse.cc (check_component): Adjust the error check to
+	require a codimension if the allocatable type has
+	a non-coarray LOCK_TYPE component.
+
+gcc/testsuite/ChangeLog:
+
+	* gfortran.dg/coarray_lock_3.f90: Remove dg-error on
+	valid code.
+	* gfortran.dg/coarray_lock_4.f90: Likewise.
+	* gfortran.dg/coarray_lock_5.f90: Likwise
+
+	Co-Authored by: Andre Vehreschild <vehre@gcc.gnu.org>
+
+(cherry picked from commit 89110c5386b69391fe7ec549f89cdf89c7ab3a81)
+---
+ gcc/fortran/parse.cc                         | 7 ++-----
+ gcc/testsuite/gfortran.dg/coarray_lock_3.f90 | 2 +-
+ gcc/testsuite/gfortran.dg/coarray_lock_4.f90 | 2 +-
+ gcc/testsuite/gfortran.dg/coarray_lock_5.f90 | 2 +-
+ 4 files changed, 5 insertions(+), 8 deletions(-)
+
+diff --git a/gcc/fortran/parse.cc b/gcc/fortran/parse.cc
+index a95bb62afb8c..81c7e5869abd 100644
+--- a/gcc/fortran/parse.cc
++++ b/gcc/fortran/parse.cc
+@@ -3675,11 +3675,8 @@ check_component (gfc_symbol *sym, gfc_component *c, gfc_component **lockp,
+                "of type LOCK_TYPE, which must have a codimension or be a "
+                "subcomponent of a coarray", c->name, &c->loc);
+ 
+-  if (lock_type && allocatable && !coarray)
+-    gfc_error ("Allocatable component %s at %L of type LOCK_TYPE must have "
+-               "a codimension", c->name, &c->loc);
+-  else if (lock_type && allocatable && c->ts.type == BT_DERIVED
+-           && c->ts.u.derived->attr.lock_comp)
++  if (lock_type && allocatable && !coarray && c->ts.type == BT_DERIVED
++      && c->ts.u.derived->attr.lock_comp)
+     gfc_error ("Allocatable component %s at %L must have a codimension as "
+                "it has a noncoarray subcomponent of type LOCK_TYPE",
+                c->name, &c->loc);
+diff --git a/gcc/testsuite/gfortran.dg/coarray_lock_3.f90 b/gcc/testsuite/gfortran.dg/coarray_lock_3.f90
+index 388857307f05..2aec37172762 100644
+--- a/gcc/testsuite/gfortran.dg/coarray_lock_3.f90
++++ b/gcc/testsuite/gfortran.dg/coarray_lock_3.f90
+@@ -24,7 +24,7 @@ end module m
+ module m2
+   use iso_fortran_env
+   type t2
+-    type(lock_type), allocatable :: x ! { dg-error "Allocatable component x at .1. of type LOCK_TYPE must have a codimension" }
++    type(lock_type), allocatable :: x
+   end type t2
+ end module m2
+ 
+diff --git a/gcc/testsuite/gfortran.dg/coarray_lock_4.f90 b/gcc/testsuite/gfortran.dg/coarray_lock_4.f90
+index 787dfe042102..107dc19883f4 100644
+--- a/gcc/testsuite/gfortran.dg/coarray_lock_4.f90
++++ b/gcc/testsuite/gfortran.dg/coarray_lock_4.f90
+@@ -49,7 +49,7 @@ subroutine more_tests
+   type(t1) :: x1 ! OK
+ 
+   type t2
+-    type(lock_type), allocatable :: c1(:) ! { dg-error "Allocatable component c1 at .1. of type LOCK_TYPE must have a codimension" }
++    type(lock_type), allocatable :: c1(:)
+   end type t2
+ 
+   type t3
+diff --git a/gcc/testsuite/gfortran.dg/coarray_lock_5.f90 b/gcc/testsuite/gfortran.dg/coarray_lock_5.f90
+index b419606b0de1..a92c7f52d8e5 100644
+--- a/gcc/testsuite/gfortran.dg/coarray_lock_5.f90
++++ b/gcc/testsuite/gfortran.dg/coarray_lock_5.f90
+@@ -32,7 +32,7 @@ subroutine test2()
+   use iso_fortran_env
+   implicit none
+   type t
+-    type(lock_type), allocatable :: lock ! { dg-error "Allocatable component lock at .1. of type LOCK_TYPE must have a codimension" }
++    type(lock_type), allocatable :: lock
+   end type t
+   type t2
+     type(lock_type) :: lock
+-- 
+2.43.7
+
+

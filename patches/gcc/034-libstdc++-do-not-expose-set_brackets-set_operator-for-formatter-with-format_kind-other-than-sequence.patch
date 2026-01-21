@@ -1,0 +1,110 @@
+From 3fb34411a7994b25e5efb6064ee17556567e0dc0 Mon Sep 17 00:00:00 2001
+From: =?utf8?q?Tomasz=20Kami=C5=84ski?= <tkaminsk@redhat.com>
+Date: Tue, 8 Jul 2025 10:04:41 +0200
+Subject: [PATCH] libstdc++: Do not expose set_brackets/set_separator for
+ formatter with format_kind other than sequence [PR119861]
+
+The standard defines separate specializations of range-default-formatter, out
+of which only one for range_format::sequence provide the set_brackets and
+set_separator methods. We implemented it as one specialization and exposed
+this method for range_format other than string or debug_string, i.e. when
+range_formatter was used as underlying formatter.
+
+	PR libstdc++/119861
+
+libstdc++-v3/ChangeLog:
+
+	* include/std/format (formatter<_Rg, _CharT>::set_separator)
+	(formatter<_Rg, _CharT>::set_brackets): Constrain with
+	(format_kind<_Rg> == range_format::sequence).
+	* testsuite/std/format/ranges/pr119861_neg.cc: New test.
+
+(cherry picked from commit 70bd97e89ddf8fcb8c14e84a8fd580404536eeb1)
+---
+ libstdc++-v3/include/std/format               |  4 +-
+ .../std/format/ranges/pr119861_neg.cc         | 52 +++++++++++++++++++
+ 2 files changed, 54 insertions(+), 2 deletions(-)
+ create mode 100644 libstdc++-v3/testsuite/std/format/ranges/pr119861_neg.cc
+
+diff --git a/libstdc++-v3/include/std/format b/libstdc++-v3/include/std/format
+index 7d6b75228d18..6c9f2743f6b4 100644
+--- a/libstdc++-v3/include/std/format
++++ b/libstdc++-v3/include/std/format
+@@ -5708,13 +5708,13 @@ namespace __format
+ 
+       constexpr void
+       set_separator(basic_string_view<_CharT> __sep) noexcept
+-	requires (!_S_range_format_is_string)
++	requires (format_kind<_Rg> == range_format::sequence)
+       { _M_under.set_separator(__sep); }
+ 
+       constexpr void
+       set_brackets(basic_string_view<_CharT> __open,
+ 		   basic_string_view<_CharT> __close) noexcept
+-	requires (!_S_range_format_is_string)
++	requires (format_kind<_Rg> == range_format::sequence)
+       { _M_under.set_brackets(__open, __close); }
+ 
+       // We deviate from standard, that declares this as template accepting
+diff --git a/libstdc++-v3/testsuite/std/format/ranges/pr119861_neg.cc b/libstdc++-v3/testsuite/std/format/ranges/pr119861_neg.cc
+new file mode 100644
+index 000000000000..9a6ed16393ee
+--- /dev/null
++++ b/libstdc++-v3/testsuite/std/format/ranges/pr119861_neg.cc
+@@ -0,0 +1,52 @@
++// { dg-do compile { target c++23 } }
++
++#include <format>
++#include <vector>
++
++// only format_kind::sequence provides set_brackets and set_separator methods 
++
++template<std::range_format fk, typename T>
++struct MyCont : std::vector<T>
++{
++  using std::vector<T>::vector;
++};
++
++template<std::range_format fk, typename T>
++constexpr std::range_format std::format_kind<MyCont<fk, T>> = fk;
++
++void test_sequence()
++{
++  std::formatter<MyCont<std::range_format::sequence, int>, char> fmtter;
++  fmtter.set_brackets("{", "}");
++  fmtter.set_separator(",");
++}
++
++void test_map()
++{
++  std::formatter<MyCont<std::range_format::map, std::pair<int, int>>, char> fmtter;
++  fmtter.set_brackets("{", "}"); // { dg-error "here" }
++  fmtter.set_separator(","); // { dg-error "here" }
++}
++
++void test_set()
++{
++  std::formatter<MyCont<std::range_format::set, int>, char> fmtter;
++  fmtter.set_brackets("{", "}"); // { dg-error "here" }
++  fmtter.set_separator(","); // { dg-error "here" }
++}
++
++void test_string()
++{
++  std::formatter<MyCont<std::range_format::string, char>, char> fmtter;
++  fmtter.set_brackets("{", "}"); // { dg-error "here" }
++  fmtter.set_separator(","); // { dg-error "here" }
++}
++
++void test_debug_string()
++{
++  std::formatter<MyCont<std::range_format::debug_string, char>, char> fmtter;
++  fmtter.set_brackets("{", "}"); // { dg-error "here" }
++  fmtter.set_separator(","); // { dg-error "here" }
++}
++
++// { dg-error "no matching function for call to 'std::formatter<" "" { target *-*-* } 0 }
+-- 
+2.43.7
+
+

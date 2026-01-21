@@ -1,0 +1,152 @@
+From d43ece39b709992681d92b17c1e58b5f152ff247 Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Wed, 6 Aug 2025 11:30:08 +0200
+Subject: [PATCH] bitint: Fix up INTEGER_CST PHI handling [PR121413]
+
+The following testcase is miscompiled on aarch64-linux.
+The problem is in the optimization to shorten large constants
+in PHI arguments.
+In a couple of places during bitint lowering we compute
+minimal precision of constant and if it is significantly
+smaller than the precision of the type, store smaller constant
+in memory and extend it at runtime (zero or all ones).
+Now, in most places that works fine, we handle the stored number
+of limbs by loading them from memory and then the rest is
+extended.  In the PHI INTEGER_CST argument handling we do
+it differently, we don't form there any loops (because we
+insert stmt sequences on the edges).
+The problem is that we copy the whole _BitInt variable from
+memory to the PHI VAR_DECL + initialize the rest to = {} or
+memset to -1.  It has
+min_prec = CEIL (min_prec, limb_prec) * limb_prec;
+precision, so e.g. on x86_64 there is no padding and it works
+just fine.  But on aarch64 which has abi_limb_mode TImode
+and limb_mode DImode it doesn't in some cases.
+In the testcase the constant has 408 bits min precision, rounded up
+to limb_prec (64) is 448, i.e. 7 limbs.  But aarch64 with TImode
+abi_limb_mode will actually allocate 8 limbs and the most significant
+limb is solely padding.  As we want to extend the constant with all
+ones, copying the padding (from memory, so 0s) will result in
+64 0 bits where 1 bits were needed.
+
+The following patch fixes it by detecting this case and setting
+min_prec to a multiple of abi limb precision so that it has
+no padding.
+
+2025-08-06  Jakub Jelinek  <jakub@redhat.com>
+
+	PR tree-optimization/121413
+	* gimple-lower-bitint.cc (abi_limb_prec): New variable
+	(bitint_precision_kind): Initialize it.
+	(gimple_lower_bitint): Clear it at the start.  For
+	min_prec > limb_prec descreased precision vars for
+	INTEGER_CST PHI arguments ensure min_prec is either
+	prec or multiple of abi_limb_prec.
+
+	* gcc.dg/torture/bitint-85.c: New test.
+
+(cherry picked from commit 70aff5112ec25f2391d8048d8c7994160d3cb008)
+---
+ gcc/gimple-lower-bitint.cc               | 22 ++++++++++++---
+ gcc/testsuite/gcc.dg/torture/bitint-85.c | 34 ++++++++++++++++++++++++
+ 2 files changed, 53 insertions(+), 3 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.dg/torture/bitint-85.c
+
+diff --git a/gcc/gimple-lower-bitint.cc b/gcc/gimple-lower-bitint.cc
+index 23f3162e1d99..6e83367ff41f 100644
+--- a/gcc/gimple-lower-bitint.cc
++++ b/gcc/gimple-lower-bitint.cc
+@@ -76,7 +76,7 @@ enum bitint_prec_kind {
+ /* Caches to speed up bitint_precision_kind.  */
+ 
+ static int small_max_prec, mid_min_prec, large_min_prec, huge_min_prec;
+-static int limb_prec;
++static int limb_prec, abi_limb_prec;
+ 
+ /* Categorize _BitInt(PREC) as small, middle, large or huge.  */
+ 
+@@ -106,6 +106,9 @@ bitint_precision_kind (int prec)
+     large_min_prec = MAX_FIXED_MODE_SIZE + 1;
+   if (!limb_prec)
+     limb_prec = GET_MODE_PRECISION (limb_mode);
++  if (!abi_limb_prec)
++    abi_limb_prec
++      = GET_MODE_PRECISION (as_a <scalar_int_mode> (info.abi_limb_mode));
+   if (!huge_min_prec)
+     {
+       if (4 * limb_prec >= MAX_FIXED_MODE_SIZE)
+@@ -6075,7 +6078,7 @@ static unsigned int
+ gimple_lower_bitint (void)
+ {
+   small_max_prec = mid_min_prec = large_min_prec = huge_min_prec = 0;
+-  limb_prec = 0;
++  limb_prec = abi_limb_prec = 0;
+ 
+   unsigned int i;
+   for (i = 0; i < num_ssa_names; ++i)
+@@ -7036,7 +7039,20 @@ gimple_lower_bitint (void)
+ 		       from smaller number.  */
+ 		    min_prec = prec;
+ 		  else
+-		    min_prec = CEIL (min_prec, limb_prec) * limb_prec;
++		    {
++		      min_prec = CEIL (min_prec, limb_prec) * limb_prec;
++		      if (min_prec > (unsigned) limb_prec
++			  && abi_limb_prec > limb_prec)
++			{
++			  /* For targets with ABI limb precision higher than
++			     limb precision round to ABI limb precision,
++			     otherwise c can contain padding bits.  */
++			  min_prec
++			    = CEIL (min_prec, abi_limb_prec) * abi_limb_prec;
++			  if (min_prec > prec - rem - 2 * limb_prec)
++			    min_prec = prec;
++			}
++		    }
+ 		  if (min_prec == 0)
+ 		    c = NULL_TREE;
+ 		  else if (min_prec == prec)
+diff --git a/gcc/testsuite/gcc.dg/torture/bitint-85.c b/gcc/testsuite/gcc.dg/torture/bitint-85.c
+new file mode 100644
+index 000000000000..43eb6ffc0b68
+--- /dev/null
++++ b/gcc/testsuite/gcc.dg/torture/bitint-85.c
+@@ -0,0 +1,34 @@
++/* { dg-do run { target bitint } } */
++/* { dg-options "-std=c23 -pedantic-errors" } */
++/* { dg-skip-if "" { ! run_expensive_tests }  { "*" } { "-O0" "-O2" } } */
++/* { dg-skip-if "" { ! run_expensive_tests } { "-flto" } { "" } } */
++
++#if __BITINT_MAXWIDTH__ >= 1024
++constexpr _BitInt(1024) d = -541140097068598424394740839221562143161511518875518765552323978870598341733206554363735813878577506997168480201818027232521wb;
++int c;
++
++static inline void
++foo (_BitInt(1024) b, _BitInt(1024) *r)
++{
++  if (c)
++    b = 0;
++  *r = b;
++}
++
++[[gnu::noipa]] void
++bar (_BitInt(1024) y)
++{
++  if (y != d)
++    __builtin_abort ();
++}
++#endif
++
++int
++main ()
++{
++#if __BITINT_MAXWIDTH__ >= 1024
++  _BitInt(1024) x;
++  foo (d, &x);
++  bar (x);
++#endif
++}
+-- 
+2.43.7
+
+

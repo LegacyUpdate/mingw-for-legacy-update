@@ -1,0 +1,156 @@
+From c8acafb9e86a06bca8384e247168ce9a8599ded1 Mon Sep 17 00:00:00 2001
+From: Robin Dapp <rdapp.gcc@gmail.com>
+Date: Tue, 7 Oct 2025 07:18:27 -0600
+Subject: [PATCH] [PATCH] RISC-V: Detect wrap in shuffle_series_pattern
+ [PR121845].
+
+Hi,
+
+In shuffle_series_pattern we use series_p to determine if the permute
+mask is a simple series.  This didn't take into account that series_p
+also returns true for e.g. {0, 3, 2, 1} where the step is 3 and the
+indices form a series modulo 4.
+
+We emit
+ vid + vmul
+in order to synthesize a series.  In order to be always correct we would
+need a vrem afterwards still which does not seem worth it.
+
+This patch adds the modulo for VLA permutes and punts if we wrap around
+for VLS permutes.  I'm not really certain whether we'll really see a wrapping
+VLA series (certainly we haven't so far in the test suite) but as we observed
+a VLS one here now it appears conservatively correct to module the indices.
+
+Regtested on rv64gcv_zvl512b.
+
+Regards
+ Robin
+
+	PR target/121845
+
+gcc/ChangeLog:
+
+	* config/riscv/riscv-v.cc (shuffle_series_patterns):
+	Modulo indices for VLA and punt when wrapping for VLS.
+
+gcc/testsuite/ChangeLog:
+
+	* gcc.target/riscv/rvv/autovec/pr121845.c: New test.
+
+(cherry picked from commit 62631c39a788161ff2f686adf355d10443e0d899)
+---
+ gcc/config/riscv/riscv-v.cc                   | 38 ++++++++++++++++++-
+ .../gcc.target/riscv/rvv/autovec/pr121845.c   | 37 ++++++++++++++++++
+ 2 files changed, 74 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/gcc.target/riscv/rvv/autovec/pr121845.c
+
+diff --git a/gcc/config/riscv/riscv-v.cc b/gcc/config/riscv/riscv-v.cc
+index bdf2c8fbf727..247cb05c2eec 100644
+--- a/gcc/config/riscv/riscv-v.cc
++++ b/gcc/config/riscv/riscv-v.cc
+@@ -3946,6 +3946,9 @@ shuffle_series_patterns (struct expand_vec_perm_d *d)
+   bool need_insert = false;
+   bool have_series = false;
+ 
++  poly_int64 len = d->perm.length ();
++  bool need_modulo = !len.is_constant ();
++
+   /* Check for a full series.  */
+   if (known_ne (step1, 0) && d->perm.series_p (0, 1, el1, step1))
+     have_series = true;
+@@ -3957,7 +3960,33 @@ shuffle_series_patterns (struct expand_vec_perm_d *d)
+       need_insert = true;
+     }
+ 
+-  if (!have_series)
++  /* A permute like {0, 3, 2, 1} is recognized as series because series_p also
++     allows wrapping/modulo of the permute index.  The step would be 3 and the
++     indices are correct modulo 4.  As noted in expand_vec_perm vrgather does
++     not handle wrapping but rather zeros out-of-bounds indices.
++     This means we would need to emit an explicit modulo operation here which
++     does not seem worth it.  We rather defer to the generic handling instead.
++     Even in the non-wrapping case it is doubtful whether
++      vid
++      vmul
++      vrgather
++     is preferable over
++      vle
++      vrgather.
++     If the permute mask can be reused there shouldn't be any difference and
++     otherwise it becomes a question of load bandwidth.  */
++  if (have_series && len.is_constant ())
++    {
++      int64_t step = need_insert ? step2.to_constant () : step1.to_constant ();
++      int prec = GET_MODE_PRECISION (GET_MODE_INNER (d->vmode));
++      wide_int wlen = wide_int::from (len.to_constant (), prec * 2, SIGNED);
++      wide_int wstep = wide_int::from (step, prec * 2, SIGNED);
++      wide_int result = wi::mul (wlen, wstep);
++      if (wi::gt_p (result, wlen, SIGNED))
++	need_modulo = true;
++    }
++
++  if (!have_series || (len.is_constant () && need_modulo))
+     return false;
+ 
+   /* Disable shuffle if we can't find an appropriate integer index mode for
+@@ -3976,6 +4005,13 @@ shuffle_series_patterns (struct expand_vec_perm_d *d)
+   expand_vec_series (series, gen_int_mode (need_insert ? el2 : el1, eltmode),
+ 		     gen_int_mode (need_insert ? step2 : step1, eltmode));
+ 
++  if (need_modulo)
++    {
++      rtx mod = gen_const_vector_dup (sel_mode, len - 1);
++      series = expand_simple_binop (sel_mode, AND, series, mod, NULL,
++				    0, OPTAB_DIRECT);
++    }
++
+   /* Insert the remaining element if necessary.  */
+   if (need_insert)
+     {
+diff --git a/gcc/testsuite/gcc.target/riscv/rvv/autovec/pr121845.c b/gcc/testsuite/gcc.target/riscv/rvv/autovec/pr121845.c
+new file mode 100644
+index 000000000000..84aca3cd8e74
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/riscv/rvv/autovec/pr121845.c
+@@ -0,0 +1,37 @@
++/* { dg-do run } */
++/* { dg-require-effective-target riscv_v_ok } */
++/* { dg-options "-march=rv64gcv -mabi=lp64d -O0" } */
++
++#include <stdint.h>
++typedef uint32_t a;
++typedef uint64_t uint64;
++
++uint64 b;
++__attribute__ ((__vector_size__ (4 * sizeof (a)))) a f = {504339, 7, 3};
++uint64 *g = &b;
++
++int32_t *
++c (uint8_t, int32_t *, uint32_t, uint32_t, int64_t);
++int8_t
++d ()
++{
++  int32_t e;
++  c (0, &e, 0, 0, 1);
++  return 0;
++}
++
++int32_t *
++c (uint8_t, int32_t *j, uint32_t, uint32_t, int64_t)
++{
++  f = __builtin_shufflevector (f, f, 0, 3, 2, 1);
++  *g = f[2];
++  return j;
++}
++
++int
++main ()
++{
++  d ();
++  if (b != 3)
++    __builtin_abort ();
++}
+-- 
+2.43.7
+
+

@@ -1,0 +1,113 @@
+From c9f9bfb30bcd02cc85b4dbadee99805d1fc39203 Mon Sep 17 00:00:00 2001
+From: Egas Ribeiro <egas.g.ribeiro@gmail.com>
+Date: Fri, 19 Dec 2025 21:34:55 +0000
+Subject: [PATCH] c++: Fix member-like friend detection for non-template
+ classes [PR122550]
+
+member_like_constrained_friend_p was incorrectly returning true for
+constrained friend function templates declared in non-template classes,
+causing them to be treated as distinct from their forward declarations.
+This led to ambiguity errors at call sites.
+
+Per [temp.friend]/9, a constrained friend is only "member-like" (and thus
+declares a different function) in two cases:
+1. Non-template friends with constraints (must be in a templated class)
+2. Template friends whose constraints depend on outer template parameters
+
+In both cases, the enclosing class scope must be templated. The fix adds
+a check for CLASSTYPE_IMPLICIT_INSTANTIATION to ensure the friend's
+context is actually a class template, not a plain class or explicit
+specialization.
+
+	PR c++/122550
+
+gcc/cp/ChangeLog:
+
+	* decl.cc (member_like_constrained_friend_p): Check that the
+	friend's enclosing class is an implicit instantiation.
+
+gcc/testsuite/ChangeLog:
+
+	* g++.dg/cpp2a/concepts-friend18.C: New test.
+	* g++.dg/cpp2a/concepts-friend18a.C: New test.
+
+Signed-off-by: Egas Ribeiro <egas.g.ribeiro@gmail.com>
+Reviewed-by: Patrick Palka <ppalka@redhat.com>
+(cherry picked from commit 3f09320bf65312a2f442aca514a35a382a6521f1)
+---
+ gcc/cp/decl.cc                                |  1 +
+ .../g++.dg/cpp2a/concepts-friend18.C          | 19 ++++++++++++++++
+ .../g++.dg/cpp2a/concepts-friend18a.C         | 22 +++++++++++++++++++
+ 3 files changed, 42 insertions(+)
+ create mode 100644 gcc/testsuite/g++.dg/cpp2a/concepts-friend18.C
+ create mode 100644 gcc/testsuite/g++.dg/cpp2a/concepts-friend18a.C
+
+diff --git a/gcc/cp/decl.cc b/gcc/cp/decl.cc
+index 6d70502aae11..7eb5185f410e 100644
+--- a/gcc/cp/decl.cc
++++ b/gcc/cp/decl.cc
+@@ -1012,6 +1012,7 @@ member_like_constrained_friend_p (tree decl)
+ 	  && DECL_UNIQUE_FRIEND_P (decl)
+ 	  && DECL_FRIEND_CONTEXT (decl)
+ 	  && get_constraints (decl)
++	  && CLASSTYPE_IMPLICIT_INSTANTIATION (DECL_FRIEND_CONTEXT (decl))
+ 	  && (!DECL_TEMPLATE_INFO (decl)
+ 	      || !PRIMARY_TEMPLATE_P (DECL_TI_TEMPLATE (decl))
+ 	      || (uses_outer_template_parms_in_constraints
+diff --git a/gcc/testsuite/g++.dg/cpp2a/concepts-friend18.C b/gcc/testsuite/g++.dg/cpp2a/concepts-friend18.C
+new file mode 100644
+index 000000000000..bd1bac6cdacd
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/cpp2a/concepts-friend18.C
+@@ -0,0 +1,19 @@
++// PR c++/122550
++// { dg-do compile { target c++20 } }
++
++struct Hasher;
++template <class a>
++concept C = true;
++
++template<C T>
++void add(Hasher&, T);
++
++struct Hasher {
++    template<C T>
++    friend void add(Hasher& hasher, T integer) {}
++};
++
++int main() {
++    Hasher h;
++    add(h, 0);
++}
+diff --git a/gcc/testsuite/g++.dg/cpp2a/concepts-friend18a.C b/gcc/testsuite/g++.dg/cpp2a/concepts-friend18a.C
+new file mode 100644
+index 000000000000..d29a2fba0371
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/cpp2a/concepts-friend18a.C
+@@ -0,0 +1,22 @@
++// PR c++/122550
++// { dg-do compile { target c++20 } }
++
++template<typename U>
++struct Hasher;
++
++template <class a>
++concept C = true;
++
++template<C T>
++void add(Hasher<int>&, T);
++
++template<>
++struct Hasher<int> {
++    template<C T>
++    friend void add(Hasher& hasher, T integer) {}
++};
++
++int main() {
++    Hasher<int> h;
++    add(h, 0);
++}
+-- 
+2.43.7
+
+

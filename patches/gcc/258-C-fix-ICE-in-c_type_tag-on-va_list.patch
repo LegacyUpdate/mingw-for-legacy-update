@@ -1,0 +1,79 @@
+From f4d19f74bcd0ca496de729b46dd2d8a80fda1d29 Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Thu, 27 Nov 2025 20:18:57 +0100
+Subject: [PATCH] c: Fix ICE in c_type_tag on va_list [PR121506]
+
+The C and C++ FEs disagree on what TYPE_NAME on RECORD_TYPE for
+structure/class definition is (rather than typedef/using, for
+those both have TYPE_NAME of TYPE_DECL with DECL_ORIGINAL_TYPE),
+the C FE just uses IDENTIFIER_NODE as TYPE_NAME on RECORD_TYPE,
+while the C++ FE uses TYPE_DECL as TYPENAME on RECORD_TYPE and
+only DECL_NAME on the TYPE_DECL provides the IDENTIFIER_NODE.
+The reason for the C++ FE way is that there can be type definitions
+at class scope (rather than just typedefs) and those need to be
+among TYPE_FIELDS (so the corresponding TYPE_DECL is in that chain)
+etc.
+The middle-end can cope with it, e.g.
+                if (TREE_CODE (TYPE_NAME (node)) == IDENTIFIER_NODE)
+                  pp_tree_identifier (pp, TYPE_NAME (node));
+                else if (TREE_CODE (TYPE_NAME (node)) == TYPE_DECL
+                         && DECL_NAME (TYPE_NAME (node)))
+                  dump_decl_name (pp, TYPE_NAME (node), flags);
+and many other places.
+Now, the backends on various targets create artificial structure
+definitions for va_list, e.g. x86 creates struct __va_list_tag
+and they do it the C++ FE way so that the C++ FE can cope with those.
+Except the new c_type_tag can't deal with that and ICEs.
+
+The following patch fixes it so that it can handle it too.
+
+2025-11-27  Jakub Jelinek  <jakub@redhat.com>
+
+	PR c/121506
+	* c-typeck.cc (c_type_tag): If TYPE_NAME is TYPE_DECL
+	with non-NULL DECL_NAME, return that.
+
+	* gcc.dg/pr121506.c: New test.
+
+(cherry picked from commit ca19686a6b87696c0ecea5e9fce825b5e5e10144)
+---
+ gcc/c/c-typeck.cc               | 6 +++---
+ gcc/testsuite/gcc.dg/pr121506.c | 8 ++++++++
+ 2 files changed, 11 insertions(+), 3 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.dg/pr121506.c
+
+diff --git a/gcc/c/c-typeck.cc b/gcc/c/c-typeck.cc
+index b007c8ffe766..944e75a83e47 100644
+--- a/gcc/c/c-typeck.cc
++++ b/gcc/c/c-typeck.cc
+@@ -602,9 +602,9 @@ c_type_tag (const_tree t)
+     return NULL_TREE;
+   if (TREE_CODE (name) == TYPE_DECL)
+     {
+-      /* A TYPE_DECL added by add_decl_expr.  */
+-      gcc_checking_assert (!DECL_NAME (name));
+-      return NULL_TREE;
++      if (!DECL_NAME (name))
++	return NULL_TREE;
++      name = DECL_NAME (name);
+     }
+   gcc_checking_assert (TREE_CODE (name) == IDENTIFIER_NODE);
+   return name;
+diff --git a/gcc/testsuite/gcc.dg/pr121506.c b/gcc/testsuite/gcc.dg/pr121506.c
+new file mode 100644
+index 000000000000..0d0664739aca
+--- /dev/null
++++ b/gcc/testsuite/gcc.dg/pr121506.c
+@@ -0,0 +1,8 @@
++/* PR c/121506 */
++/* { dg-do compile } */
++
++#include <stdarg.h>
++
++struct A;
++void foo (struct A *);	/* { dg-message "previous declaration of 'foo' with type 'void\\\(struct A \\\*\\\)'" } */
++void foo (va_list);	/* { dg-error "conflicting types for 'foo'; have" } */
+-- 
+2.43.7
+
+

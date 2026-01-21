@@ -1,0 +1,117 @@
+From bacfbe00834337948aa29a08896974534c85f7af Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Sat, 10 Jan 2026 11:35:30 +0100
+Subject: [PATCH] ranger: Verify gimple_call_num_args for several builtins
+ [PR123431]
+
+While gimple_call_combined_fn already do call
+gimple_builtin_call_types_compatible_p and for most of builtins ensures
+the right types of arguments, for type generic builtins it does not,
+from POV of that function those functions are rettype (...).
+Now, while the FE does some number of argument checking for the type
+generic builtins, as the testcase below shows, it can be gamed.
+
+So, this patch checks the number of arguments for type generic builtins
+and does nothing if they have unexpected number of arguments.
+Also for the returns arg verifies it can access the first argument.
+
+2026-01-10  Jakub Jelinek  <jakub@redhat.com>
+
+	PR tree-optimization/123431
+	* gimple-range-op.cc (gimple_range_op_handler::maybe_builtin_call):
+	Punt if type-generic builtins with a single argument don't have
+	exactly one argument.  For returns_arg punt if call doesn't have
+	at least one argument.
+
+	* gcc.dg/pr123431.c: New test.
+
+(cherry picked from commit 8a6ff9ca60cf532f5b4fa55a85a289076819e625)
+---
+ gcc/gimple-range-op.cc          | 14 +++++++++++++-
+ gcc/testsuite/gcc.dg/pr123431.c | 19 +++++++++++++++++++
+ 2 files changed, 32 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/gcc.dg/pr123431.c
+
+diff --git a/gcc/gimple-range-op.cc b/gcc/gimple-range-op.cc
+index 90a619714898..d3d9bff1efc5 100644
+--- a/gcc/gimple-range-op.cc
++++ b/gcc/gimple-range-op.cc
+@@ -1404,6 +1404,8 @@ gimple_range_op_handler::maybe_builtin_call ()
+   switch (func)
+     {
+     case CFN_BUILT_IN_CONSTANT_P:
++      if (gimple_call_num_args (call) != 1)
++	return;
+       m_op1 = gimple_call_arg (call, 0);
+       if (irange::supports_p (TREE_TYPE (m_op1)))
+ 	m_operator = &op_cfn_constant_p;
+@@ -1412,21 +1414,29 @@ gimple_range_op_handler::maybe_builtin_call ()
+       break;
+ 
+     CASE_FLT_FN (CFN_BUILT_IN_SIGNBIT):
++      if (gimple_call_num_args (call) != 1)
++	return;
+       m_op1 = gimple_call_arg (call, 0);
+       m_operator = &op_cfn_signbit;
+       break;
+ 
+     CASE_FLT_FN (BUILT_IN_ISINF):
++      if (gimple_call_num_args (call) != 1)
++	return;
+       m_op1 = gimple_call_arg (call, 0);
+       m_operator = &op_cfn_isinf;
+       break;
+ 
+     case CFN_BUILT_IN_ISFINITE:
++      if (gimple_call_num_args (call) != 1)
++	return;
+       m_op1 = gimple_call_arg (call, 0);
+       m_operator = &op_cfn_isfinite;
+       break;
+ 
+     case CFN_BUILT_IN_ISNORMAL:
++      if (gimple_call_num_args (call) != 1)
++	return;
+       m_op1 = gimple_call_arg (call, 0);
+       m_operator = &op_cfn_isnormal;
+       break;
+@@ -1557,7 +1567,9 @@ gimple_range_op_handler::maybe_builtin_call ()
+     default:
+       {
+ 	unsigned arg;
+-	if (gimple_call_fnspec (call).returns_arg (&arg) && arg == 0)
++	if (gimple_call_fnspec (call).returns_arg (&arg)
++	    && arg == 0
++	    && gimple_call_num_args (call) > 0)
+ 	  {
+ 	    m_op1 = gimple_call_arg (call, 0);
+ 	    m_operator = &op_cfn_pass_through_arg1;
+diff --git a/gcc/testsuite/gcc.dg/pr123431.c b/gcc/testsuite/gcc.dg/pr123431.c
+new file mode 100644
+index 000000000000..369b77ec13ca
+--- /dev/null
++++ b/gcc/testsuite/gcc.dg/pr123431.c
+@@ -0,0 +1,19 @@
++/* PR tree-optimization/123431 */
++/* { dg-do compile } */
++/* { dg-options "-O2" } */
++
++extern void foo (int);
++
++extern inline __attribute__((always_inline)) void
++bar (int x, ...)
++{
++  if (__builtin_constant_p (__builtin_va_arg_pack ()))
++    foo (x);
++}
++
++void
++baz (int x)
++{
++  bar (1, 2);
++  bar (3, x);
++}
+-- 
+2.43.7
+
+

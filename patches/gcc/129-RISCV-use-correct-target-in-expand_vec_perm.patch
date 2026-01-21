@@ -1,0 +1,162 @@
+From 7ec702536bb759f4b1cc848d5a7670ab01edc90d Mon Sep 17 00:00:00 2001
+From: Robin Dapp <rdapp@ventanamicro.com>
+Date: Thu, 4 Sep 2025 10:16:21 +0200
+Subject: [PATCH] RISC-V: Use correct target in expand_vec_perm [PR121780].
+
+This fixes a glaring mistake in yesterday's change to the expansion of
+vec_perm.  We should of course move tmp_target into the real target
+and not the other way around.  I wonder why my testing hasn't
+caught this...
+
+	PR target/121742
+	PR target/121780
+	PR target/121781
+
+gcc/ChangeLog:
+
+	* config/riscv/riscv-v.cc (expand_vec_perm): Swap target and
+	tmp_target.
+
+gcc/testsuite/ChangeLog:
+
+	* gcc.target/riscv/rvv/autovec/pr121780.c: New test.
+	* gcc.target/riscv/rvv/autovec/pr121781.c: New test.
+
+(cherry picked from commit e3d5e9f0c8c6f27bf59d321d5082be7b3bb39f8a)
+---
+ gcc/config/riscv/riscv-v.cc                   |  2 +-
+ .../gcc.target/riscv/rvv/autovec/pr121780.c   | 47 ++++++++++++++++
+ .../gcc.target/riscv/rvv/autovec/pr121781.c   | 53 +++++++++++++++++++
+ 3 files changed, 101 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/gcc.target/riscv/rvv/autovec/pr121780.c
+ create mode 100644 gcc/testsuite/gcc.target/riscv/rvv/autovec/pr121781.c
+
+diff --git a/gcc/config/riscv/riscv-v.cc b/gcc/config/riscv/riscv-v.cc
+index 488331d00534..bdf2c8fbf727 100644
+--- a/gcc/config/riscv/riscv-v.cc
++++ b/gcc/config/riscv/riscv-v.cc
+@@ -3076,7 +3076,7 @@ expand_vec_perm (rtx target, rtx op0, rtx op1, rtx sel)
+   emit_vlmax_masked_gather_mu_insn (tmp_target, op1, tmp, mask);
+ 
+   if (overlap)
+-    emit_move_insn (tmp_target, target);
++    emit_move_insn (target, tmp_target);
+ }
+ 
+ /* Implement TARGET_VECTORIZE_VEC_PERM_CONST for RVV.  */
+diff --git a/gcc/testsuite/gcc.target/riscv/rvv/autovec/pr121780.c b/gcc/testsuite/gcc.target/riscv/rvv/autovec/pr121780.c
+new file mode 100644
+index 000000000000..8284e5acecb5
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/riscv/rvv/autovec/pr121780.c
+@@ -0,0 +1,47 @@
++/* { dg-do run } */
++/* { dg-require-effective-target riscv_v_ok } */
++/* { dg-options "-march=rv64gcv -mabi=lp64d -O1 -Wno-overflow" } */
++
++typedef char int8_t;
++typedef unsigned char uint8_t;
++typedef short int16_t;
++typedef int int32_t;
++typedef unsigned int uint32_t;
++typedef long int64_t;
++typedef unsigned long uint64_t;
++
++typedef uint8_t a;
++typedef a b __attribute__((vector_size(4)));
++typedef a c __attribute__((vector_size(8)));
++int d[10];
++struct {
++  int16_t e;
++} f;
++int64_t g;
++int32_t j(int32_t, int32_t, int8_t, uint8_t, int64_t) {
++  c k = {20927, 0, 9, 6, 6, 2};
++  int *l = &d[1];
++  for (;;) {
++    asm goto("" : : : : m);
++    k = __builtin_shufflevector(
++        __builtin_shufflevector(k, k, 3, 1, 1, 9, 4, 5, 9, 0),
++        __builtin_shufflevector((b){}, (b){}, 1, 3, 7, 6, 0, 0, 6, 2), 10, 2, 1,
++        7, 7, 7, 4, 5);
++    for (; f.e >= 0;) {
++      *l = k[7];
++      uint32_t n[][7][6] = {};
++      return n[0][5][0];
++    m:
++    }
++  }
++}
++
++int main() {
++  uint64_t o = 1;
++  j(o, g, g, o, 0);
++  int BS_CHECKSUM = 5;
++  for (int i = 0; i < 10; i++)
++    BS_CHECKSUM ^= d[i];
++  if (BS_CHECKSUM != 7)
++    __builtin_abort ();
++}
+diff --git a/gcc/testsuite/gcc.target/riscv/rvv/autovec/pr121781.c b/gcc/testsuite/gcc.target/riscv/rvv/autovec/pr121781.c
+new file mode 100644
+index 000000000000..cf85cd37e54d
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/riscv/rvv/autovec/pr121781.c
+@@ -0,0 +1,53 @@
++/* { dg-do run } */
++/* { dg-require-effective-target riscv_v_ok } */
++/* { dg-options "-march=rv64gcv -mabi=lp64d -O1" } */
++
++typedef unsigned char uint8_t;
++typedef short int16_t;
++typedef unsigned short uint16_t;
++typedef int int32_t;
++typedef unsigned int uint32_t;
++typedef unsigned long uint64_t;
++
++typedef int16_t a;
++typedef uint16_t b;
++typedef b c __attribute__((vector_size(8)));
++typedef a d __attribute__((vector_size(8)));
++typedef b e __attribute__((vector_size(16)));
++int f[10];
++uint16_t g, l, k;
++int32_t j;
++int32_t m(uint32_t, const uint32_t *);
++int32_t *n(uint64_t, uint8_t);
++uint8_t o() {
++  int p = 7;
++  m(p, 0);
++  return 0;
++}
++int32_t m(uint32_t, const uint32_t *) {
++  int32_t q = l;
++  n(q, 0);
++  return k;
++}
++int32_t *n(uint64_t, uint8_t) {
++  c r = {1, 6, 8, 30};
++  d s = {};
++  e u;
++  int *t = &f[7];
++  for (j = 9; j; j--) {
++    *t ^= s[0];
++    r = __builtin_shufflevector(r * r, r, 2, 5, 7, 2);
++    for (g = 0; g != 1; g = g + 3)
++      s = (d)__builtin_shufflevector(
++          __builtin_shufflevector(u, (e){}, 3, 1, 1, 1), r, 4, 6, 0, 2);
++  }
++  return &j;
++}
++int main() {
++  o();
++  int BS_CHECKSUM = 5;
++  for (int i = 0; i < 10; i++)
++    BS_CHECKSUM ^= f[i];
++  if (BS_CHECKSUM != 0xffffffffffffced1ull)
++    __builtin_abort ();
++}
+-- 
+2.43.7
+
+

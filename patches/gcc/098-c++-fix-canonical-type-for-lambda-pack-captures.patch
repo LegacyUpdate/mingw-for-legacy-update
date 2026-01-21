@@ -1,0 +1,162 @@
+From 217066a4635c951afccf54de9d98432750371353 Mon Sep 17 00:00:00 2001
+From: Nathaniel Shead <nathanieloshead@gmail.com>
+Date: Tue, 23 Sep 2025 00:18:43 +1000
+Subject: [PATCH] c++: Fix canonical type for lambda pack captures [PR122015]
+
+comp_template_parms_position uses whether a TEMPLATE_TYPE_PARM is a pack
+to determine equivalency.  This in turn affects whether
+canonical_type_parameter finds a pre-existing auto type as equivalent.
+
+When generating the 'auto...' type for a lambda pack capture, we only
+mark it as a pack after generating the node (and calculating its
+canonical); this means that later when comparing a version streamed in
+from a module we think that two equivalent types have different
+TYPE_CANONICAL, because the latter already had
+TEMPLATE_PARM_PARAMETER_PACK set before calculating its canonical.
+
+This patch fixes this by using a new 'make_auto_pack' function to ensure
+that packness is set before the canonical is looked up.
+
+	PR c++/122015
+
+gcc/cp/ChangeLog:
+
+	* cp-tree.h (make_auto_pack): Declare.
+	* lambda.cc (lambda_capture_field_type): Use make_auto_pack to
+	ensure TYPE_CANONICAL is set correctly.
+	* pt.cc (make_auto_pack): New function.
+
+gcc/testsuite/ChangeLog:
+
+	* g++.dg/modules/lambda-11.h: New test.
+	* g++.dg/modules/lambda-11_a.H: New test.
+	* g++.dg/modules/lambda-11_b.C: New test.
+
+Signed-off-by: Nathaniel Shead <nathanieloshead@gmail.com>
+Reviewed-by: Patrick Palka <ppalka@redhat.com>
+(cherry picked from commit cc79849cc883146964f0001f33c8b7eb576825c4)
+---
+ gcc/cp/cp-tree.h                           |  1 +
+ gcc/cp/lambda.cc                           | 25 +++++++++++++---------
+ gcc/cp/pt.cc                               | 12 +++++++++++
+ gcc/testsuite/g++.dg/modules/lambda-11.h   |  6 ++++++
+ gcc/testsuite/g++.dg/modules/lambda-11_a.H |  6 ++++++
+ gcc/testsuite/g++.dg/modules/lambda-11_b.C |  6 ++++++
+ 6 files changed, 46 insertions(+), 10 deletions(-)
+ create mode 100644 gcc/testsuite/g++.dg/modules/lambda-11.h
+ create mode 100644 gcc/testsuite/g++.dg/modules/lambda-11_a.H
+ create mode 100644 gcc/testsuite/g++.dg/modules/lambda-11_b.C
+
+diff --git a/gcc/cp/cp-tree.h b/gcc/cp/cp-tree.h
+index 619cd6bc1687..6a6adf2aa596 100644
+--- a/gcc/cp/cp-tree.h
++++ b/gcc/cp/cp-tree.h
+@@ -7663,6 +7663,7 @@ extern tree make_constrained_auto		(tree, tree);
+ extern tree make_constrained_decltype_auto	(tree, tree);
+ extern tree make_template_placeholder		(tree);
+ extern tree make_cast_auto			(void);
++extern tree make_auto_pack			(void);
+ extern bool template_placeholder_p		(tree);
+ extern bool ctad_template_p			(tree);
+ extern bool unparenthesized_id_or_class_member_access_p (tree);
+diff --git a/gcc/cp/lambda.cc b/gcc/cp/lambda.cc
+index 352e1b99e25b..9192653c0241 100644
+--- a/gcc/cp/lambda.cc
++++ b/gcc/cp/lambda.cc
+@@ -222,18 +222,23 @@ lambda_capture_field_type (tree expr, bool explicit_init_p,
+     type = TREE_TYPE (expr);
+   else if (explicit_init_p)
+     {
+-      tree auto_node = make_auto ();
+-
+-      type = auto_node;
+-      if (by_reference_p)
+-	/* Add the reference now, so deduction doesn't lose
+-	   outermost CV qualifiers of EXPR.  */
+-	type = build_reference_type (type);
+       if (uses_parameter_packs (expr))
+-	/* Stick with 'auto' even if the type could be deduced.  */
+-	TEMPLATE_TYPE_PARAMETER_PACK (auto_node) = true;
++	{
++	  /* Stick with 'auto...' even if the type could be deduced.  */
++	  type = make_auto_pack ();
++	  if (by_reference_p)
++	    type = build_reference_type (type);
++	}
+       else
+-	type = do_auto_deduction (type, expr, auto_node);
++	{
++	  tree auto_node = make_auto ();
++	  type = auto_node;
++	  if (by_reference_p)
++	    /* Add the reference now, so deduction doesn't lose
++	       outermost CV qualifiers of EXPR.  */
++	    type = build_reference_type (type);
++	  type = do_auto_deduction (type, expr, auto_node);
++	}
+     }
+   else if (!type_deducible_expression_p (expr))
+     {
+diff --git a/gcc/cp/pt.cc b/gcc/cp/pt.cc
+index 3a3577f9d566..03e0432bd0d5 100644
+--- a/gcc/cp/pt.cc
++++ b/gcc/cp/pt.cc
+@@ -30126,6 +30126,18 @@ make_constrained_decltype_auto (tree con, tree args)
+   return make_constrained_placeholder_type (type, con, args);
+ }
+ 
++/* Create an "auto..." type-specifier.  */
++
++tree
++make_auto_pack ()
++{
++  tree type = make_auto_1 (auto_identifier, false);
++  TEMPLATE_TYPE_PARAMETER_PACK (type) = true;
++  /* Our canonical type depends on being a pack.  */
++  TYPE_CANONICAL (type) = canonical_type_parameter (type);
++  return type;
++}
++
+ /* Returns true if the placeholder type constraint T has any dependent
+    (explicit) template arguments.  */
+ 
+diff --git a/gcc/testsuite/g++.dg/modules/lambda-11.h b/gcc/testsuite/g++.dg/modules/lambda-11.h
+new file mode 100644
+index 000000000000..e4a07f22cf05
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/modules/lambda-11.h
+@@ -0,0 +1,6 @@
++// PR c++/122015
++
++template <typename> auto declval();
++template <typename... _BindArgs> void bind_front() {
++  [... __bound_args(_BindArgs{})] {};
++}
+diff --git a/gcc/testsuite/g++.dg/modules/lambda-11_a.H b/gcc/testsuite/g++.dg/modules/lambda-11_a.H
+new file mode 100644
+index 000000000000..03d024260c34
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/modules/lambda-11_a.H
+@@ -0,0 +1,6 @@
++// PR c++/122015
++// { dg-do compile { target c++20 } }
++// { dg-additional-options "-fmodule-header" }
++// { dg-module-cmi {} }
++
++#include "lambda-11.h"
+diff --git a/gcc/testsuite/g++.dg/modules/lambda-11_b.C b/gcc/testsuite/g++.dg/modules/lambda-11_b.C
+new file mode 100644
+index 000000000000..c7a5f43ba42d
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/modules/lambda-11_b.C
+@@ -0,0 +1,6 @@
++// PR c++/122015
++// { dg-do compile { target c++20 } }
++// { dg-additional-options "-fmodules -fno-module-lazy" }
++
++#include "lambda-11.h"
++import "lambda-11_a.H";
+-- 
+2.43.7
+
+

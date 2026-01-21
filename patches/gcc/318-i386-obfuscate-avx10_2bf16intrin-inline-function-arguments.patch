@@ -1,0 +1,258 @@
+From 89b4304b2746943213f9eef1d1cebb83b4996465 Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Wed, 17 Dec 2025 09:12:42 +0100
+Subject: [PATCH] i386: Obfuscate avx10_2bf16intrin.h inline function arguments
+ [PR123155]
+
+Function arguments in installed headers need to be obfuscated (unlike
+object-like macro arguments), as e.g.
+is a valid program.  Most of the arguments are obfuscated, but some
+leaked in in the avx10_2bf16intrin.h header.
+gcc -S -O2 -O2 -Werror-implicit-function-declaration -march=novalake -msse4a -m3dnow -mavx -mavx2 -mfma4 -mxop -maes -mpclmul -mpopcnt -mabm -mlzcnt -mbmi -mbmi2 -mtbm -mlwp  -mfsgsbase -mrdrnd -mf16c -mfma -mrtm -mrdseed -mprfchw -madx -mfxsr -mxsaveopt -msha -mxsavec -mxsaves -mclflushopt -mavx512vp2intersect -mclwb -mmwaitx -mclzero -mpku -msgx -mrdpid -mgfni -mpconfig -mwbnoinvd -menqcmd -mserialize -mtsxldtrk -mamx-tile -mamx-int8 -mamx-bf16 -mkl -mwidekl -mavxvnni -mavxifma -mavxvnniint8 -mavxneconvert -mcmpccxadd -mamx-fp16 -mprefetchi -mraoint -mamx-complex -mavxvnniint16 -msm3 -msha512 -msm4 -mavx10.2 -mamx-avx512 -mamx-tf32 -mamx-fp8 -mmovrs -mamx-movrs -g -dA gcc/testsuite/gcc.target/i386/sse-13.c -fno-eliminate-unused-debug-{symbols,types} -o sse-13.s
+grep -A1 DW_TAG_formal_parameter sse-13.s | grep DW_AT_name | grep -v 'scii "__' | grep -v 'DW_AT_name: "__'
+shows arguments not prefixed with __ and the following patch fixes them.
+
+2025-12-17  Jakub Jelinek  <jakub@redhat.com>
+
+	PR target/123155
+	* config/i386/avx10_2-512bf16intrin.h (_mm512_roundscale_pbh,
+	_mm512_mask_roundscale_pbh, _mm512_maskz_roundscale_pbh,
+	_mm512_reduce_pbh, _mm512_mask_reduce_pbh, _mm512_maskz_reduce_pbh):
+	Rename B argument to __B.
+	* config/i386/avx10_2bf16intrin.h (_mm256_roundscale_pbh,
+	_mm256_mask_roundscale_pbh, _mm256_maskz_roundscale_pbh,
+	_mm_roundscale_pbh, _mm_mask_roundscale_pbh, _mm_maskz_roundscale_pbh,
+	_mm256_reduce_pbh, _mm256_mask_reduce_pbh, _mm256_maskz_reduce_pbh,
+	_mm_reduce_pbh, _mm_mask_reduce_pbh, _mm_maskz_reduce_pbh): Likewise.
+
+(cherry picked from commit 7a0fbbe9bf75345caaf1bdb73960aeaa2e60c23d)
+---
+ gcc/config/i386/avx10_2-512bf16intrin.h | 24 ++++++-------
+ gcc/config/i386/avx10_2bf16intrin.h     | 48 ++++++++++++-------------
+ 2 files changed, 36 insertions(+), 36 deletions(-)
+
+diff --git a/gcc/config/i386/avx10_2-512bf16intrin.h b/gcc/config/i386/avx10_2-512bf16intrin.h
+index 21e4b369c9eb..37e1fb6cb11f 100644
+--- a/gcc/config/i386/avx10_2-512bf16intrin.h
++++ b/gcc/config/i386/avx10_2-512bf16intrin.h
+@@ -472,28 +472,28 @@ _mm512_maskz_getexp_pbh (__mmask32 __U, __m512bh __A)
+ #ifdef __OPTIMIZE__
+ extern __inline__ __m512bh
+ __attribute__ ((__gnu_inline__, __always_inline__, __artificial__))
+-_mm512_roundscale_pbh (__m512bh __A, int B)
++_mm512_roundscale_pbh (__m512bh __A, int __B)
+ {
+   return (__m512bh)
+-    __builtin_ia32_rndscalebf16512_mask (__A, B,
++    __builtin_ia32_rndscalebf16512_mask (__A, __B,
+ 					 (__v32bf) _mm512_setzero_si512 (),
+ 					 (__mmask32) -1);
+ }
+ 
+ extern __inline__ __m512bh
+ __attribute__ ((__gnu_inline__, __always_inline__, __artificial__))
+-_mm512_mask_roundscale_pbh (__m512bh __W, __mmask32 __U, __m512bh __A, int B)
++_mm512_mask_roundscale_pbh (__m512bh __W, __mmask32 __U, __m512bh __A, int __B)
+ {
+   return (__m512bh)
+-    __builtin_ia32_rndscalebf16512_mask (__A, B, __W,  __U);
++    __builtin_ia32_rndscalebf16512_mask (__A, __B, __W,  __U);
+ }
+ 
+ extern __inline__ __m512bh
+ __attribute__ ((__gnu_inline__, __always_inline__, __artificial__))
+-_mm512_maskz_roundscale_pbh (__mmask32 __U, __m512bh __A, int B)
++_mm512_maskz_roundscale_pbh (__mmask32 __U, __m512bh __A, int __B)
+ {
+   return (__m512bh)
+-    __builtin_ia32_rndscalebf16512_mask (__A, B,
++    __builtin_ia32_rndscalebf16512_mask (__A, __B,
+ 					 (__v32bf) _mm512_setzero_si512 (),
+ 					 __U);
+ }
+@@ -518,10 +518,10 @@ _mm512_maskz_roundscale_pbh (__mmask32 __U, __m512bh __A, int B)
+ #ifdef __OPTIMIZE__
+ extern __inline__ __m512bh
+ __attribute__ ((__gnu_inline__, __always_inline__, __artificial__))
+-_mm512_reduce_pbh (__m512bh __A, int B)
++_mm512_reduce_pbh (__m512bh __A, int __B)
+ {
+   return (__m512bh)
+-    __builtin_ia32_reducebf16512_mask (__A, B,
++    __builtin_ia32_reducebf16512_mask (__A, __B,
+ 				       (__v32bf) _mm512_setzero_si512 (),
+ 				       (__mmask32) -1);
+ }
+@@ -529,18 +529,18 @@ _mm512_reduce_pbh (__m512bh __A, int B)
+ extern __inline__ __m512bh
+ __attribute__ ((__gnu_inline__, __always_inline__, __artificial__))
+ _mm512_mask_reduce_pbh (__m512bh __W, __mmask32 __U,
+-			__m512bh __A, int B)
++			__m512bh __A, int __B)
+ {
+   return (__m512bh)
+-    __builtin_ia32_reducebf16512_mask (__A, B, __W,  __U);
++    __builtin_ia32_reducebf16512_mask (__A, __B, __W,  __U);
+ }
+ 
+ extern __inline__ __m512bh
+ __attribute__ ((__gnu_inline__, __always_inline__, __artificial__))
+-_mm512_maskz_reduce_pbh (__mmask32 __U, __m512bh __A, int B)
++_mm512_maskz_reduce_pbh (__mmask32 __U, __m512bh __A, int __B)
+ {
+   return (__m512bh)
+-    __builtin_ia32_reducebf16512_mask (__A, B,
++    __builtin_ia32_reducebf16512_mask (__A, __B,
+ 					  (__v32bf) _mm512_setzero_si512 (),
+ 					  __U);
+ }
+diff --git a/gcc/config/i386/avx10_2bf16intrin.h b/gcc/config/i386/avx10_2bf16intrin.h
+index e6890fc2cfd6..057eb43a8c5e 100644
+--- a/gcc/config/i386/avx10_2bf16intrin.h
++++ b/gcc/config/i386/avx10_2bf16intrin.h
+@@ -905,10 +905,10 @@ _mm_maskz_getexp_pbh (__mmask8 __U, __m128bh __A)
+ #ifdef __OPTIMIZE__
+ extern __inline__ __m256bh
+ __attribute__ ((__gnu_inline__, __always_inline__, __artificial__))
+-_mm256_roundscale_pbh (__m256bh __A, int B)
++_mm256_roundscale_pbh (__m256bh __A, int __B)
+ {
+   return (__m256bh)
+-    __builtin_ia32_rndscalebf16256_mask (__A, B,
++    __builtin_ia32_rndscalebf16256_mask (__A, __B,
+ 					 (__v16bf) _mm256_setzero_si256 (),
+ 					 (__mmask16) -1);
+ }
+@@ -916,28 +916,28 @@ _mm256_roundscale_pbh (__m256bh __A, int B)
+ extern __inline__ __m256bh
+ __attribute__ ((__gnu_inline__, __always_inline__, __artificial__))
+ _mm256_mask_roundscale_pbh (__m256bh __W, __mmask16 __U,
+-			    __m256bh __A, int B)
++			    __m256bh __A, int __B)
+ {
+   return (__m256bh)
+-    __builtin_ia32_rndscalebf16256_mask (__A, B, __W, __U);
++    __builtin_ia32_rndscalebf16256_mask (__A, __B, __W, __U);
+ }
+ 
+ extern __inline__ __m256bh
+ __attribute__ ((__gnu_inline__, __always_inline__, __artificial__))
+-_mm256_maskz_roundscale_pbh (__mmask16 __U, __m256bh __A, int B)
++_mm256_maskz_roundscale_pbh (__mmask16 __U, __m256bh __A, int __B)
+ {
+   return (__m256bh)
+-    __builtin_ia32_rndscalebf16256_mask (__A, B,
++    __builtin_ia32_rndscalebf16256_mask (__A, __B,
+ 					 (__v16bf) _mm256_setzero_si256 (),
+ 					 __U);
+ }
+ 
+ extern __inline__ __m128bh
+ __attribute__ ((__gnu_inline__, __always_inline__, __artificial__))
+-_mm_roundscale_pbh (__m128bh __A, int B)
++_mm_roundscale_pbh (__m128bh __A, int __B)
+ {
+   return (__m128bh)
+-    __builtin_ia32_rndscalebf16128_mask (__A, B,
++    __builtin_ia32_rndscalebf16128_mask (__A, __B,
+ 					 (__v8bf) _mm_setzero_si128 (),
+ 					 (__mmask8) -1);
+ }
+@@ -945,18 +945,18 @@ _mm_roundscale_pbh (__m128bh __A, int B)
+ extern __inline__ __m128bh
+ __attribute__ ((__gnu_inline__, __always_inline__, __artificial__))
+ _mm_mask_roundscale_pbh (__m128bh __W, __mmask8 __U,
+-			 __m128bh __A, int B)
++			 __m128bh __A, int __B)
+ {
+   return (__m128bh)
+-    __builtin_ia32_rndscalebf16128_mask (__A, B, __W, __U);
++    __builtin_ia32_rndscalebf16128_mask (__A, __B, __W, __U);
+ }
+ 
+ extern __inline__ __m128bh
+ __attribute__ ((__gnu_inline__, __always_inline__, __artificial__))
+-_mm_maskz_roundscale_pbh (__mmask8 __U, __m128bh __A, int B)
++_mm_maskz_roundscale_pbh (__mmask8 __U, __m128bh __A, int __B)
+ {
+   return (__m128bh)
+-    __builtin_ia32_rndscalebf16128_mask (__A, B,
++    __builtin_ia32_rndscalebf16128_mask (__A, __B,
+ 					 (__v8bf) _mm_setzero_si128 (),
+ 					 __U);
+ }
+@@ -994,10 +994,10 @@ _mm_maskz_roundscale_pbh (__mmask8 __U, __m128bh __A, int B)
+ #ifdef __OPTIMIZE__
+ extern __inline__ __m256bh
+ __attribute__ ((__gnu_inline__, __always_inline__, __artificial__))
+-_mm256_reduce_pbh (__m256bh __A, int B)
++_mm256_reduce_pbh (__m256bh __A, int __B)
+ {
+   return (__m256bh)
+-    __builtin_ia32_reducebf16256_mask (__A, B,
++    __builtin_ia32_reducebf16256_mask (__A, __B,
+ 				       (__v16bf) _mm256_setzero_si256 (),
+ 				       (__mmask16) -1);
+ }
+@@ -1005,28 +1005,28 @@ _mm256_reduce_pbh (__m256bh __A, int B)
+ extern __inline__ __m256bh
+ __attribute__ ((__gnu_inline__, __always_inline__, __artificial__))
+ _mm256_mask_reduce_pbh (__m256bh __W, __mmask16 __U,
+-			__m256bh __A, int B)
++			__m256bh __A, int __B)
+ {
+   return (__m256bh)
+-    __builtin_ia32_reducebf16256_mask (__A, B, __W, __U);
++    __builtin_ia32_reducebf16256_mask (__A, __B, __W, __U);
+ }
+ 
+ extern __inline__ __m256bh
+ __attribute__ ((__gnu_inline__, __always_inline__, __artificial__))
+-_mm256_maskz_reduce_pbh (__mmask16 __U, __m256bh __A, int B)
++_mm256_maskz_reduce_pbh (__mmask16 __U, __m256bh __A, int __B)
+ {
+   return (__m256bh)
+-    __builtin_ia32_reducebf16256_mask (__A, B,
++    __builtin_ia32_reducebf16256_mask (__A, __B,
+ 				       (__v16bf) _mm256_setzero_si256 (),
+ 				       __U);
+ }
+ 
+ extern __inline__ __m128bh
+ __attribute__ ((__gnu_inline__, __always_inline__, __artificial__))
+-_mm_reduce_pbh (__m128bh __A, int B)
++_mm_reduce_pbh (__m128bh __A, int __B)
+ {
+   return (__m128bh)
+-    __builtin_ia32_reducebf16128_mask (__A, B,
++    __builtin_ia32_reducebf16128_mask (__A, __B,
+ 				       (__v8bf) _mm_setzero_si128 (),
+ 				       (__mmask8) -1);
+ }
+@@ -1034,18 +1034,18 @@ _mm_reduce_pbh (__m128bh __A, int B)
+ extern __inline__ __m128bh
+ __attribute__ ((__gnu_inline__, __always_inline__, __artificial__))
+ _mm_mask_reduce_pbh (__m128bh __W, __mmask8 __U,
+-		     __m128bh __A, int B)
++		     __m128bh __A, int __B)
+ {
+   return (__m128bh)
+-    __builtin_ia32_reducebf16128_mask (__A, B, __W, __U);
++    __builtin_ia32_reducebf16128_mask (__A, __B, __W, __U);
+ }
+ 
+ extern __inline__ __m128bh
+ __attribute__ ((__gnu_inline__, __always_inline__, __artificial__))
+-_mm_maskz_reduce_pbh (__mmask8 __U, __m128bh __A, int B)
++_mm_maskz_reduce_pbh (__mmask8 __U, __m128bh __A, int __B)
+ {
+   return (__m128bh)
+-    __builtin_ia32_reducebf16128_mask (__A, B,
++    __builtin_ia32_reducebf16128_mask (__A, __B,
+ 				       (__v8bf) _mm_setzero_si128 (),
+ 				       __U);
+ }
+-- 
+2.43.7
+
+

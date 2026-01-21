@@ -1,0 +1,133 @@
+From 46cfa36e295943d4bfa01c033a17f48c70154eeb Mon Sep 17 00:00:00 2001
+From: Jonathan Wakely <jwakely@redhat.com>
+Date: Mon, 1 Sep 2025 18:12:27 +0100
+Subject: [PATCH] libstdc++: Fix std::get<T> for std::pair with reference
+ members [PR121745]
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf8
+Content-Transfer-Encoding: 8bit
+
+Make the std::get<T> overloads for rvalues use std::forward<T>(p.first)
+not std::move(p.first), so that lvalue reference members are not
+incorrectly converted to rvalues.
+
+It might appear that std::move(p).first would also work, but the
+language rules say that for std::pair<T&&, U> that would produce T&
+rather than the expected T&& (see the discussion in P2445R1 Â§8.2).
+
+Additional tests are added to verify all combinations of reference
+members, value categories, and const-qualification.
+
+libstdc++-v3/ChangeLog:
+
+	PR libstdc++/121745
+	* include/bits/stl_pair.h (get): Use forward instead of move in
+	std::get<T> overloads for rvalue pairs.
+	* testsuite/20_util/pair/astuple/get_by_type.cc: Check all value
+	categories and cv-qualification.
+
+Reviewed-by: Tomasz KamiÅski <tkaminsk@redhat.com>
+(cherry picked from commit c8a24f60b6874fca4fb3adb153f8d5f1dd72b951)
+---
+ libstdc++-v3/include/bits/stl_pair.h          |  8 +--
+ .../20_util/pair/astuple/get_by_type.cc       | 52 +++++++++++++++++++
+ 2 files changed, 56 insertions(+), 4 deletions(-)
+
+diff --git a/libstdc++-v3/include/bits/stl_pair.h b/libstdc++-v3/include/bits/stl_pair.h
+index 8c57712b4617..37547ceac62d 100644
+--- a/libstdc++-v3/include/bits/stl_pair.h
++++ b/libstdc++-v3/include/bits/stl_pair.h
+@@ -1313,12 +1313,12 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
+   template <typename _Tp, typename _Up>
+     constexpr _Tp&&
+     get(pair<_Tp, _Up>&& __p) noexcept
+-    { return std::move(__p.first); }
++    { return std::forward<_Tp>(__p.first); }
+ 
+   template <typename _Tp, typename _Up>
+     constexpr const _Tp&&
+     get(const pair<_Tp, _Up>&& __p) noexcept
+-    { return std::move(__p.first); }
++    { return std::forward<const _Tp>(__p.first); }
+ 
+   template <typename _Tp, typename _Up>
+     constexpr _Tp&
+@@ -1333,12 +1333,12 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
+   template <typename _Tp, typename _Up>
+     constexpr _Tp&&
+     get(pair<_Up, _Tp>&& __p) noexcept
+-    { return std::move(__p.second); }
++    { return std::forward<_Tp>(__p.second); }
+ 
+   template <typename _Tp, typename _Up>
+     constexpr const _Tp&&
+     get(const pair<_Up, _Tp>&& __p) noexcept
+-    { return std::move(__p.second); }
++    { return std::forward<const _Tp>(__p.second); }
+ #endif // __glibcxx_tuples_by_type
+ 
+ 
+diff --git a/libstdc++-v3/testsuite/20_util/pair/astuple/get_by_type.cc b/libstdc++-v3/testsuite/20_util/pair/astuple/get_by_type.cc
+index 33ebf7a46b90..05a61c3f302c 100644
+--- a/libstdc++-v3/testsuite/20_util/pair/astuple/get_by_type.cc
++++ b/libstdc++-v3/testsuite/20_util/pair/astuple/get_by_type.cc
+@@ -33,3 +33,55 @@ void test01()
+   const int&&  cpsecond __attribute__((unused)) =
+     std::get<int>(std::move(cp));
+ }
++
++// PR libstdc++/121745 return of get(pair<_Up, _Tp>&& __p) may be ill-formed
++void
++test_pr121745(std::pair<float&, int&> p)
++{
++  float& pfirst = std::get<float&>(std::move(p));
++  int& psecond  = std::get<int&>(std::move(p));
++
++  const auto& p2 = p;
++  float& p2first = std::get<float&>(std::move(p2));
++  int& p2second  = std::get<int&>(std::move(p2));
++}
++
++template<typename T, typename Pair>
++using get_t = decltype(std::get<T>(std::declval<Pair>()));
++
++// Check that get<T>(Pair) returns Ret
++template<typename T, typename Pair, typename Ret>
++constexpr bool verify = std::is_same<get_t<T, Pair>, Ret>::value;
++
++template<typename T1, typename T2>
++void
++check()
++{
++  // Overloads for accessing first member
++  static_assert( verify<T1, std::pair<T1, T2>&, T1&>,
++		 "T1& get(pair<T1, T2>&)" );
++  static_assert( verify<T1, const std::pair<T1, T2>&, const T1&>,
++		 "const T1& get(const pair<T1, T2>&)" );
++  static_assert( verify<T1, std::pair<T1, T2>&&, T1&&>,
++		 "T1&& get(pair<T1, T2>&&)" );
++  static_assert( verify<T1, const std::pair<T1, T2>&&, const T1&&>,
++		 "const T1&& get(const pair<T1, T2>&&)" );
++
++  // Overloads for accessing second member
++  static_assert( verify<T2, std::pair<T1, T2>&, T2&>,
++		 "T2& get(pair<T1, T2>&)" );
++  static_assert( verify<T2, const std::pair<T1, T2>&, const T2&>,
++		 "const T2& get(const pair<T1, T2>&)" );
++  static_assert( verify<T2, std::pair<T1, T2>&&, T2&&>,
++		 "T2&& get(pair<T1, T2>&&)" );
++  static_assert( verify<T2, const std::pair<T1, T2>&&, const T2&&>,
++		 "const T2&& get(const pair<T1, T2>&&)" );
++}
++
++void
++test_all()
++{
++  check<float, int>();
++  check<float&, int&>();
++  check<float&&, int&&>();
++}
+-- 
+2.43.7
+
+

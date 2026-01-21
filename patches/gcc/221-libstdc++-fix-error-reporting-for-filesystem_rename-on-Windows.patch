@@ -1,0 +1,68 @@
+From d207ebcb5f728eca944e1f19401643b01d5e43f5 Mon Sep 17 00:00:00 2001
+From: Jonathan Wakely <jwakely@redhat.com>
+Date: Mon, 17 Nov 2025 21:01:33 +0000
+Subject: [PATCH] libstdc++: Fix error reporting for filesystem::rename on
+ Windows [PR122726]
+
+Use the __last_system_error() function and the system_category to
+convert the Windows error to a generic one.
+
+libstdc++-v3/ChangeLog:
+
+	PR libstdc++/122726
+	* src/filesystem/ops-common.h [_GLIBCXX_FILESYSTEM_IS_WINDOWS]
+	(rename): Use __last_system_error to set errno accurately.
+	* testsuite/27_io/filesystem/operations/rename.cc: Test
+	error_code matches errc::no_such_file_or_directory.
+
+(cherry picked from commit 77278e0292cd23f0d1ddbb5e6e18064e119bdd6f)
+---
+ libstdc++-v3/src/filesystem/ops-common.h               |  5 +----
+ .../testsuite/27_io/filesystem/operations/rename.cc    | 10 ++++++++++
+ 2 files changed, 11 insertions(+), 4 deletions(-)
+
+diff --git a/libstdc++-v3/src/filesystem/ops-common.h b/libstdc++-v3/src/filesystem/ops-common.h
+index 4feacfdb932d..ce7645db0ae8 100644
+--- a/libstdc++-v3/src/filesystem/ops-common.h
++++ b/libstdc++-v3/src/filesystem/ops-common.h
+@@ -159,10 +159,7 @@ namespace __gnu_posix
+     if (MoveFileExW(oldname, newname,
+ 		    MOVEFILE_REPLACE_EXISTING | MOVEFILE_COPY_ALLOWED))
+       return 0;
+-    if (GetLastError() == ERROR_ACCESS_DENIED)
+-      errno = EACCES;
+-    else
+-      errno = EIO;
++    errno = std::__last_system_error().default_error_condition().value();
+     return -1;
+   }
+ 
+diff --git a/libstdc++-v3/testsuite/27_io/filesystem/operations/rename.cc b/libstdc++-v3/testsuite/27_io/filesystem/operations/rename.cc
+index 00e088a10481..fef25472c352 100644
+--- a/libstdc++-v3/testsuite/27_io/filesystem/operations/rename.cc
++++ b/libstdc++-v3/testsuite/27_io/filesystem/operations/rename.cc
+@@ -170,10 +170,20 @@ test_directories()
+   fs::remove_all(dir, ec);
+ }
+ 
++void
++test_pr122726()
++{
++  std::error_code ec;
++  const auto nonesuch = __gnu_test::nonexistent_path();
++  fs::rename(nonesuch, "new-name", ec);
++  VERIFY( ec == std::make_error_code(std::errc::no_such_file_or_directory) );
++}
++
+ int
+ main()
+ {
+   test01();
+   test_symlinks();
+   test_directories();
++  test_pr122726();
+ }
+-- 
+2.43.7
+
+

@@ -1,0 +1,460 @@
+From e811195771d8b90a4c869a0fd210ce7302b442e6 Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Fri, 5 Sep 2025 10:54:53 +0200
+Subject: [PATCH] testsuite, powerpc, v2: Fix vsx-vectorize-* after alignment
+ peeling [PR118567]
+
+On Tue, Jul 01, 2025 at 02:50:40PM -0500, Segher Boessenkool wrote:
+> No tests become good tests without effort.  And tests that are not good
+> tests require constant maintenance!
+
+Here are two patches, either just the first one or both can be used
+and both were tested on powerpc64le-linux.
+
+The first one removes all the checking etc. stuff from the testcases,
+as they are just dg-do compile, for the vectorize dump checks all we
+care about are the vectorized loops they want to test.
+
+2025-09-05  Jakub Jelinek  <jakub@redhat.com>
+
+	PR testsuite/118567
+	* gcc.target/powerpc/vsx-vectorize-1.c: Remove includes, checking
+	part of main1 and main.
+	* gcc.target/powerpc/vsx-vectorize-2.c: Remove includes, replace
+	bar definition with declaration, remove main.
+	* gcc.target/powerpc/vsx-vectorize-3.c: Likewise.
+	* gcc.target/powerpc/vsx-vectorize-4.c: Likewise.
+	* gcc.target/powerpc/vsx-vectorize-5.c: Likewise.
+	* gcc.target/powerpc/vsx-vectorize-6.c: Likewise.
+	* gcc.target/powerpc/vsx-vectorize-7.c: Likewise.
+	* gcc.target/powerpc/vsx-vectorize-8.c: Likewise.
+
+(cherry picked from commit 193b28649933685f4dd3824c01aee4f843cc66b5)
+---
+ .../gcc.target/powerpc/vsx-vectorize-1.c      | 19 -----------
+ .../gcc.target/powerpc/vsx-vectorize-2.c      | 34 +------------------
+ .../gcc.target/powerpc/vsx-vectorize-3.c      | 31 +----------------
+ .../gcc.target/powerpc/vsx-vectorize-4.c      | 31 +----------------
+ .../gcc.target/powerpc/vsx-vectorize-5.c      | 31 +----------------
+ .../gcc.target/powerpc/vsx-vectorize-6.c      | 34 +------------------
+ .../gcc.target/powerpc/vsx-vectorize-7.c      | 34 +------------------
+ .../gcc.target/powerpc/vsx-vectorize-8.c      | 34 +------------------
+ 8 files changed, 7 insertions(+), 241 deletions(-)
+
+diff --git a/gcc/testsuite/gcc.target/powerpc/vsx-vectorize-1.c b/gcc/testsuite/gcc.target/powerpc/vsx-vectorize-1.c
+index a0e0496d3455..f18bc0621fb5 100644
+--- a/gcc/testsuite/gcc.target/powerpc/vsx-vectorize-1.c
++++ b/gcc/testsuite/gcc.target/powerpc/vsx-vectorize-1.c
+@@ -4,8 +4,6 @@
+ /* { dg-require-effective-target powerpc_vsx } */
+ 
+ /* Taken from vect/vect-align-1.c.  */
+-#include <stdlib.h>
+-#include <stdarg.h>
+ 
+ /* Compile time known misalignment. Cannot use loop peeling to align
+    the store.  */
+@@ -28,23 +26,6 @@ main1 (struct foo * __restrict__ p)
+     {
+       p->y[i] = x[i];
+     }
+-
+-  /* check results:  */
+-  for (i = 0; i < N; i++)
+-    {
+-      if (p->y[i] != x[i])
+-	abort ();
+-    }
+-  return 0;
+-}
+-
+-
+-int main (void)
+-{
+-  int i;
+-  struct foo *p = malloc (2*sizeof (struct foo));
+-  
+-  main1 (p);
+   return 0;
+ }
+ 
+diff --git a/gcc/testsuite/gcc.target/powerpc/vsx-vectorize-2.c b/gcc/testsuite/gcc.target/powerpc/vsx-vectorize-2.c
+index 52c49b27cb77..9c2c6b322d67 100644
+--- a/gcc/testsuite/gcc.target/powerpc/vsx-vectorize-2.c
++++ b/gcc/testsuite/gcc.target/powerpc/vsx-vectorize-2.c
+@@ -4,28 +4,10 @@
+ /* { dg-require-effective-target powerpc_vsx } */
+ 
+ /* Taken from vect/vect-95.c.  */
+-#include <stdlib.h>
+-#include <stdarg.h>
+ 
+ #define N 256
+ 
+-__attribute__ ((noinline))
+-void bar (float *pd, float *pa, float *pb, float *pc) 
+-{
+-  int i;
+-
+-  /* check results:  */
+-  for (i = 0; i < N; i++)
+-    {
+-      if (pa[i] != (pb[i] * pc[i]))
+-	abort ();
+-      if (pd[i] != 5.0)
+-	abort ();
+-    }
+-
+-  return;
+-}
+-
++void bar (float *pd, float *pa, float *pb, float *pc);
+ 
+ __attribute__ ((noinline)) int
+ main1 (int n, float * __restrict__ pd, float * __restrict__ pa, float * __restrict__ pb, float * __restrict__ pc)
+@@ -43,20 +25,6 @@ main1 (int n, float * __restrict__ pd, float * __restrict__ pa, float * __restri
+   return 0;
+ }
+ 
+-int main (void)
+-{
+-  int i;
+-  float a[N] __attribute__ ((__aligned__(__BIGGEST_ALIGNMENT__)));
+-  float d[N+1] __attribute__ ((__aligned__(__BIGGEST_ALIGNMENT__)));
+-  float b[N] = {0,3,6,9,12,15,18,21,24,27,30,33,36,39,42,45,48,51,54,57};
+-  float c[N] = {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19};
+-
+-  main1 (N,&d[1],a,b,c);
+-  main1 (N-2,&d[1],a,b,c);
+-
+-  return 0;
+-}
+-
+ /* { dg-final { scan-tree-dump-times "vectorized 1 loops" 1 "vect" } } */
+ /* { dg-final { scan-tree-dump-times "Alignment of access forced using peeling" 0 "vect" {xfail { {! vect_hw_misalign } || powerpc*-*-* } } } } */
+ /* { dg-final { scan-tree-dump-times "Alignment of access forced using versioning" 0 "vect" } } */
+diff --git a/gcc/testsuite/gcc.target/powerpc/vsx-vectorize-3.c b/gcc/testsuite/gcc.target/powerpc/vsx-vectorize-3.c
+index f2f838a77fc5..40c458d20a36 100644
+--- a/gcc/testsuite/gcc.target/powerpc/vsx-vectorize-3.c
++++ b/gcc/testsuite/gcc.target/powerpc/vsx-vectorize-3.c
+@@ -4,26 +4,10 @@
+ /* { dg-require-effective-target powerpc_vsx } */
+ 
+ /* Taken from vect/vect-95.c.  */
+-#include <stdlib.h>
+-#include <stdarg.h>
+ 
+ #define N 256
+ 
+-__attribute__ ((noinline))
+-void bar (short *pa, short *pb, short *pc) 
+-{
+-  int i;
+-
+-  /* check results:  */
+-  for (i = 0; i < N; i++)
+-    {
+-      if (pa[i] != (pb[i] * pc[i]))
+-	abort ();
+-    }
+-
+-  return;
+-}
+-
++void bar (short *pa, short *pb, short *pc);
+ 
+ __attribute__ ((noinline)) int
+ main1 (int n, short * __restrict__ pa, short * __restrict__ pb, short * __restrict__ pc)
+@@ -40,19 +24,6 @@ main1 (int n, short * __restrict__ pa, short * __restrict__ pb, short * __restri
+   return 0;
+ }
+ 
+-int main (void)
+-{
+-  int i;
+-  short a[N] __attribute__ ((__aligned__(__BIGGEST_ALIGNMENT__)));
+-  short b[N] = {0,3,6,9,12,15,18,21,24,27,30,33,36,39,42,45,48,51,54,57};
+-  short c[N] = {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19};
+-
+-  main1 (N,a,b,c);
+-  main1 (N-2,a,b,c);
+-
+-  return 0;
+-}
+-
+ /* { dg-final { scan-tree-dump-times "vectorized 1 loops" 1 "vect" } } */
+ /* { dg-final { scan-tree-dump-times "Alignment of access forced using peeling" 1 "vect" } } */
+ /* { dg-final { scan-tree-dump-times "Alignment of access forced using versioning" 0 "vect" } } */
+diff --git a/gcc/testsuite/gcc.target/powerpc/vsx-vectorize-4.c b/gcc/testsuite/gcc.target/powerpc/vsx-vectorize-4.c
+index 8bf9dff1712e..e5881c30b3da 100644
+--- a/gcc/testsuite/gcc.target/powerpc/vsx-vectorize-4.c
++++ b/gcc/testsuite/gcc.target/powerpc/vsx-vectorize-4.c
+@@ -4,26 +4,10 @@
+ /* { dg-require-effective-target powerpc_vsx } */
+ 
+ /* Taken from vect/vect-95.c.  */
+-#include <stdlib.h>
+-#include <stdarg.h>
+ 
+ #define N 256
+ 
+-__attribute__ ((noinline))
+-void bar (double *pa, double *pb, double *pc) 
+-{
+-  int i;
+-
+-  /* check results:  */
+-  for (i = 0; i < N; i++)
+-    {
+-      if (pa[i] != (pb[i] * pc[i]))
+-	abort ();
+-    }
+-
+-  return;
+-}
+-
++void bar (double *pa, double *pb, double *pc);
+ 
+ __attribute__ ((noinline)) int
+ main1 (int n, double * __restrict__ pa, double * __restrict__ pb, double * __restrict__ pc)
+@@ -40,19 +24,6 @@ main1 (int n, double * __restrict__ pa, double * __restrict__ pb, double * __res
+   return 0;
+ }
+ 
+-int main (void)
+-{
+-  int i;
+-  double a[N] __attribute__ ((__aligned__(__BIGGEST_ALIGNMENT__)));
+-  double b[N] = {0,3,6,9,12,15,18,21,24,27,30,33,36,39,42,45,48,51,54,57};
+-  double c[N] = {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19};
+-
+-  main1 (N,a,b,c);
+-  main1 (N-2,a,b,c);
+-
+-  return 0;
+-}
+-
+ /* { dg-final { scan-tree-dump-times "vectorized 1 loops" 1 "vect" } } */
+ /* { dg-final { scan-tree-dump-times "Alignment of access forced using peeling" 0 "vect" { xfail { {! vect_hw_misalign } || powerpc*-*-* } } } } */
+ /* { dg-final { scan-tree-dump-times "Alignment of access forced using versioning" 0 "vect" { xfail { powerpc*-*-aix* } } } } */
+diff --git a/gcc/testsuite/gcc.target/powerpc/vsx-vectorize-5.c b/gcc/testsuite/gcc.target/powerpc/vsx-vectorize-5.c
+index 1446e40b1d3c..abb6e4a9ba9d 100644
+--- a/gcc/testsuite/gcc.target/powerpc/vsx-vectorize-5.c
++++ b/gcc/testsuite/gcc.target/powerpc/vsx-vectorize-5.c
+@@ -4,26 +4,10 @@
+ /* { dg-require-effective-target powerpc_vsx } */
+ 
+ /* Taken from vect/vect-95.c.  */
+-#include <stdlib.h>
+-#include <stdarg.h>
+ 
+ #define N 256
+ 
+-__attribute__ ((noinline))
+-void bar (char *pa, char *pb, char *pc) 
+-{
+-  int i;
+-
+-  /* check results:  */
+-  for (i = 0; i < N; i++)
+-    {
+-      if (pa[i] != (pb[i] + pc[i]))
+-	abort ();
+-    }
+-
+-  return;
+-}
+-
++void bar (char *pa, char *pb, char *pc);
+ 
+ __attribute__ ((noinline)) int
+ main1 (int n, char * __restrict__ pa, char * __restrict__ pb, char * __restrict__ pc)
+@@ -40,19 +24,6 @@ main1 (int n, char * __restrict__ pa, char * __restrict__ pb, char * __restrict_
+   return 0;
+ }
+ 
+-int main (void)
+-{
+-  int i;
+-  char a[N] __attribute__ ((__aligned__(__BIGGEST_ALIGNMENT__)));
+-  char b[N] = {0,3,6,9,12,15,18,21,24,27,30,33,36,39,42,45,48,51,54,57};
+-  char c[N] = {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19};
+-
+-  main1 (N,a,b,c);
+-  main1 (N-2,a,b,c);
+-
+-  return 0;
+-}
+-
+ /* { dg-final { scan-tree-dump-times "vectorized 1 loops" 1 "vect" } } */
+ /* { dg-final { scan-tree-dump-times "Alignment of access forced using peeling" 1 "vect" } } */
+ /* { dg-final { scan-tree-dump-times "Alignment of access forced using versioning" 0 "vect" } } */
+diff --git a/gcc/testsuite/gcc.target/powerpc/vsx-vectorize-6.c b/gcc/testsuite/gcc.target/powerpc/vsx-vectorize-6.c
+index 6f49ccbbb6a6..849d4775bf85 100644
+--- a/gcc/testsuite/gcc.target/powerpc/vsx-vectorize-6.c
++++ b/gcc/testsuite/gcc.target/powerpc/vsx-vectorize-6.c
+@@ -4,28 +4,10 @@
+ /* { dg-require-effective-target powerpc_vsx } */
+ 
+ /* Taken from vect/vect-95.c.  */
+-#include <stdlib.h>
+-#include <stdarg.h>
+ 
+ #define N 256
+ 
+-__attribute__ ((noinline))
+-void bar (double *pd, double *pa, double *pb, double *pc) 
+-{
+-  int i;
+-
+-  /* check results:  */
+-  for (i = 0; i < N; i++)
+-    {
+-      if (pa[i] != (pb[i] * pc[i]))
+-	abort ();
+-      if (pd[i] != 5.0)
+-	abort ();
+-    }
+-
+-  return;
+-}
+-
++void bar (double *pd, double *pa, double *pb, double *pc);
+ 
+ __attribute__ ((noinline)) int
+ main1 (int n, double * __restrict__ pd, double * __restrict__ pa, double * __restrict__ pb, double * __restrict__ pc)
+@@ -43,20 +25,6 @@ main1 (int n, double * __restrict__ pd, double * __restrict__ pa, double * __res
+   return 0;
+ }
+ 
+-int main (void)
+-{
+-  int i;
+-  double a[N] __attribute__ ((__aligned__(__BIGGEST_ALIGNMENT__)));
+-  double d[N+1] __attribute__ ((__aligned__(__BIGGEST_ALIGNMENT__)));
+-  double b[N] = {0,3,6,9,12,15,18,21,24,27,30,33,36,39,42,45,48,51,54,57};
+-  double c[N] = {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19};
+-
+-  main1 (N,&d[1],a,b,c);
+-  main1 (N-2,&d[1],a,b,c);
+-
+-  return 0;
+-}
+-
+ /* { dg-final { scan-tree-dump-times "vectorized 1 loops" 1 "vect" } } */
+ /* { dg-final { scan-tree-dump-times "Alignment of access forced using peeling" 0 "vect" { xfail { {! vect_hw_misalign } || powerpc*-*-* } } } } */
+ /* { dg-final { scan-tree-dump-times "Alignment of access forced using versioning" 0 "vect" { xfail { powerpc*-*-aix* } } } } */
+diff --git a/gcc/testsuite/gcc.target/powerpc/vsx-vectorize-7.c b/gcc/testsuite/gcc.target/powerpc/vsx-vectorize-7.c
+index fde65a521d9e..05a12ca7d34d 100644
+--- a/gcc/testsuite/gcc.target/powerpc/vsx-vectorize-7.c
++++ b/gcc/testsuite/gcc.target/powerpc/vsx-vectorize-7.c
+@@ -4,28 +4,10 @@
+ /* { dg-require-effective-target powerpc_vsx } */
+ 
+ /* Taken from vect/vect-95.c.  */
+-#include <stdlib.h>
+-#include <stdarg.h>
+ 
+ #define N 256
+ 
+-__attribute__ ((noinline))
+-void bar (int *pd, int *pa, int *pb, int *pc) 
+-{
+-  int i;
+-
+-  /* check results:  */
+-  for (i = 0; i < N; i++)
+-    {
+-      if (pa[i] != (pb[i] * pc[i]))
+-	abort ();
+-      if (pd[i] != 5.0)
+-	abort ();
+-    }
+-
+-  return;
+-}
+-
++void bar (int *pd, int *pa, int *pb, int *pc);
+ 
+ __attribute__ ((noinline)) int
+ main1 (int n, int * __restrict__ pd, int * __restrict__ pa, int * __restrict__ pb, int * __restrict__ pc)
+@@ -43,20 +25,6 @@ main1 (int n, int * __restrict__ pd, int * __restrict__ pa, int * __restrict__ p
+   return 0;
+ }
+ 
+-int main (void)
+-{
+-  int i;
+-  int a[N] __attribute__ ((__aligned__(__BIGGEST_ALIGNMENT__)));
+-  int d[N+1] __attribute__ ((__aligned__(__BIGGEST_ALIGNMENT__)));
+-  int b[N] = {0,3,6,9,12,15,18,21,24,27,30,33,36,39,42,45,48,51,54,57};
+-  int c[N] = {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19};
+-
+-  main1 (N,&d[1],a,b,c);
+-  main1 (N-2,&d[1],a,b,c);
+-
+-  return 0;
+-}
+-
+ /* { dg-final { scan-tree-dump-times "vectorized 1 loops" 1 "vect" } } */
+ /* { dg-final { scan-tree-dump-times "Alignment of access forced using peeling" 0 "vect" {xfail { {! vect_hw_misalign } || powerpc*-*-* } } } } */
+ /* { dg-final { scan-tree-dump-times "Alignment of access forced using versioning" 0 "vect" } } */
+diff --git a/gcc/testsuite/gcc.target/powerpc/vsx-vectorize-8.c b/gcc/testsuite/gcc.target/powerpc/vsx-vectorize-8.c
+index fb50cd54fd97..5f953fa826e2 100644
+--- a/gcc/testsuite/gcc.target/powerpc/vsx-vectorize-8.c
++++ b/gcc/testsuite/gcc.target/powerpc/vsx-vectorize-8.c
+@@ -4,28 +4,10 @@
+ /* { dg-require-effective-target powerpc_vsx } */
+ 
+ /* Taken from vect/vect-95.c.  */
+-#include <stdlib.h>
+-#include <stdarg.h>
+ 
+ #define N 256
+ 
+-__attribute__ ((noinline))
+-void bar (short *pd, short *pa, short *pb, short *pc) 
+-{
+-  int i;
+-
+-  /* check results:  */
+-  for (i = 0; i < N; i++)
+-    {
+-      if (pa[i] != (pb[i] * pc[i]))
+-	abort ();
+-      if (pd[i] != 5.0)
+-	abort ();
+-    }
+-
+-  return;
+-}
+-
++void bar (short *pd, short *pa, short *pb, short *pc);
+ 
+ __attribute__ ((noinline)) int
+ main1 (int n, short * __restrict__ pd, short * __restrict__ pa, short * __restrict__ pb, short * __restrict__ pc)
+@@ -43,20 +25,6 @@ main1 (int n, short * __restrict__ pd, short * __restrict__ pa, short * __restri
+   return 0;
+ }
+ 
+-int main (void)
+-{
+-  int i;
+-  short a[N] __attribute__ ((__aligned__(__BIGGEST_ALIGNMENT__)));
+-  short d[N+1] __attribute__ ((__aligned__(__BIGGEST_ALIGNMENT__)));
+-  short b[N] = {0,3,6,9,12,15,18,21,24,27,30,33,36,39,42,45,48,51,54,57};
+-  short c[N] = {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19};
+-
+-  main1 (N,&d[1],a,b,c);
+-  main1 (N-2,&d[1],a,b,c);
+-
+-  return 0;
+-}
+-
+ /* { dg-final { scan-tree-dump-times "vectorized 1 loops" 1 "vect" } } */
+ /* { dg-final { scan-tree-dump-times "Alignment of access forced using peeling" 0 "vect" } } */
+ /* { dg-final { scan-tree-dump-times "Alignment of access forced using versioning" 2 "vect" } } */
+-- 
+2.43.7
+
+

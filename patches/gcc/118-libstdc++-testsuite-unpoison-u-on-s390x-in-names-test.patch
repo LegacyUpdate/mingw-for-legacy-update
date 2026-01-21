@@ -1,0 +1,62 @@
+From 2360c6156721759cab9484b8ee761aa4ae4d2574 Mon Sep 17 00:00:00 2001
+From: Patrick Palka <ppalka@redhat.com>
+Date: Tue, 23 Sep 2025 22:41:26 -0400
+Subject: [PATCH] libstdc++/testsuite: Unpoison 'u' on s390x in names.cc test
+
+This is the s390 counterpart to r11-7364-gd0453cf5c68b6a, and fixes the
+following names.cc failure caused by a use of a poisoned identifier.
+If we look at the corresponding upstream header[1] it's clear that the
+problematic identifier is 'u'.
+
+In file included from /usr/include/linux/types.h:5,
+                 from /usr/include/linux/sched/types.h:5,
+                 from /usr/include/bits/sched.h:61,
+                 from /usr/include/sched.h:43,
+                 from /usr/include/pthread.h:22,
+                 from /usr/include/c++/14/s390x-redhat-linux/bits/gthr-default.h:35,
+                 from /usr/include/c++/14/s390x-redhat-linux/bits/gthr.h:157,
+                 from /usr/include/c++/14/ext/atomicity.h:35,
+                 from /usr/include/c++/14/bits/ios_base.h:39,
+                 from /usr/include/c++/14/streambuf:43,
+                 from /usr/include/c++/14/bits/streambuf_iterator.h:35,
+                 from /usr/include/c++/14/iterator:66,
+                 from /usr/include/c++/14/s390x-redhat-linux/bits/stdc++.h:54,
+                 from /root/rpmbuild/BUILD/gcc-14.3.1-20250617/libstdc++-v3/testsuite/17_intro/names.cc:384:
+/usr/include/asm/types.h:24: error: expected unqualified-id before '[' token
+/usr/include/asm/types.h:24: error: expected ')' before '[' token
+/root/rpmbuild/BUILD/gcc-14.3.1-20250617/libstdc++-v3/testsuite/17_intro/names.cc:101: note: to match this '('
+compiler exited with status 1
+FAIL: 17_intro/names.cc  -std=gnu++98 (test for excess errors)
+Excess errors:
+/usr/include/asm/types.h:24: error: expected unqualified-id before '[' token
+/usr/include/asm/types.h:24: error: expected ')' before '[' token
+
+[1]: https://github.com/torvalds/linux/blob/master/arch/s390/include/uapi/asm/types.h
+
+libstdc++-v3/ChangeLog:
+
+	* testsuite/17_intro/names.cc: Undefine 'u' on s390*-linux.
+
+Reviewed-by: Jonathan Wakely <jwakely@redhat.com>
+(cherry picked from commit e9f3138f38067664bae25947ebabc0e8fa223d43)
+---
+ libstdc++-v3/testsuite/17_intro/names.cc | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/libstdc++-v3/testsuite/17_intro/names.cc b/libstdc++-v3/testsuite/17_intro/names.cc
+index f67818db425f..ae3cb8c3048b 100644
+--- a/libstdc++-v3/testsuite/17_intro/names.cc
++++ b/libstdc++-v3/testsuite/17_intro/names.cc
+@@ -282,6 +282,8 @@
+ // <sys/ucontext.h> defines fpreg_t::d and fpreg_t::f
+ #undef d
+ #undef f
++// <asm/types.h> defines __vector128::u
++#undef u
+ #endif
+ 
+ #if defined (__linux__) && defined (__sparc__)
+-- 
+2.43.7
+
+

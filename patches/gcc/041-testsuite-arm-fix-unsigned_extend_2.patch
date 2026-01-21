@@ -1,0 +1,85 @@
+From ca6174ac3740372ff55db34e2f625c489ed28c73 Mon Sep 17 00:00:00 2001
+From: Christophe Lyon <christophe.lyon@linaro.org>
+Date: Tue, 8 Apr 2025 16:24:18 +0000
+Subject: [PATCH] testsuite: arm: Fix unsigned-extend-2.c [PR116445]
+
+The test was designed to pass with thumb2, but code generation changed
+with the introduction of Low Overhead Loops, so the test can fail if
+one overrides the flags when running the testsuite.
+
+In addition, useless subtract / extension instructions require -O2 to
+remove them (-O is not sufficient), so replace -O with -O2 in
+dg-options.
+
+arm_thumb2_ok_no_arm_v8_1m_lob does not do what the test needs (it can
+fail because some flags conflict, rather than because lob are
+supported, and we do not need to check runtime support in this test
+anyway), so the patch reverts back to arm_thumb2_ok.
+
+Finally, replace the scan-assembler directives with
+check-function-bodies, checking both types of code generation (with
+and without LOL).  Depending on architecture version, the two insns
+    and     r0, r1, r0, lsr #1
+    ands    r3, r3, #255
+can be swapped, so accept both orders.
+
+gcc/testsuite/ChangeLog:
+
+	PR target/116445
+	* gcc.target/arm/unsigned-extend-2.c: Fix dg directives.
+
+(cherry picked from commit 20c25919132b497c3a46a4bc4044f65b6459b99e)
+---
+ .../gcc.target/arm/unsigned-extend-2.c        | 33 +++++++++++++++----
+ 1 file changed, 27 insertions(+), 6 deletions(-)
+
+diff --git a/gcc/testsuite/gcc.target/arm/unsigned-extend-2.c b/gcc/testsuite/gcc.target/arm/unsigned-extend-2.c
+index 41ee994c1ec2..d9f95a14277b 100644
+--- a/gcc/testsuite/gcc.target/arm/unsigned-extend-2.c
++++ b/gcc/testsuite/gcc.target/arm/unsigned-extend-2.c
+@@ -1,6 +1,31 @@
+ /* { dg-do compile } */
+-/* { dg-require-effective-target arm_thumb2_ok_no_arm_v8_1m_lob } */
+-/* { dg-options "-O" } */
++/* { dg-require-effective-target arm_thumb2_ok } */
++/* { dg-options "-O2 -mthumb" } */
++/* { dg-final { check-function-bodies "**" "" } } */
++
++/*
++** foo:
++** 	movs	(r[0-9]+), #8
++** (
++** 	subs	\1, \1, #1
++** 	ands	\1, \1, #255
++** 	and	r0, r1, r0, lsr #1
++** 	bne	.L[0-9]+
++** 	bx	lr
++** |
++** 	subs	\1, \1, #1
++** 	and	r0, r1, r0, lsr #1
++** 	ands	\1, \1, #255
++** 	bne	.L[0-9]+
++** 	bx	lr
++** |
++** 	push	{lr}
++** 	dls	lr, \1
++** 	and	r0, r1, r0, lsr #1
++** 	le	lr, .L[0-9]+
++** 	pop	{pc}
++** )
++*/
+ 
+ unsigned short foo (unsigned short x, unsigned short c)
+ {
+@@ -12,7 +37,3 @@ unsigned short foo (unsigned short x, unsigned short c)
+     }
+   return x;
+ }
+-
+-/* { dg-final { scan-assembler "ands" } } */
+-/* { dg-final { scan-assembler-not "uxtb" } } */
+-/* { dg-final { scan-assembler-not "cmp" } } */
+-- 
+2.43.7
+
+

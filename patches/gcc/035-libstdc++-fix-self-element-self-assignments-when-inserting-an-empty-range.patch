@@ -1,0 +1,126 @@
+From 334324b8936878ea59c3f5750b633b12de894af7 Mon Sep 17 00:00:00 2001
+From: =?utf8?q?Tomasz=20Kami=C5=84ski?= <tkaminsk@redhat.com>
+Date: Thu, 14 Aug 2025 15:20:36 +0200
+Subject: [PATCH] libstdc++: Fix-self element self-assigments when inserting an
+ empty range [PR121313]
+
+For __n == 0, the elements were self move-assigned by
+std::move_backward(__ins, __old_finish - __n, __old_finish).
+
+	PR libstdc++/121313
+
+libstdc++-v3/ChangeLog:
+
+	* include/bits/vector.tcc (vector::insert_range): Add check for
+	empty size.
+	* testsuite/23_containers/vector/modifiers/insert/insert_range.cc:
+	New tests.
+
+(cherry picked from commit cc54f2f47e63c9d404a44f618cf114ae63e81b40)
+---
+ libstdc++-v3/include/bits/vector.tcc          |  9 ++--
+ .../vector/modifiers/insert/insert_range.cc   | 51 +++++++++++++++++++
+ 2 files changed, 57 insertions(+), 3 deletions(-)
+
+diff --git a/libstdc++-v3/include/bits/vector.tcc b/libstdc++-v3/include/bits/vector.tcc
+index b21e1d3b7a2c..5d4e9ad05a1c 100644
+--- a/libstdc++-v3/include/bits/vector.tcc
++++ b/libstdc++-v3/include/bits/vector.tcc
+@@ -994,15 +994,18 @@ _GLIBCXX_BEGIN_NAMESPACE_CONTAINER
+ 
+ 	if constexpr (ranges::forward_range<_Rg>)
+ 	  {
++	    const auto __ins_idx = __pos - cbegin();
++	    // Number of new elements to insert:
++	    const auto __n = size_type(ranges::distance(__rg));
++	    if (__n == 0)
++	      return begin() + __ins_idx;
++
+ 	    // Start of existing elements:
+ 	    pointer __old_start = this->_M_impl._M_start;
+ 	    // End of existing elements:
+ 	    pointer __old_finish = this->_M_impl._M_finish;
+ 	    // Insertion point:
+-	    const auto __ins_idx = __pos - cbegin();
+ 	    pointer __ins = __old_start + __ins_idx;
+-	    // Number of new elements to insert:
+-	    const auto __n = size_type(ranges::distance(__rg));
+ 	    // Number of elements that can fit in unused capacity:
+ 	    const auto __cap = this->_M_impl._M_end_of_storage - __old_finish;
+ 	    if (__cap >= __n)
+diff --git a/libstdc++-v3/testsuite/23_containers/vector/modifiers/insert/insert_range.cc b/libstdc++-v3/testsuite/23_containers/vector/modifiers/insert/insert_range.cc
+index 590714351267..14fd0ff34ca4 100644
+--- a/libstdc++-v3/testsuite/23_containers/vector/modifiers/insert/insert_range.cc
++++ b/libstdc++-v3/testsuite/23_containers/vector/modifiers/insert/insert_range.cc
+@@ -99,16 +99,67 @@ test_ranges()
+   return true;
+ }
+ 
++struct SelfAssignChecker {
++  static int moveCounter;
++  static int copyCounter;
++
++  SelfAssignChecker() = default;
++  constexpr SelfAssignChecker(int v) : val(v) { }
++  SelfAssignChecker(const SelfAssignChecker&) = default;
++  SelfAssignChecker(SelfAssignChecker&&) = default;
++
++  SelfAssignChecker operator=(const SelfAssignChecker& rhs)
++  {
++    if (this == &rhs)
++      ++copyCounter;
++    this->val = rhs.val;
++    return *this;
++  }
++
++  SelfAssignChecker operator=(SelfAssignChecker&& rhs)
++  {
++    if (this == &rhs)
++      ++moveCounter;
++    this->val = rhs.val;
++    return *this;
++  }
++
++  int val;
++
++  friend bool operator==(SelfAssignChecker, SelfAssignChecker) = default;
++};
++
++int SelfAssignChecker::moveCounter = 0;
++int SelfAssignChecker::copyCounter = 0;
++
++void
++test_pr121313()
++{
++  using namespace __gnu_test;
++
++  SelfAssignChecker::copyCounter = SelfAssignChecker::moveCounter = 0;
++  do_test<test_forward_range<int>, std::allocator<SelfAssignChecker>>();
++  VERIFY( SelfAssignChecker::moveCounter == 0 );
++  VERIFY( SelfAssignChecker::copyCounter == 0 );
++
++  SelfAssignChecker::copyCounter = SelfAssignChecker::moveCounter = 0;
++  do_test<test_input_range<int>, std::allocator<SelfAssignChecker>>();
++  VERIFY( SelfAssignChecker::moveCounter == 0 );
++  VERIFY( SelfAssignChecker::copyCounter == 0 );
++}
++
+ constexpr bool
+ test_constexpr()
+ {
+   // XXX: this doesn't test the non-forward_range code paths are constexpr.
+   do_test<std::span<short>, std::allocator<int>>();
+   return true;
++
+ }
+ 
+ int main()
+ {
+   test_ranges();
++  test_pr121313();
+   static_assert( test_constexpr() );
+ }
+-- 
+2.43.7
+
+

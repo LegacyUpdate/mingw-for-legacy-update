@@ -1,0 +1,97 @@
+From df569c064eac2f30c6f19fe5db931cdad0b2abcb Mon Sep 17 00:00:00 2001
+From: Patrick Palka <ppalka@redhat.com>
+Date: Fri, 10 Oct 2025 10:25:25 -0400
+Subject: [PATCH] c++: base-specifier name lookup is type-only [PR122192]
+
+The r13-6098 change to make TYPENAME_TYPE no longer always ignore
+non-type bindings needs another exception: base-specifiers that are
+represented as TYPENAME_TYPE, for which lookup must be type-only (by
+[class.derived.general]/2).  This patch fixes this by giving such
+TYPENAME_TYPEs a tag type of class_type rather than typename_type so
+that we treat them like elaborated-type-specifiers (another type-only
+lookup situation).
+
+	PR c++/122192
+
+gcc/cp/ChangeLog:
+
+	* decl.cc (make_typename_type): Document base-specifier as
+	another type-only lookup case.
+	* parser.cc (cp_parser_class_name): Propagate tag_type to
+	make_typename_type instead of hardcoding typename_type.
+	(cp_parser_base_specifier): Pass class_type instead of
+	typename_type as tag_type to cp_parser_class_name.
+
+gcc/testsuite/ChangeLog:
+
+	* g++.dg/template/dependent-base6.C: New test.
+
+Reviewed-by: Jason Merrill <jason@redhat.com>
+(cherry picked from commit 49ddf362f0a7c1fdeb62f13a852a2fdec9d6fe6d)
+---
+ gcc/cp/decl.cc                                  |  4 +++-
+ gcc/cp/parser.cc                                |  5 ++---
+ gcc/testsuite/g++.dg/template/dependent-base6.C | 12 ++++++++++++
+ 3 files changed, 17 insertions(+), 4 deletions(-)
+ create mode 100644 gcc/testsuite/g++.dg/template/dependent-base6.C
+
+diff --git a/gcc/cp/decl.cc b/gcc/cp/decl.cc
+index 9cf75936d7af..6d70502aae11 100644
+--- a/gcc/cp/decl.cc
++++ b/gcc/cp/decl.cc
+@@ -4546,7 +4546,9 @@ make_typename_type (tree context, tree name, enum tag_types tag_type,
+ 	   - the tag corresponds to a class-key or 'enum' so
+ 	     [basic.lookup.elab] applies, or
+ 	   - the tag corresponds to scope_type or tf_qualifying_scope is
+-	     set so [basic.lookup.qual]/1 applies.
++	     set so [basic.lookup.qual]/1 applies, or
++	   - we're inside a base-specifier so [class.derived.general]/2 applies;
++	     the tag will already be class_type in that case.
+ 	 TODO: If we'd set/track the scope_type tag thoroughly on all
+ 	 TYPENAME_TYPEs that are followed by :: then we wouldn't need the
+ 	 tf_qualifying_scope flag.  */
+diff --git a/gcc/cp/parser.cc b/gcc/cp/parser.cc
+index 7f1f62c76e7c..d5ba1bf3c1c5 100644
+--- a/gcc/cp/parser.cc
++++ b/gcc/cp/parser.cc
+@@ -27406,8 +27406,7 @@ cp_parser_class_name (cp_parser *parser,
+   /* If this is a typename, create a TYPENAME_TYPE.  */
+   if (typename_p && decl != error_mark_node)
+     {
+-      decl = make_typename_type (scope, decl, typename_type,
+-				 /*complain=*/tf_error);
++      decl = make_typename_type (scope, decl, tag_type, /*complain=*/tf_error);
+       if (decl != error_mark_node)
+ 	decl = TYPE_NAME (decl);
+     }
+@@ -29748,7 +29747,7 @@ cp_parser_base_specifier (cp_parser* parser)
+       type = cp_parser_class_name (parser,
+ 				   class_scope_p,
+ 				   template_p,
+-				   typename_type,
++				   class_type,
+ 				   /*check_dependency_p=*/true,
+ 				   /*class_head_p=*/false,
+ 				   /*is_declaration=*/true);
+diff --git a/gcc/testsuite/g++.dg/template/dependent-base6.C b/gcc/testsuite/g++.dg/template/dependent-base6.C
+new file mode 100644
+index 000000000000..b4bc5c279a58
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/template/dependent-base6.C
+@@ -0,0 +1,12 @@
++// PR c++/122192
++// Verify name lookup within a base-specifier is type-only.
++
++struct A {
++  int B;
++  struct B { };
++};
++
++struct S1 : A::B { }; // OK
++
++template<class T> struct S2 : T::B { }; // OK, used to fail
++template struct S2<A>;
+-- 
+2.43.7
+
+

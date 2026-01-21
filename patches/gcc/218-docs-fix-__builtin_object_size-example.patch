@@ -1,0 +1,42 @@
+From 5f28f7cea440e578014e1a7afc7f92b36f55a871 Mon Sep 17 00:00:00 2001
+From: Andrew Pinski <andrew.pinski@oss.qualcomm.com>
+Date: Mon, 18 Aug 2025 12:00:45 -0700
+Subject: [PATCH] docs: Fix __builtin_object_size example [PR121581]
+
+This example used to work (with C) in GCC 14 before the
+warning for different pointer types without a cast was changed
+to an error.
+The fix is to make the q variable `int*` rather than the current `char*`.
+This also fixes the example for C++ too.
+
+Pushed as obvious after doing a `make html`.
+
+	PR middle-end/121581
+gcc/ChangeLog:
+
+	* doc/extend.texi (__builtin_object_size): Fix example.
+
+Signed-off-by: Andrew Pinski <andrew.pinski@oss.qualcomm.com>
+(cherry picked from commit 2be801a805c6cca08aaa33fd387dcc7bd4fe8aac)
+---
+ gcc/doc/extend.texi | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/gcc/doc/extend.texi b/gcc/doc/extend.texi
+index f45927a908ad..570e89a04afe 100644
+--- a/gcc/doc/extend.texi
++++ b/gcc/doc/extend.texi
+@@ -16971,7 +16971,8 @@ is computed.
+ 
+ @smallexample
+ struct V @{ char buf1[10]; int b; char buf2[10]; @} var;
+-char *p = &var.buf1[1], *q = &var.b;
++char *p = &var.buf1[1];
++int *q = &var.b;
+ 
+ /* Here the object p points to is var.  */
+ assert (__builtin_object_size (p, 0) == sizeof (var) - 1);
+-- 
+2.43.7
+
+

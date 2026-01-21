@@ -1,0 +1,99 @@
+From 934b2d4ad4470b0acf8711d7406c65490877ac52 Mon Sep 17 00:00:00 2001
+From: Nathaniel Shead <nathanieloshead@gmail.com>
+Date: Thu, 16 Oct 2025 22:51:23 +1100
+Subject: [PATCH] c++: Don't constrain template visibility using no-linkage
+ variables [PR122253]
+
+When finding the minimal visibility of a template, any reference to a
+dependent automatic variable will cause the instantiation to be marked
+as internal linkage.  However, when processing the template decl we
+don't yet know whether that should actually be the case, as a given
+instantiation may not require referencing the local decl in its
+mangling.
+
+This patch fixes the issue by checking for no-linkage decls first, in
+which case we just constrain using the type of the entity.  We can't use
+a check for lk_external/lk_internal in the other cases, as
+instantiations referring to internal types can still have external
+linkage as determined by the language, but should still constrain the
+visibility of any declarations that refer to them.
+
+	PR c++/122253
+
+gcc/cp/ChangeLog:
+
+	* decl2.cc (min_vis_expr_r): Don't mark no-linkage declarations
+	as VISIBILITY_ANON.
+
+gcc/testsuite/ChangeLog:
+
+	* g++.dg/modules/internal-16.C: New test.
+
+Signed-off-by: Nathaniel Shead <nathanieloshead@gmail.com>
+Reviewed-by: Patrick Palka <ppalka@redhat.com>
+Reviewed-by: Jason Merrill <jason@redhat.com>
+(cherry picked from commit f062a6b7985fcee82e02b626aada4e0824850bd0)
+---
+ gcc/cp/decl2.cc                            |  7 ++++-
+ gcc/testsuite/g++.dg/modules/internal-16.C | 30 ++++++++++++++++++++++
+ 2 files changed, 36 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/g++.dg/modules/internal-16.C
+
+diff --git a/gcc/cp/decl2.cc b/gcc/cp/decl2.cc
+index 63a5a21511df..4a29c4a0b1c0 100644
+--- a/gcc/cp/decl2.cc
++++ b/gcc/cp/decl2.cc
+@@ -2862,7 +2862,12 @@ min_vis_expr_r (tree *tp, int */*walk_subtrees*/, void *data)
+ 	  break;
+ 	}
+     addressable:
+-      if (! TREE_PUBLIC (t))
++      if (decl_linkage (t) == lk_none)
++	tpvis = type_visibility (TREE_TYPE (t));
++      /* Decls that have had their visibility constrained will report
++	 as external linkage, but we still want to transitively constrain
++	 if we refer to them, so just check TREE_PUBLIC instead.  */
++      else if (!TREE_PUBLIC (t))
+ 	tpvis = VISIBILITY_ANON;
+       else
+ 	tpvis = DECL_VISIBILITY (t);
+diff --git a/gcc/testsuite/g++.dg/modules/internal-16.C b/gcc/testsuite/g++.dg/modules/internal-16.C
+new file mode 100644
+index 000000000000..4a928ae801bb
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/modules/internal-16.C
+@@ -0,0 +1,30 @@
++// PR c++/122253
++// { dg-additional-options "-fmodules -Wtemplate-names-tu-local" }
++
++export module M;
++
++template <int> struct ic {};
++struct S {
++  constexpr operator int() const { return 5; }
++  constexpr int operator&() const { return 8; }
++};
++
++template <typename T> inline void a(T) {
++  T a;
++  static T b;
++  ic<a>{};
++  ic<b>{};
++  ic<&a>{};
++  ic<&b>{};
++}
++
++template <typename T> inline auto b(T x) {
++  return [&](auto y) {
++    return [=](auto z) {
++      return ic<(int)x + (int)&y + (int)z>{};
++    };
++  };
++}
++
++template void a(S);
++ic<5 + 8 + 5> x = b(S{})(S{})(S{});
+-- 
+2.43.7
+
+

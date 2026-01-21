@@ -1,0 +1,48 @@
+From 76aeacb436dfad649974cf5f61ec1ce6dd5f8417 Mon Sep 17 00:00:00 2001
+From: mengqinggang <mengqinggang@loongson.cn>
+Date: Fri, 8 Aug 2025 16:22:59 +0800
+Subject: [PATCH] LoongArch: macro instead enum for base abi type
+
+enum can't be used in #if.
+For #if expression, identifiers that are not macros,
+which are all considered to be the number zero.
+
+This patch may fix https://sourceware.org/bugzilla/show_bug.cgi?id=32776.
+
+gcc/ChangeLog:
+
+	* config/loongarch/loongarch-def.h (ABI_BASE_LP64D): New macro.
+	(ABI_BASE_LP64F): New macro.
+	(ABI_BASE_LP64S): New macro.
+	(N_ABI_BASE_TYPES): New macro.
+
+(cherry picked from commit 9467435253948b83fcb5f7430f6cd571236960d8)
+---
+ gcc/config/loongarch/loongarch-def.h | 10 ++++------
+ 1 file changed, 4 insertions(+), 6 deletions(-)
+
+diff --git a/gcc/config/loongarch/loongarch-def.h b/gcc/config/loongarch/loongarch-def.h
+index 0bcd2a70121b..0a7d0c923fef 100644
+--- a/gcc/config/loongarch/loongarch-def.h
++++ b/gcc/config/loongarch/loongarch-def.h
+@@ -78,12 +78,10 @@ extern loongarch_def_array<const char *, N_ISA_EXT_TYPES>
+ 
+ 
+ /* Base ABI */
+-enum {
+-  ABI_BASE_LP64D	= 0,
+-  ABI_BASE_LP64F	= 1,
+-  ABI_BASE_LP64S	= 2,
+-  N_ABI_BASE_TYPES	= 3
+-};
++#define ABI_BASE_LP64D	  0
++#define ABI_BASE_LP64F	  1
++#define ABI_BASE_LP64S	  2
++#define N_ABI_BASE_TYPES  3
+ 
+ extern loongarch_def_array<const char *, N_ABI_BASE_TYPES>
+   loongarch_abi_base_strings;
+-- 
+2.43.7
+
+

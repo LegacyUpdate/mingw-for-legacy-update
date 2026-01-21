@@ -1,0 +1,73 @@
+From 014dd4b845d97aa5823971ea8b58cf1811662554 Mon Sep 17 00:00:00 2001
+From: Robin Dapp <rdapp@ventanamicro.com>
+Date: Wed, 12 Nov 2025 10:17:47 +0100
+Subject: [PATCH] RISC-V: vsetvl: Add null check for fault-first loop
+ [PR122652].
+
+For a fault-first load we store the first instruction that read its VL
+result.  The loop to do so uses next_nondebug_insn () which returns
+nullptr when we are at the end.  Check for that before accessing the
+next insn.
+
+	PR target/122652
+
+gcc/ChangeLog:
+
+	* config/riscv/riscv-vsetvl.cc: Add nullptr check.
+
+gcc/testsuite/ChangeLog:
+
+	* gcc.target/riscv/rvv/base/pr122652.c: New test.
+
+(cherry picked from commit b2d0abfcd5a3a58e7967eb76bb3508e5ef20d9fa)
+---
+ gcc/config/riscv/riscv-vsetvl.cc              |  2 +-
+ .../gcc.target/riscv/rvv/base/pr122652.c      | 22 +++++++++++++++++++
+ 2 files changed, 23 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/gcc.target/riscv/rvv/base/pr122652.c
+
+diff --git a/gcc/config/riscv/riscv-vsetvl.cc b/gcc/config/riscv/riscv-vsetvl.cc
+index a8c92565541a..2f309b52183f 100644
+--- a/gcc/config/riscv/riscv-vsetvl.cc
++++ b/gcc/config/riscv/riscv-vsetvl.cc
+@@ -1178,7 +1178,7 @@ public:
+     if (fault_first_load_p (insn->rtl ()))
+       {
+ 	for (insn_info *i = insn->next_nondebug_insn ();
+-	     i->bb () == insn->bb (); i = i->next_nondebug_insn ())
++	     i && i->bb () == insn->bb (); i = i->next_nondebug_insn ())
+ 	  {
+ 	    if (find_access (i->defs (), VL_REGNUM))
+ 	      break;
+diff --git a/gcc/testsuite/gcc.target/riscv/rvv/base/pr122652.c b/gcc/testsuite/gcc.target/riscv/rvv/base/pr122652.c
+new file mode 100644
+index 000000000000..bd8f1b4d3ef2
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/riscv/rvv/base/pr122652.c
+@@ -0,0 +1,22 @@
++/* { dg-do compile } */
++/* { dg-options "-O3 -march=rv64gcv -mabi=lp64d" } */
++
++#include "riscv_vector.h"
++
++int a;
++int b();
++
++int c() {
++  if (b())
++    a = 0;
++}
++
++void d() {
++  for (; c() + d;) {
++    long e, h;
++    char *f;
++    __rvv_uint16mf4_t g;
++    __rvv_uint8mf8x3_t i = __riscv_vlseg3e8ff_v_u8mf8x3(f, &h, e);
++    __riscv_vsoxseg3ei16_v_u8mf8x3(0, g, i, 0);
++  }
++}
+-- 
+2.43.7
+
+

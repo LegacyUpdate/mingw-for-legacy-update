@@ -1,0 +1,59 @@
+From cb5abf3a78486e0ed0530505c629cdee4029d571 Mon Sep 17 00:00:00 2001
+From: Viljar Indus <indus@adacore.com>
+Date: Tue, 5 Aug 2025 12:04:18 +0300
+Subject: [PATCH] ada: Create a pragma to emit a misplaced Storage_Size aspect
+ error
+
+We do not emit an error on misplaced Strorage_Size error when
+the aspect is not applied to a task (or an access type). We
+instead create an attribute definition which is ignored most of the
+time. Create a temporary pragma for the aspect specification to
+emit the same misplaced aspect error as we do for pragmas.
+
+gcc/ada/ChangeLog:
+
+	* sem_ch13.adb (Analyze_Aspect_Definitions): Create a temporary
+	pragma for the non-task and access type cases.
+---
+ gcc/ada/sem_ch13.adb | 18 ++++++++++++++++--
+ 1 file changed, 16 insertions(+), 2 deletions(-)
+
+diff --git a/gcc/ada/sem_ch13.adb b/gcc/ada/sem_ch13.adb
+index 99d642d65ee9..0941d1bc1eea 100644
+--- a/gcc/ada/sem_ch13.adb
++++ b/gcc/ada/sem_ch13.adb
+@@ -4878,14 +4878,28 @@ package body Sem_Ch13 is
+                         goto Continue;
+                      end;
+ 
+-                  --  All other cases, generate attribute definition
++                  --  Generate an attribute definition for access types
+ 
+-                  else
++                  elsif Is_Access_Type (E) then
+                      Aitem :=
+                        Make_Attribute_Definition_Clause (Loc,
+                          Name       => Ent,
+                          Chars      => Name_Storage_Size,
+                          Expression => Relocate_Node (Expr));
++
++                  --  This is likely a misplaced aspect. Create a pragma to
++                  --  emit the actual error.
++
++                  else
++                     Aitem :=
++                       Make_Aitem_Pragma
++                         (Pragma_Argument_Associations =>
++                            New_List
++                              (Make_Pragma_Argument_Association
++                                 (Loc, Expression => Relocate_Node (Expr))),
++                          Pragma_Name                  => Name_Storage_Size);
++                     Insert_Pragma (Aitem);
++                     goto Continue;
+                   end if;
+ 
+                when Aspect_External_Initialization =>
+-- 
+2.43.7
+
+

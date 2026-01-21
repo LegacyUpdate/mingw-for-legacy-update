@@ -1,0 +1,59 @@
+From 1352498c69ee67cda2466f78916adbda871392d1 Mon Sep 17 00:00:00 2001
+From: Lulu Cheng <chenglulu@loongson.cn>
+Date: Mon, 3 Nov 2025 17:53:52 +0800
+Subject: [PATCH] LoongArch: Fix PR122097 (2).
+
+r16-4703 does not completely fix PR122097.  Floating-point vectors
+were not processed in the function loongarch_const_vector_same_bytes_p.
+This patch will completely resolve this issue.
+
+	PR target/122097
+
+gcc/ChangeLog:
+
+	* config/loongarch/loongarch.cc
+	(loongarch_const_vector_same_bytes_p): Add processing for
+	floating-point vector data.
+
+(cherry picked from commit e753fa38bb612a3bebe0fc596a44a104bbd2739b)
+---
+ gcc/config/loongarch/loongarch.cc | 22 +++++++++++++++++++++-
+ 1 file changed, 21 insertions(+), 1 deletion(-)
+
+diff --git a/gcc/config/loongarch/loongarch.cc b/gcc/config/loongarch/loongarch.cc
+index c88dcb3645cd..3c3f2c66397b 100644
+--- a/gcc/config/loongarch/loongarch.cc
++++ b/gcc/config/loongarch/loongarch.cc
+@@ -1835,7 +1835,27 @@ loongarch_const_vector_same_bytes_p (rtx op, machine_mode mode)
+ 
+   first = CONST_VECTOR_ELT (op, 0);
+   bytes = GET_MODE_UNIT_SIZE (mode);
+-  val = INTVAL (first);
++
++  if (GET_MODE_CLASS (mode) == MODE_VECTOR_FLOAT)
++    {
++      rtx val_s = CONST_VECTOR_ELT (op, 0);
++      const REAL_VALUE_TYPE *x = CONST_DOUBLE_REAL_VALUE (val_s);
++      if (GET_MODE (val_s) == DFmode)
++	{
++	  long tmp[2];
++	  REAL_VALUE_TO_TARGET_DOUBLE (*x, tmp);
++	  val = (unsigned HOST_WIDE_INT) tmp[1] << 32 | tmp[0];
++	}
++      else
++	{
++	  long tmp;
++	  REAL_VALUE_TO_TARGET_SINGLE (*x, tmp);
++	  val = (unsigned HOST_WIDE_INT) tmp;
++	}
++    }
++  else
++    val = UINTVAL (first);
++
+   first_byte = val & 0xff;
+   for (i = 1; i < bytes; i++)
+     {
+-- 
+2.43.7
+
+

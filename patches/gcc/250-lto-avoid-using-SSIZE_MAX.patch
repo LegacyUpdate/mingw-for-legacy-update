@@ -1,0 +1,36 @@
+From b0e3253dc990beb637b70d2e0c43e8ec586d169f Mon Sep 17 00:00:00 2001
+From: Siddhesh Poyarekar <siddhesh@gotplt.org>
+Date: Mon, 24 Nov 2025 20:32:08 -0500
+Subject: [PATCH] lto/122515: Avoid using SSIZE_MAX
+
+SSIZE_MAX may not always be available, so build it using (size_t) -1
+instead.
+
+gcc/lto/ChangeLog:
+
+	PR lto/122515
+	* lto-common.cc (lto_read_section_data): Avoid using SSIZE_MAX.
+
+Signed-off-by: Siddhesh Poyarekar <siddhesh@gotplt.org>
+(cherry picked from commit fb9b614c675f66a7979a5f37ef60f32fab73abdd)
+---
+ gcc/lto/lto-common.cc | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/gcc/lto/lto-common.cc b/gcc/lto/lto-common.cc
+index 3d35c0389161..13aca2c9d2af 100644
+--- a/gcc/lto/lto-common.cc
++++ b/gcc/lto/lto-common.cc
+@@ -2438,7 +2438,7 @@ lto_read_section_data (struct lto_file_decl_data *file_data,
+ 
+   computed_offset = offset & ((off_t) page_mask);
+   diff = offset - computed_offset;
+-  if (len > (size_t) (SSIZE_MAX - diff))
++  if (len > (((size_t) -1) >> 1) - diff)
+     {
+       fatal_error (input_location, "Cannot map %s: section is too long",
+ 		   file_data->file_name);
+-- 
+2.43.7
+
+

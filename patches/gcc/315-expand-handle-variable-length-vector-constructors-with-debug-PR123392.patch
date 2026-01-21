@@ -1,0 +1,65 @@
+From 062b2dfdc9c17c25ef60ae498f2518ce3b977eb9 Mon Sep 17 00:00:00 2001
+From: Tejas Belagod <tejas.belagod@arm.com>
+Date: Tue, 13 Jan 2026 16:58:38 +0000
+Subject: [PATCH] expand: Handle variable-length vector constructors with debug
+ [PR123392]
+
+Variable-length Vector initializer constructors currently only work in
+non-debug mode.  It ICEs when compiled with -g.  This patch fixes it to handle
+variable-length vector intialization by limiting the constructor elements to
+the lower bound of the variable length poly which is also the maximum number
+of elements allowed in the initializer.
+
+	PR middle-end/123392
+gcc/
+	* cfgexpand.cc (expand_debug_expr): Handle variable-length initializer
+	for CONSTRUCTOR.
+
+gcc/testsuite/
+
+	* gcc.target/aarch64/sve/acle/general/pr123392.c: New.
+---
+ gcc/cfgexpand.cc                                       |  6 ++----
+ .../gcc.target/aarch64/sve/acle/general/pr123392.c     | 10 ++++++++++
+ 2 files changed, 12 insertions(+), 4 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.target/aarch64/sve/acle/general/pr123392.c
+
+diff --git a/gcc/cfgexpand.cc b/gcc/cfgexpand.cc
+index 981faf36e93e..e2455981b4ed 100644
+--- a/gcc/cfgexpand.cc
++++ b/gcc/cfgexpand.cc
+@@ -5635,12 +5635,10 @@ expand_debug_expr (tree exp)
+       else if (TREE_CODE (TREE_TYPE (exp)) == VECTOR_TYPE)
+ 	{
+ 	  unsigned i;
+-	  unsigned HOST_WIDE_INT nelts;
++	  poly_uint64 elts = TYPE_VECTOR_SUBPARTS (TREE_TYPE (exp));
++	  unsigned HOST_WIDE_INT nelts = constant_lower_bound (elts);
+ 	  tree val;
+ 
+-	  if (!TYPE_VECTOR_SUBPARTS (TREE_TYPE (exp)).is_constant (&nelts))
+-	    goto flag_unsupported;
+-
+ 	  op0 = gen_rtx_CONCATN (mode, rtvec_alloc (nelts));
+ 
+ 	  FOR_EACH_CONSTRUCTOR_VALUE (CONSTRUCTOR_ELTS (exp), i, val)
+diff --git a/gcc/testsuite/gcc.target/aarch64/sve/acle/general/pr123392.c b/gcc/testsuite/gcc.target/aarch64/sve/acle/general/pr123392.c
+new file mode 100644
+index 000000000000..5fe9848998d0
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/aarch64/sve/acle/general/pr123392.c
+@@ -0,0 +1,10 @@
++/* { dg-do compile } */
++/* { dg-options "-O3 -g" } */
++
++#include <arm_sve.h>
++
++svint32_t res (int32_t *a)
++{
++  svint32_t s = { a[0], a[1], a[2], a[3] };
++  return s;
++}
+-- 
+2.43.7
+
+

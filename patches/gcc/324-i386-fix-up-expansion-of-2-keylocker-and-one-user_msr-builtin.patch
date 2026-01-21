@@ -1,0 +1,94 @@
+From cc4cf789f70cbb19ec38ce6de70541ef884b122b Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Fri, 19 Dec 2025 16:44:16 +0100
+Subject: [PATCH] c++: Suppress -Wreturn-type warnings for functions with
+ failed assertions [PR91388]
+
+This is something Jonathan has asked for recently.  E.g. in the recent
+libstdc++ r16-6177 random.tcc changes, there was
+          if constexpr (__d <= 32)
+            return __generate_canonical_any<_RealT, uint64_t, __d>(__urng);
+          else
+            {
+ #if defined(__SIZEOF_INT128__)
+              static_assert(__d <= 64,
+                "irregular RNG with float precision >64 is not supported");
+              return __generate_canonical_any<
+                _RealT, unsigned __int128, __d>(__urng);
+ #else
+              static_assert(false, "irregular RNG with float precision"
+                 " >32 requires __int128 support");
+ #endif
+            }
+and when we hit there the static_assert, we don't get just an error about
+that, but also a -Wreturn-type warning in the same function because that
+path falls through to the end of function without returning a value.
+But a function with a failed static_assert is erroneous and will never
+fall through to the end.  We could treat failed static_assert in functions
+as __builtin_unreachable (), but I think it doesn't matter where exactly
+in a function static_assert(false); appears, so this patch just suppresses
+-Wreturn-type warning in that function instead.
+
+2025-12-19  Jakub Jelinek  <jakub@redhat.com>
+
+	PR c++/91388
+	* semantics.cc (finish_static_assert): Suppress -Wreturn-type warnings
+	in functions with failed assertions.
+
+	* g++.dg/cpp1z/static_assert1.C: New test.
+
+(cherry picked from commit a6687d123301287a26c09073d360bc2d93176666)
+---
+ gcc/cp/semantics.cc                         | 10 ++++++++++
+ gcc/testsuite/g++.dg/cpp1z/static_assert1.C | 17 +++++++++++++++++
+ 2 files changed, 27 insertions(+)
+ create mode 100644 gcc/testsuite/g++.dg/cpp1z/static_assert1.C
+
+diff --git a/gcc/cp/semantics.cc b/gcc/cp/semantics.cc
+index 804c22d4661a..53ea69555bca 100644
+--- a/gcc/cp/semantics.cc
++++ b/gcc/cp/semantics.cc
+@@ -12471,6 +12471,16 @@ finish_static_assert (tree condition, tree message, location_t location,
+ 	    error_at (cloc, "static assertion failed: %.*s", len, msg);
+ 
+ 	  diagnose_failing_condition (bad, cloc, show_expr_p);
++
++	  /* Suppress -Wreturn-type for functions with failed static_asserts.
++	     Otherwise templates like:
++	     if constexpr (whatever)
++	       return something (args);
++	     else
++	       static_assert (false, "explanation");
++	     get a useless extra -Wreturn-type warning.  */
++	  if (current_function_decl)
++	    suppress_warning (current_function_decl, OPT_Wreturn_type);
+ 	}
+       else if (condition && condition != error_mark_node)
+ 	{
+diff --git a/gcc/testsuite/g++.dg/cpp1z/static_assert1.C b/gcc/testsuite/g++.dg/cpp1z/static_assert1.C
+new file mode 100644
+index 000000000000..3c94eb87c95d
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/cpp1z/static_assert1.C
+@@ -0,0 +1,17 @@
++// PR c++/91388
++// Make sure we don't emit -Wreturn-type in functions with failed static_asserts.
++// { dg-do compile { target c++17 } }
++
++template <int N>
++int
++foo ()
++{
++  if constexpr (N <= 42)
++    return N;
++  else
++    static_assert (false, "too high N");	// { dg-error "too high N" }
++}						// { dg-bogus "no return statement in function returning non-void" }
++
++int a = foo <0> ();
++int b = foo <42> ();
++int c = foo <100> ();
+-- 
+2.43.7
+
+

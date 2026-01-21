@@ -1,0 +1,113 @@
+From 95f5abd112020f86aba51ed35a6d517fb09682fe Mon Sep 17 00:00:00 2001
+From: Patrick Palka <ppalka@redhat.com>
+Date: Fri, 5 Dec 2025 13:43:26 -0500
+Subject: [PATCH] libstdc++: Consolidate bullet 1 __common_reference_impl
+ partial specs
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf8
+Content-Transfer-Encoding: 8bit
+
+... and in passing use requires-clauses instead of void_t based SFINAE.
+This is a non-functional change that'll simplify implementing the
+P2655R3 change to common_reference.
+
+	PR c++/120446
+
+libstdc++-v3/ChangeLog:
+
+	* include/std/type_traits (__common_reference_impl): Rewrite
+	partial specializations to use requires-clause instead of
+	an additional void_t template parameter.  Consolidate the
+	partial specializations corresponding to bullet 1.
+
+Reviewed-by: Tomasz KamiÅski <tkaminsk@redhat.com>
+Reviewed-by: Jonathan Wakely <jwakely@redhat.com>
+(cherry picked from commit cbdbbdd1fccfd789e6fbcb37b1b602bb7482de4b)
+---
+ libstdc++-v3/include/std/type_traits | 40 +++++++++-------------------
+ 1 file changed, 13 insertions(+), 27 deletions(-)
+
+diff --git a/libstdc++-v3/include/std/type_traits b/libstdc++-v3/include/std/type_traits
+index 676cdf2d7e66..0a402617c52d 100644
+--- a/libstdc++-v3/include/std/type_traits
++++ b/libstdc++-v3/include/std/type_traits
+@@ -4113,7 +4113,7 @@ template<typename _Ret, typename _Fn, typename... _Args>
+     { using type = _Tp0; };
+ 
+   /// @cond undocumented
+-  template<typename _Tp1, typename _Tp2, int _Bullet = 1, typename = void>
++  template<typename _Tp1, typename _Tp2, int _Bullet = 1>
+     struct __common_reference_impl
+     : __common_reference_impl<_Tp1, _Tp2, _Bullet + 1>
+     { };
+@@ -4126,46 +4126,32 @@ template<typename _Ret, typename _Fn, typename... _Args>
+ 
+   // If T1 and T2 are reference types and COMMON-REF(T1, T2) is well-formed, ...
+   template<typename _Tp1, typename _Tp2>
+-    struct __common_reference_impl<_Tp1&, _Tp2&, 1,
+-				   void_t<__common_ref<_Tp1&, _Tp2&>>>
+-    { using type = __common_ref<_Tp1&, _Tp2&>; };
+-
+-  template<typename _Tp1, typename _Tp2>
+-    struct __common_reference_impl<_Tp1&&, _Tp2&&, 1,
+-				   void_t<__common_ref<_Tp1&&, _Tp2&&>>>
+-    { using type = __common_ref<_Tp1&&, _Tp2&&>; };
+-
+-  template<typename _Tp1, typename _Tp2>
+-    struct __common_reference_impl<_Tp1&, _Tp2&&, 1,
+-				   void_t<__common_ref<_Tp1&, _Tp2&&>>>
+-    { using type = __common_ref<_Tp1&, _Tp2&&>; };
+-
+-  template<typename _Tp1, typename _Tp2>
+-    struct __common_reference_impl<_Tp1&&, _Tp2&, 1,
+-				   void_t<__common_ref<_Tp1&&, _Tp2&>>>
+-    { using type = __common_ref<_Tp1&&, _Tp2&>; };
++    requires is_reference_v<_Tp1> && is_reference_v<_Tp2>
++      && requires { typename __common_ref<_Tp1, _Tp2>; }
++    struct __common_reference_impl<_Tp1, _Tp2, 1>
++    { using type = __common_ref<_Tp1, _Tp2>; };
+ 
+   // Otherwise, if basic_common_reference<...>::type is well-formed, ...
+   template<typename _Tp1, typename _Tp2>
+-    struct __common_reference_impl<_Tp1, _Tp2, 2,
+-				   void_t<__basic_common_ref<_Tp1, _Tp2>>>
++    requires requires { typename __basic_common_ref<_Tp1, _Tp2>; }
++    struct __common_reference_impl<_Tp1, _Tp2, 2>
+     { using type = __basic_common_ref<_Tp1, _Tp2>; };
+ 
+   // Otherwise, if COND-RES(T1, T2) is well-formed, ...
+   template<typename _Tp1, typename _Tp2>
+-    struct __common_reference_impl<_Tp1, _Tp2, 3,
+-				   void_t<__cond_res<_Tp1, _Tp2>>>
++    requires requires { typename __cond_res<_Tp1, _Tp2>; }
++    struct __common_reference_impl<_Tp1, _Tp2, 3>
+     { using type = __cond_res<_Tp1, _Tp2>; };
+ 
+   // Otherwise, if common_type_t<T1, T2> is well-formed, ...
+   template<typename _Tp1, typename _Tp2>
+-    struct __common_reference_impl<_Tp1, _Tp2, 4,
+-				   void_t<common_type_t<_Tp1, _Tp2>>>
++    requires requires { typename common_type_t<_Tp1, _Tp2>; }
++    struct __common_reference_impl<_Tp1, _Tp2, 4>
+     { using type = common_type_t<_Tp1, _Tp2>; };
+ 
+   // Otherwise, there shall be no member type.
+   template<typename _Tp1, typename _Tp2>
+-    struct __common_reference_impl<_Tp1, _Tp2, 5, void>
++    struct __common_reference_impl<_Tp1, _Tp2, 5>
+     { };
+ 
+   // Otherwise, if sizeof...(T) is greater than two, ...
+@@ -4184,7 +4170,7 @@ template<typename _Ret, typename _Fn, typename... _Args>
+     { };
+   /// @endcond
+ 
+-#endif // C++2a
++#endif // C++20
+ 
+   /// @} group metaprogramming
+ 
+-- 
+2.43.7
+
+

@@ -1,0 +1,55 @@
+From 10932131fd133554ecd92f792e48f1015229dac6 Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Thu, 4 Dec 2025 20:37:00 +0100
+Subject: [PATCH] aarch64: Fix crc{,_rev}<SWI124:mode>si4 expanders [PR122991]
+
+The newly added gcc.dg/pr122991.c test fails also on aarch64.
+The problem is the same as on x86 which has been fixed in r16-5882,
+while the last operand is guaranteed to be a CONST_INT of the right
+mode initially, maybe_legitimize_operands can change that if some earlier
+operand has the same value and e.g. register_operand predicate has been
+used, that operand is forced into a pseudo and maybe_legitimize_operands
+then checks if that satisfies the predicate of the other operand.
+As on x86 and aarch64 it didn't have any predicate, it happily used
+a pseudo in those cases instead of the expected CONST_INT.
+
+The following patch fixes that.
+
+2025-12-04  Jakub Jelinek  <jakub@redhat.com>
+
+	PR target/122991
+	* config/aarch64/aarch64.md (crc_rev<ALLI:mode><ALLX:mode>4,
+	crc<ALLI:mode><ALLX:mode>4): Use const_int_operand predicate for
+	the last operand.
+
+(cherry picked from commit 8d36603b8501b33525ebf583f0bb6ca489fee000)
+---
+ gcc/config/aarch64/aarch64.md | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/gcc/config/aarch64/aarch64.md b/gcc/config/aarch64/aarch64.md
+index fa4791d91fcb..87d6e443717e 100644
+--- a/gcc/config/aarch64/aarch64.md
++++ b/gcc/config/aarch64/aarch64.md
+@@ -4740,7 +4740,7 @@
+    ;; data
+    (match_operand:ALLI 2 "register_operand" "r")
+    ;; polynomial without leading 1
+-   (match_operand:ALLX 3)]
++   (match_operand:ALLX 3 "const_int_operand")]
+   ""
+   {
+     /* If the polynomial is the same as the polynomial of crc32c* instruction,
+@@ -4779,7 +4779,7 @@
+    ;; data
+    (match_operand:ALLI 2 "register_operand" "r")
+    ;; polynomial without leading 1
+-   (match_operand:ALLX 3)]
++   (match_operand:ALLX 3 "const_int_operand")]
+   "TARGET_AES && <ALLI:sizen> <= <ALLX:sizen>"
+   {
+     aarch64_expand_crc_using_pmull (<ALLX:MODE>mode, <ALLI:MODE>mode,
+-- 
+2.43.7
+
+

@@ -1,0 +1,146 @@
+From 2171c346abfc1990fdf4801e760371e64f2c75d8 Mon Sep 17 00:00:00 2001
+From: Eric Botcazou <ebotcazou@adacore.com>
+Date: Mon, 15 Dec 2025 09:09:13 +0100
+Subject: [PATCH] Ada: Fix ICE in fld_incomplete_type_of when building GtkAda
+ with LTO
+
+This is a regression from GCC 9 present on mainline and all active branches:
+the compilation of GtkAda in LTO mode trips on the assertion present in the
+fld_incomplete_type_of function about the TYPE_CANONICAL of types pointed to
+by pointer (or reference) types.  The problem comes from an oversight in the
+update_pointer_to function on gcc-interface, which correctly propagates the
+TYPE_CANONICAL of the new pointer type to the old one when there is a new
+pointer type, but fails to synthesize it when there is no new pointer type.
+
+gcc/ada/
+	PR ada/123060
+	* gcc-interface/utils.cc (update_pointer_to): Synthesize a new
+	TYPE_CANONICAL for the old pointer type in the case where there
+	is no new pointer type.  Likewise for references.
+
+gcc/testsuite/
+	* gnat.dg/lto30.ads, gnat.dg/lto30.adb: New test.
+---
+ gcc/ada/gcc-interface/utils.cc  | 38 +++++++++++++++++++++++++++++----
+ gcc/testsuite/gnat.dg/lto30.adb | 31 +++++++++++++++++++++++++++
+ gcc/testsuite/gnat.dg/lto30.ads | 13 +++++++++++
+ 3 files changed, 78 insertions(+), 4 deletions(-)
+ create mode 100644 gcc/testsuite/gnat.dg/lto30.adb
+ create mode 100644 gcc/testsuite/gnat.dg/lto30.ads
+
+diff --git a/gcc/ada/gcc-interface/utils.cc b/gcc/ada/gcc-interface/utils.cc
+index 20355a21e1a1..e8fe15013798 100644
+--- a/gcc/ada/gcc-interface/utils.cc
++++ b/gcc/ada/gcc-interface/utils.cc
+@@ -4594,8 +4594,23 @@ update_pointer_to (tree old_type, tree new_type)
+ 	    new_ptr = TYPE_NEXT_PTR_TO (new_ptr);
+ 	  TYPE_NEXT_PTR_TO (new_ptr) = ptr;
+ 	}
+-      else
+-	TYPE_POINTER_TO (new_type) = ptr;
++      else if (ptr)
++	{
++	  TYPE_POINTER_TO (new_type) = ptr;
++
++	  /* If there is no pointer pointing to NEW_TYPE yet, re-compute the
++	     TYPE_CANONICAL of the old pointer but pointing to NEW_TYPE, like
++	     build_pointer_type would have done for such a pointer, because we
++	     will propagate it in the adjustment loop below.  */
++	  if (TYPE_STRUCTURAL_EQUALITY_P (new_type))
++	    SET_TYPE_STRUCTURAL_EQUALITY (ptr);
++	  else if (TYPE_CANONICAL (new_type) != new_type
++		   || (TYPE_REF_CAN_ALIAS_ALL (ptr)
++		       && !lookup_attribute ("may_alias",
++					     TYPE_ATTRIBUTES (new_type))))
++	    TYPE_CANONICAL (ptr)
++	      = build_pointer_type (TYPE_CANONICAL (new_type));
++	}
+ 
+       /* Now adjust them.  */
+       for (; ptr; ptr = TYPE_NEXT_PTR_TO (ptr))
+@@ -4615,8 +4630,23 @@ update_pointer_to (tree old_type, tree new_type)
+ 	    new_ref = TYPE_NEXT_REF_TO (new_ref);
+ 	  TYPE_NEXT_REF_TO (new_ref) = ref;
+ 	}
+-      else
+-	TYPE_REFERENCE_TO (new_type) = ref;
++      else if (ref)
++	{
++	  TYPE_REFERENCE_TO (new_type) = ref;
++
++	  /* If there is no reference pointing to NEW_TYPE yet, re-compute the
++	     TYPE_CANONICAL of the old reference but pointing to NEW_TYPE, like
++	     build_reference_type would have done for such a reference, because
++	     we will propagate it in the adjustment loop below.  */
++	  if (TYPE_STRUCTURAL_EQUALITY_P (new_type))
++	    SET_TYPE_STRUCTURAL_EQUALITY (ref);
++	  else if (TYPE_CANONICAL (new_type) != new_type
++		   || (TYPE_REF_CAN_ALIAS_ALL (ref)
++		       && !lookup_attribute ("may_alias",
++					     TYPE_ATTRIBUTES (new_type))))
++	    TYPE_CANONICAL (ref)
++	      = build_reference_type (TYPE_CANONICAL (new_type));
++	}
+ 
+       /* Now adjust them.  */
+       for (; ref; ref = TYPE_NEXT_REF_TO (ref))
+diff --git a/gcc/testsuite/gnat.dg/lto30.adb b/gcc/testsuite/gnat.dg/lto30.adb
+new file mode 100644
+index 000000000000..863ca61a574e
+--- /dev/null
++++ b/gcc/testsuite/gnat.dg/lto30.adb
+@@ -0,0 +1,31 @@
++-- { dg-do compile }
++-- { dg-options "-flto" { target lto } }
++
++with Ada.Unchecked_Conversion;
++with System;
++
++package body Lto30 is
++
++   generic
++      type T is private;
++   package Unbounded_Arrays is
++      type Unbounded_Array is array (Natural range 1 .. Natural'Last) of T;
++      type Unbounded_Array_Access is access Unbounded_Array;
++      function Convert is new
++         Ada.Unchecked_Conversion (System.Address, Unbounded_Array_Access);
++   end Unbounded_Arrays;
++
++   package Atom_Arrays is new Unbounded_Arrays (Ptr);
++   use Atom_Arrays;
++
++   procedure Proc is
++      procedure Foo (Targets : access Unbounded_Array_Access);
++      pragma Import (Ada, Foo, "Foo");
++
++      Output : aliased Unbounded_Array_Access;
++
++   begin
++      Foo (Output'Unchecked_Access);
++   end;
++
++end Lto30;
+diff --git a/gcc/testsuite/gnat.dg/lto30.ads b/gcc/testsuite/gnat.dg/lto30.ads
+new file mode 100644
+index 000000000000..3dec139246b6
+--- /dev/null
++++ b/gcc/testsuite/gnat.dg/lto30.ads
+@@ -0,0 +1,13 @@
++package Lto30 is
++
++   type Rec is private;
++
++   type Ptr is access all Rec;
++
++   procedure Proc;
++
++private
++
++   type Rec is null record;
++
++end Lto30;
+-- 
+2.43.7
+
+

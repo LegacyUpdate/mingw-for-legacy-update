@@ -1,0 +1,75 @@
+From 96777e13668a829dcbd3c75071b0fcfd7849e649 Mon Sep 17 00:00:00 2001
+From: Richard Biener <rguenther@suse.de>
+Date: Mon, 18 Aug 2025 13:38:37 +0200
+Subject: [PATCH] tree-optimization/121527 - wrong SRA with aggregate copy
+
+SRA handles outermost VIEW_CONVERT_EXPRs but it wrongly ignores
+those when building an access which leads to the wrong size
+used when the VIEW_CONVERT_EXPR does not have the same size as
+its operand which is valid GENERIC and is used by Ada upcasting.
+
+	PR tree-optimization/121527
+	* tree-sra.cc (build_access_from_expr_1): Do not strip an
+	outer VIEW_CONVERT_EXPR as it's relevant for the size of
+	the access.
+	(get_access_for_expr): Likewise.
+
+(cherry picked from commit 1d0a0173cd3e48f1c7c7e98893d440527fc198d0)
+---
+ gcc/tree-sra.cc | 20 ++++++--------------
+ 1 file changed, 6 insertions(+), 14 deletions(-)
+
+diff --git a/gcc/tree-sra.cc b/gcc/tree-sra.cc
+index aac5d733aa7b..a0106085ebc2 100644
+--- a/gcc/tree-sra.cc
++++ b/gcc/tree-sra.cc
+@@ -1291,19 +1291,16 @@ build_access_from_expr_1 (tree expr, gimple *stmt, bool write)
+       return NULL;
+     }
+ 
+-  /* We need to dive through V_C_Es in order to get the size of its parameter
+-     and not the result type.  Ada produces such statements.  We are also
+-     capable of handling the topmost V_C_E but not any of those buried in other
+-     handled components.  */
+-  if (TREE_CODE (expr) == VIEW_CONVERT_EXPR)
+-    expr = TREE_OPERAND (expr, 0);
+-
+-  if (contains_view_convert_expr_p (expr))
++  /* We are capable of handling the topmost V_C_E but not any of those
++     buried in other handled components.  */
++  if (contains_view_convert_expr_p (TREE_CODE (expr) == VIEW_CONVERT_EXPR
++				    ? TREE_OPERAND (expr, 0) : expr))
+     {
+       disqualify_base_of_expr (expr, "V_C_E under a different handled "
+ 			       "component.");
+       return NULL;
+     }
++
+   if (TREE_THIS_VOLATILE (expr))
+     {
+       disqualify_base_of_expr (expr, "part of a volatile reference.");
+@@ -1323,6 +1320,7 @@ build_access_from_expr_1 (tree expr, gimple *stmt, bool write)
+     case ARRAY_REF:
+     case ARRAY_RANGE_REF:
+     case BIT_FIELD_REF:
++    case VIEW_CONVERT_EXPR:
+       ret = create_access (expr, stmt, write);
+       break;
+ 
+@@ -4086,12 +4084,6 @@ get_access_for_expr (tree expr)
+   tree base;
+   bool reverse;
+ 
+-  /* FIXME: This should not be necessary but Ada produces V_C_Es with a type of
+-     a different size than the size of its argument and we need the latter
+-     one.  */
+-  if (TREE_CODE (expr) == VIEW_CONVERT_EXPR)
+-    expr = TREE_OPERAND (expr, 0);
+-
+   base = get_ref_base_and_extent (expr, &poffset, &psize, &pmax_size,
+ 				  &reverse);
+   if (!known_size_p (pmax_size)
+-- 
+2.43.7
+
+

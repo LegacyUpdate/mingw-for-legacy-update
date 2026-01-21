@@ -1,0 +1,132 @@
+From 1d26b1b37aac4bd898abf4425ffd6310d29db234 Mon Sep 17 00:00:00 2001
+From: Eric Botcazou <ebotcazou@adacore.com>
+Date: Mon, 22 Dec 2025 18:50:59 +0100
+Subject: [PATCH] Ada: Fix bogus component visibility error for class-wide type
+ in generic
+
+The problem is that Analyze_Overloaded_Selected_Component does:
+
+            --  If the prefix is a class-wide type, the visible components
+            --  are those of the base type.
+
+            if Is_Class_Wide_Type (T) then
+               T := Etype (T);
+            end if;
+
+and Resolve_Selected_Component does:
+
+               --  The visible components of a class-wide type are those of
+               --  the root type.
+
+               if Is_Class_Wide_Type (T) then
+                  T := Etype (T);
+               end if;
+
+while Analyze_Selected_Component does:
+
+      --  For class-wide types, use the entity list of the root type
+
+      if Is_Class_Wide_Type (Prefix_Type) then
+         Type_To_Use := Root_Type (Prefix_Type);
+      end if;
+
+when faced with a selected component.  So the 3rd goes to the root type, the
+1st to the base type, and the 2nd wants to do like the 3rd but ends up doing
+like the 1st!  This does not change anything for the class-wide type itself,
+but does for its class-wide subtypes.  The correct processing is the 3rd.
+
+gcc/ada/
+	PR ada/123185
+	* sem_ch4.adb (Analyze_Overloaded_Selected_Component): Go to the
+	root when the prefix has a class-wide type.
+	* sem_res.adb (Resolve_Selected_Component): Likewise.
+
+gcc/testsuite/
+	* gnat.dg/specs/class_wide1.ads: New test.
+---
+ gcc/ada/sem_ch4.adb                         | 10 +++++-----
+ gcc/ada/sem_res.adb                         |  8 ++++----
+ gcc/testsuite/gnat.dg/specs/class_wide1.ads | 19 +++++++++++++++++++
+ 3 files changed, 28 insertions(+), 9 deletions(-)
+ create mode 100644 gcc/testsuite/gnat.dg/specs/class_wide1.ads
+
+diff --git a/gcc/ada/sem_ch4.adb b/gcc/ada/sem_ch4.adb
+index 217a89436e06..6dd4891ff517 100644
+--- a/gcc/ada/sem_ch4.adb
++++ b/gcc/ada/sem_ch4.adb
+@@ -4381,16 +4381,16 @@ package body Sem_Ch4 is
+             T := It.Typ;
+          end if;
+ 
+-         --  Locate the component. For a private prefix the selector can denote
+-         --  a discriminant.
++         --  Find the selected component. For a private prefix, the selector
++         --  can denote a discriminant.
+ 
+          if Is_Record_Type (T) or else Is_Private_Type (T) then
+ 
+-            --  If the prefix is a class-wide type, the visible components are
+-            --  those of the base type.
++            --  If the prefix has a class-wide type, the visible components are
++            --  those of the root type.
+ 
+             if Is_Class_Wide_Type (T) then
+-               T := Etype (T);
++               T := Root_Type (T);
+             end if;
+ 
+             Comp := First_Entity (T);
+diff --git a/gcc/ada/sem_res.adb b/gcc/ada/sem_res.adb
+index 0df6c27c30d7..f13dba7fc5bf 100644
+--- a/gcc/ada/sem_res.adb
++++ b/gcc/ada/sem_res.adb
+@@ -11433,16 +11433,16 @@ package body Sem_Res is
+                T := It.Typ;
+             end if;
+ 
+-            --  Locate selected component. For a private prefix the selector
++            --  Find the selected component. For a private prefix, the selector
+             --  can denote a discriminant.
+ 
+             if Is_Record_Type (T) or else Is_Private_Type (T) then
+ 
+-               --  The visible components of a class-wide type are those of
+-               --  the root type.
++               --  If the prefix has a class-wide type, the visible components
++               --  are those of the root type.
+ 
+                if Is_Class_Wide_Type (T) then
+-                  T := Etype (T);
++                  T := Root_Type (T);
+                end if;
+ 
+                Comp := First_Entity (T);
+diff --git a/gcc/testsuite/gnat.dg/specs/class_wide1.ads b/gcc/testsuite/gnat.dg/specs/class_wide1.ads
+new file mode 100644
+index 000000000000..90edbba24082
+--- /dev/null
++++ b/gcc/testsuite/gnat.dg/specs/class_wide1.ads
+@@ -0,0 +1,19 @@
++-- { dg-do compile }
++
++with Ada.Containers.Indefinite_Vectors;
++
++generic
++package Class_Wide1 is
++
++   type R is tagged record
++      X : Integer;
++   end record;
++
++   package V is new Ada.Containers.Indefinite_Vectors (Positive, R);
++   package V_CW is new Ada.Containers.Indefinite_Vectors (Positive, R'Class);
++
++   function F1 (VV : V.Vector) return Integer is (VV (1).X);
++   function F2 (VV : V_CW.Vector) return Integer is (VV (1).Element.X);
++   function F3 (VV : V_CW.Vector) return Integer is (VV (1).X);
++
++end Class_Wide1;
+-- 
+2.43.7
+
+

@@ -1,0 +1,61 @@
+From 9fe46a4b5e476828d4137c76c1fe81daa75b6ec9 Mon Sep 17 00:00:00 2001
+From: Alex Coplan <alex.coplan@arm.com>
+Date: Tue, 15 Jul 2025 11:49:27 +0100
+Subject: [PATCH] aarch64: Relax fpm_t assert to allow const_ints [PR120986]
+
+This relaxes an overzealous assert that required the fpm_t argument to
+be in DImode when expanding FP8 intrinsics.  Of course this fails to
+account for modeless const_ints.
+
+gcc/ChangeLog:
+
+	PR target/120986
+	* config/aarch64/aarch64-sve-builtins.cc
+	(function_expander::expand): Relax fpm_t assert to allow
+	modeless const_ints.
+
+gcc/testsuite/ChangeLog:
+
+	PR target/120986
+	* gcc.target/aarch64/torture/pr120986-2.c: New test.
+
+(cherry picked from commit 80b0e4ad2f60de8bd57e83628b4ead46df6fb004)
+---
+ gcc/config/aarch64/aarch64-sve-builtins.cc            | 5 +++--
+ gcc/testsuite/gcc.target/aarch64/torture/pr120986-2.c | 7 +++++++
+ 2 files changed, 10 insertions(+), 2 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.target/aarch64/torture/pr120986-2.c
+
+diff --git a/gcc/config/aarch64/aarch64-sve-builtins.cc b/gcc/config/aarch64/aarch64-sve-builtins.cc
+index 36519262efd5..909d9e524e1e 100644
+--- a/gcc/config/aarch64/aarch64-sve-builtins.cc
++++ b/gcc/config/aarch64/aarch64-sve-builtins.cc
+@@ -4586,8 +4586,9 @@ function_expander::expand ()
+     {
+       /* The last element of these functions is always an fpm_t that must be
+          written to FPMR before the call to the instruction itself. */
+-      gcc_assert (args.last ()->mode == DImode);
+-      emit_move_insn (gen_rtx_REG (DImode, FPM_REGNUM), args.last ());
++      rtx fpm = args.last ();
++      gcc_assert (CONST_INT_P (fpm) || GET_MODE (fpm) == DImode);
++      emit_move_insn (gen_rtx_REG (DImode, FPM_REGNUM), fpm);
+     }
+   return base->expand (*this);
+ }
+diff --git a/gcc/testsuite/gcc.target/aarch64/torture/pr120986-2.c b/gcc/testsuite/gcc.target/aarch64/torture/pr120986-2.c
+new file mode 100644
+index 000000000000..1218dead9ddb
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/aarch64/torture/pr120986-2.c
+@@ -0,0 +1,7 @@
++/* { dg-do compile } */
++/* { dg-options "-march=armv8.2-a+sve2+fp8dot2" } */
++#include <arm_sve.h>
++svfloat16_t foo(svfloat16_t a, svmfloat8_t b, svmfloat8_t c)
++{
++  return svdot_lane_fpm (a, b, c, 0, 0);
++}
+-- 
+2.43.7
+
+

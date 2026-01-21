@@ -1,0 +1,140 @@
+From d7f9edb4473f3f12c23c9a3f044c955eba6d16d1 Mon Sep 17 00:00:00 2001
+From: Robin Dapp <rdapp@ventanamicro.com>
+Date: Mon, 8 Dec 2025 10:22:51 +0100
+Subject: [PATCH] RISC-V: Add more mode_idx attributes [PR123022].
+
+Similar to 116149 we use the mode size of operand MODE_IDX but that
+one could refer to a broadcast scalar.  Use operand 3 for scalar
+broadcast patterns instead.
+
+	PR target/123022
+
+gcc/ChangeLog:
+
+	* config/riscv/vector.md: Add mode_idx attribute.
+
+gcc/testsuite/ChangeLog:
+
+	* gcc.target/riscv/rvv/autovec/pr123022-2.c: New test.
+	* gcc.target/riscv/rvv/autovec/pr123022.c: New test.
+
+(cherry picked from commit 195471cc076d05ac1b3e2c2ed0b8cfedb0ac97a1)
+---
+ gcc/config/riscv/vector.md                    |  8 +++++++
+ .../gcc.target/riscv/rvv/autovec/pr123022-2.c |  6 ++++++
+ .../gcc.target/riscv/rvv/autovec/pr123022.c   | 21 +++++++++++++++++++
+ 3 files changed, 35 insertions(+)
+ create mode 100644 gcc/testsuite/gcc.target/riscv/rvv/autovec/pr123022-2.c
+ create mode 100644 gcc/testsuite/gcc.target/riscv/rvv/autovec/pr123022.c
+
+diff --git a/gcc/config/riscv/vector.md b/gcc/config/riscv/vector.md
+index 75e709e12e70..e92a51b5aab5 100644
+--- a/gcc/config/riscv/vector.md
++++ b/gcc/config/riscv/vector.md
+@@ -4095,6 +4095,7 @@
+   "TARGET_VECTOR"
+   "vw<plus_minus:insn><any_extend:u>.wx\t%0,%3,%z4%p1"
+   [(set_attr "type" "vi<widen_binop_insn_type>")
++   (set_attr "mode_idx" "3")
+    (set_attr "mode" "<V_DOUBLE_TRUNC>")])
+ 
+ (define_insn "@pred_single_widen_add<any_extend:su><mode>_extended_scalar"
+@@ -4361,6 +4362,7 @@
+   "TARGET_VECTOR"
+   "v<insn>.vx\t%0,%3,%4%p1"
+   [(set_attr "type" "<int_binop_insn_type>")
++   (set_attr "mode_idx" "3")
+    (set_attr "mode" "<MODE>")])
+ 
+ (define_insn "@pred_<optab><mode>_scalar"
+@@ -4382,6 +4384,7 @@
+   "TARGET_VECTOR"
+   "v<insn>.vx\t%0,%3,%4%p1"
+   [(set_attr "type" "<int_binop_insn_type>")
++   (set_attr "mode_idx" "3")
+    (set_attr "mode" "<MODE>")])
+ 
+ (define_expand "@pred_<optab><mode>_scalar"
+@@ -4436,6 +4439,7 @@
+   "TARGET_VECTOR"
+   "v<insn>.vx\t%0,%3,%4%p1"
+   [(set_attr "type" "<int_binop_insn_type>")
++   (set_attr "mode_idx" "3")
+    (set_attr "mode" "<MODE>")])
+ 
+ (define_insn "*pred_<optab><mode>_extended_scalar"
+@@ -4458,6 +4462,7 @@
+   "TARGET_VECTOR && !TARGET_64BIT"
+   "v<insn>.vx\t%0,%3,%4%p1"
+   [(set_attr "type" "<int_binop_insn_type>")
++   (set_attr "mode_idx" "3")
+    (set_attr "mode" "<MODE>")])
+ 
+ (define_expand "@pred_<optab><mode>_scalar"
+@@ -4512,6 +4517,7 @@
+   "TARGET_VECTOR"
+   "v<insn>.vx\t%0,%3,%z4%p1"
+   [(set_attr "type" "<int_binop_insn_type>")
++   (set_attr "mode_idx" "3")
+    (set_attr "mode" "<MODE>")])
+ 
+ (define_insn "*pred_<optab><mode>_extended_scalar"
+@@ -4534,6 +4540,7 @@
+   "TARGET_VECTOR && !TARGET_64BIT"
+   "v<insn>.vx\t%0,%3,%z4%p1"
+   [(set_attr "type" "<int_binop_insn_type>")
++   (set_attr "mode_idx" "3")
+    (set_attr "mode" "<MODE>")])
+ 
+ (define_insn "@pred_<sat_op><mode>"
+@@ -4579,6 +4586,7 @@
+   "TARGET_VECTOR"
+   "v<sat_op>.vx\t%0,%3,%z4%p1"
+   [(set_attr "type" "<sat_insn_type>")
++   (set_attr "mode_idx" "3")
+    (set_attr "mode" "<MODE>")])
+ 
+ (define_insn "@pred_<sat_op><mode>_scalar"
+diff --git a/gcc/testsuite/gcc.target/riscv/rvv/autovec/pr123022-2.c b/gcc/testsuite/gcc.target/riscv/rvv/autovec/pr123022-2.c
+new file mode 100644
+index 000000000000..0562b566fa80
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/riscv/rvv/autovec/pr123022-2.c
+@@ -0,0 +1,6 @@
++/* { dg-do compile } */
++/* { dg-options "-O3 -march=rv64gcv_zvl512b -mabi=lp64d -mrvv-vector-bits=zvl -fsigned-char" } */
++
++#include "pr123022.c"
++
++/* { dg-final { scan-assembler-not "vset.*zero,1," } } */
+diff --git a/gcc/testsuite/gcc.target/riscv/rvv/autovec/pr123022.c b/gcc/testsuite/gcc.target/riscv/rvv/autovec/pr123022.c
+new file mode 100644
+index 000000000000..1f5f165a02b6
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/riscv/rvv/autovec/pr123022.c
+@@ -0,0 +1,21 @@
++/* { dg-do run } */
++/* { dg-require-effective-target rvv_zvl512b_ok } */
++/* { dg-options "-O3 -march=rv64gcv_zvl512b -mabi=lp64d -mrvv-vector-bits=zvl -fsigned-char" } */
++unsigned e[2][2];
++long a;
++char c[2];
++
++int
++main ()
++{
++  long long b;
++  c[1] = 3;
++  for (unsigned h = 0; h < 2; h++)
++    for (int i = c[0]; i < 5; i += 5)
++      for (int j = 0; j < 219; j++)
++	a = c[h] ? e[h][h] + 3326195747 : 0;
++
++  b = a;
++  if (b != 3326195747)
++    __builtin_abort ();
++}
+-- 
+2.43.7
+
+

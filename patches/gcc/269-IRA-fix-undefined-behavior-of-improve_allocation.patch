@@ -1,0 +1,115 @@
+From 8bc11df218b3b9af0002188a6dfdf81e751ea278 Mon Sep 17 00:00:00 2001
+From: "Vladimir N. Makarov" <vmakarov@redhat.com>
+Date: Fri, 5 Dec 2025 14:21:38 -0500
+Subject: [PATCH] [PR122215, IRA]: Fix undefined behaviour of
+ improve_allocation
+
+Register filters are used in one loop of improve_allocation to ignore some
+hard regs for cost calculation but it is missed in the subsequent loop
+using the costs.  This results in usage of random (undefined) register costs
+and in sporadic code generation for riscv32 which uses the filters.
+
+gcc/ChangeLog:
+
+	PR rtl-optimization/122215
+	* ira-color.cc (improve_allocation): Use register filter for all
+	loop on hard regs.
+
+gcc/testsuite/ChangeLog:
+
+	PR rtl-optimization/122215
+	* gcc.target/riscv/pr122215.c: New.
+	* lib/target-supports.exp (check_effective_target_valgrind): New.
+---
+ gcc/ira-color.cc                          |  3 ++
+ gcc/testsuite/gcc.target/riscv/pr122215.c | 46 +++++++++++++++++++++++
+ gcc/testsuite/lib/target-supports.exp     |  8 ++++
+ 3 files changed, 57 insertions(+)
+ create mode 100644 gcc/testsuite/gcc.target/riscv/pr122215.c
+
+diff --git a/gcc/ira-color.cc b/gcc/ira-color.cc
+index 4b9296029cc0..848d25e095e1 100644
+--- a/gcc/ira-color.cc
++++ b/gcc/ira-color.cc
+@@ -3383,6 +3383,9 @@ improve_allocation (void)
+       for (j = 0; j < class_size; j++)
+ 	{
+ 	  hregno = ira_class_hard_regs[aclass][j];
++	  if (NUM_REGISTER_FILTERS
++	      && !test_register_filters (ALLOCNO_REGISTER_FILTERS (a), hregno))
++	    continue;
+ 	  if (check_hard_reg_p (a, hregno,
+ 				conflicting_regs, profitable_hard_regs)
+ 	      && min_cost > costs[hregno])
+diff --git a/gcc/testsuite/gcc.target/riscv/pr122215.c b/gcc/testsuite/gcc.target/riscv/pr122215.c
+new file mode 100644
+index 000000000000..cdc1ed7c4e74
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/riscv/pr122215.c
+@@ -0,0 +1,46 @@
++/* { dg-do compile } */
++/* { dg-require-effective-target valgrind } */
++/* { dg-additional-files "sparseset.supp" } */
++/* { dg-options "-wrapper valgrind,-q,--exit-on-first-error=yes,--error-exitcode=1,--suppressions=${srcdir}/sparseset.supp" } */
++
++typedef signed int int32_t;
++typedef signed long int int64_t;
++
++int64_t dual_reg_insn(int64_t x) {
++    int64_t res;
++    int64_t zero = 0;
++    asm ("some_custom_insn %0,%1,%2" : "=R" (res) : "R" (x), "R" (zero));
++    return res;
++}
++
++int32_t single_reg_insn(int32_t x) {
++    int32_t res;
++    int32_t zero = 0;
++    asm ("some_custom_insn %0,%1,%2" : "=r" (res) : "r" (x), "r" (zero));
++    return res;
++}
++
++int32_t single_reg_insn_explicit_zero(int32_t x) {
++    int32_t res;
++    asm ("some_custom_insn %0,%1,%2" : "=r" (res) : "r" (x), "r" (0));
++    return res;
++}
++
++int64_t dual_reg_insn2(int64_t x) {
++    int64_t res;
++    int64_t zero = 0;
++    asm ("some_custom_insn %0,%1,%2" : "=R" (res) : "R" (x), "R" (zero));
++    return res;
++    /* This function is IDENTICAL to dual_reg_insn,
++     * but for some obscure reason (alignment?)
++     * it decides to use sX registers instead of aX to store zero,
++     * resulting in a much larger code since it needs to use the stack.
++     * THIS ONLY HAPPENS SOMETIMES!
++     */
++}
++
++int64_t dual_reg_insn_explicit_zero(int64_t x) {
++    int64_t res;
++    asm ("some_custom_insn %0,%1,%2" : "=R" (res) : "R" (x), "R" (0LL));
++    return res;
++}
+diff --git a/gcc/testsuite/lib/target-supports.exp b/gcc/testsuite/lib/target-supports.exp
+index c5191bedc049..47595dfc5a96 100644
+--- a/gcc/testsuite/lib/target-supports.exp
++++ b/gcc/testsuite/lib/target-supports.exp
+@@ -14416,3 +14416,11 @@ proc check_effective_target_speculation_barrier_defined { } {
+ 	    }
+ 	}]
+ }
++
++# Check if valgrind executable exists in PATH on host
++proc check_effective_target_valgrind { } {
++    if { [which valgrind] != 0 } {
++        return 1
++    }
++    return 0
++}
+-- 
+2.43.7
+
+

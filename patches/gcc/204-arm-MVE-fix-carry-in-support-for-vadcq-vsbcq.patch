@@ -1,0 +1,377 @@
+From a48912e9db50915746d5fee545293e97648210bc Mon Sep 17 00:00:00 2001
+From: Christophe Lyon <christophe.lyon@linaro.org>
+Date: Thu, 2 Oct 2025 13:52:22 +0000
+Subject: [PATCH] arm: [MVE] Fix carry-in support for vadcq / vsbcq [PR122189]
+
+The vadcq and vsbcq patterns had two problems:
+- the adc / sbc part of the pattern did not mention the use of vfpcc
+- the carry calcultation part should use a different unspec code
+
+In addtion, the get_fpscr_nzcvqc and set_fpscr_nzcvqc were
+over-cautious by using unspec_volatile when unspec is really what they
+need.  Making them unspec enables to remove redundant accesses to
+FPSCR_nzcvqc.
+
+With unspec_volatile, we used to generate:
+test_2:
+	@ args = 0, pretend = 0, frame = 8
+	@ frame_needed = 0, uses_anonymous_args = 0
+	vmov.i32	q0, #0x1  @ v4si
+	push	{lr}
+	sub	sp, sp, #12
+	vmrs	r3, FPSCR_nzcvqc    ;; [1]
+	bic	r3, r3, #536870912
+	vmsr	FPSCR_nzcvqc, r3
+	vadc.i32	q3, q0, q0
+	vmrs	r3, FPSCR_nzcvqc     ;; [2]
+	vmrs	r3, FPSCR_nzcvqc
+	orr	r3, r3, #536870912
+	vmsr	FPSCR_nzcvqc, r3
+	vadc.i32	q0, q0, q0
+	vmrs	r3, FPSCR_nzcvqc
+	ldr	r0, .L8
+	ubfx	r3, r3, #29, #1
+	str	r3, [sp, #4]
+	bl	print_uint32x4_t
+	add	sp, sp, #12
+	@ sp needed
+	pop	{pc}
+.L9:
+	.align	2
+.L8:
+	.word	.LC1
+
+with unspec, we generate:
+test_2:
+	@ args = 0, pretend = 0, frame = 8
+	@ frame_needed = 0, uses_anonymous_args = 0
+	vmrs	r3, FPSCR_nzcvqc     ;; [1]
+	bic	r3, r3, #536870912   ;; [3]
+	vmov.i32	q0, #0x1  @ v4si
+	vmsr	FPSCR_nzcvqc, r3
+	vadc.i32	q3, q0, q0
+	vmrs	r3, FPSCR_nzcvqc
+	orr	r3, r3, #536870912
+	vmsr	FPSCR_nzcvqc, r3
+	vadc.i32	q0, q0, q0
+	vmrs	r3, FPSCR_nzcvqc
+	push	{lr}
+	ubfx	r3, r3, #29, #1
+	sub	sp, sp, #12
+	ldr	r0, .L8
+	str	r3, [sp, #4]
+	bl	print_uint32x4_t
+	add	sp, sp, #12
+	@ sp needed
+	pop	{pc}
+.L9:
+	.align	2
+.L8:
+	.word	.LC1
+
+That is, unspec in get_fpscr_nzcvqc enables to:
+- move [1] earlier
+- delete redundant [2]
+
+and unspec in set_fpscr_nzcvqc enables to move push {lr} and stack
+manipulation later.
+
+gcc/ChangeLog:
+
+	PR target/122189
+	* config/arm/iterators.md (VxCIQ_carry, VxCIQ_M_carry, VxCQ_carry)
+	(VxCQ_M_carry): New iterators.
+	* config/arm/mve.md (get_fpscr_nzcvqc, set_fpscr_nzcvqc): Use
+	unspec instead of unspec_volatile.
+	(vadciq, vadciq_m, vadcq, vadcq_m): Use vfpcc in operation.  Use a
+	different unspec code for carry calcultation.
+	* config/arm/unspecs.md (VADCQ_U_carry, VADCQ_M_U_carry)
+	(VADCQ_S_carry, VADCQ_M_S_carry, VSBCIQ_U_carry ,VSBCIQ_S_carry
+	,VSBCIQ_M_U_carry ,VSBCIQ_M_S_carry ,VSBCQ_U_carry ,VSBCQ_S_carry
+	,VSBCQ_M_U_carry ,VSBCQ_M_S_carry ,VADCIQ_U_carry
+	,VADCIQ_M_U_carry ,VADCIQ_S_carry ,VADCIQ_M_S_carry): New unspec
+	codes.
+
+gcc/testsuite/ChangeLog:
+
+	PR target/122189
+	* gcc.target/arm/mve/intrinsics/vadcq-check-carry.c: New test.
+	* gcc.target/arm/mve/intrinsics/vadcq_m_s32.c: Adjust instructions
+	order.
+	* gcc.target/arm/mve/intrinsics/vadcq_m_u32.c: Likewise.
+	* gcc.target/arm/mve/intrinsics/vsbcq_m_s32.c: Likewise.
+	* gcc.target/arm/mve/intrinsics/vsbcq_m_u32.c: Likewise.
+
+	(cherry picked from commits
+	027205879733933ec991c230795da6c01ac50029 and
+	697ccadd7217316ea91ddd978ddc944e6df09522)
+---
+ gcc/config/arm/iterators.md                   | 17 +++++++
+ gcc/config/arm/mve.md                         | 36 +++++++++-----
+ gcc/config/arm/unspecs.md                     | 16 +++++++
+ .../arm/mve/intrinsics/vadcq-check-carry.c    | 48 +++++++++++++++++++
+ .../arm/mve/intrinsics/vadcq_m_s32.c          |  2 +-
+ .../arm/mve/intrinsics/vadcq_m_u32.c          |  2 +-
+ .../arm/mve/intrinsics/vsbcq_m_s32.c          |  2 +-
+ .../arm/mve/intrinsics/vsbcq_m_u32.c          |  2 +-
+ 8 files changed, 109 insertions(+), 16 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.target/arm/mve/intrinsics/vadcq-check-carry.c
+
+diff --git a/gcc/config/arm/iterators.md b/gcc/config/arm/iterators.md
+index 743fe48e6ccc..d1126e76720c 100644
+--- a/gcc/config/arm/iterators.md
++++ b/gcc/config/arm/iterators.md
+@@ -3022,3 +3022,20 @@
+ ;; Define iterators for VCMLA operations as MUL
+ (define_int_iterator VCMUL_OP [UNSPEC_VCMUL
+ 			       UNSPEC_VCMUL_CONJ])
++
++(define_int_attr VxCIQ_carry   [(VADCIQ_U "VADCIQ_U_carry")
++				(VADCIQ_S "VADCIQ_S_carry")
++				(VSBCIQ_U "VSBCIQ_U_carry")
++				(VSBCIQ_S "VSBCIQ_S_carry")])
++(define_int_attr VxCIQ_M_carry [(VADCIQ_M_U "VADCIQ_M_U_carry")
++				(VADCIQ_M_S "VADCIQ_M_S_carry")
++				(VSBCIQ_M_U "VSBCIQ_M_U_carry")
++				(VSBCIQ_M_S "VSBCIQ_M_S_carry")])
++(define_int_attr VxCQ_carry [(VADCQ_U "VADCQ_U_carry")
++			     (VADCQ_S "VADCQ_S_carry")
++			     (VSBCQ_U "VSBCQ_U_carry")
++			     (VSBCQ_S "VSBCQ_S_carry")])
++(define_int_attr VxCQ_M_carry [(VADCQ_M_U "VADCQ_M_U_carry")
++			       (VADCQ_M_S "VADCQ_M_S_carry")
++			       (VSBCQ_M_U "VSBCQ_M_U_carry")
++			       (VSBCQ_M_S "VSBCQ_M_S_carry")])
+diff --git a/gcc/config/arm/mve.md b/gcc/config/arm/mve.md
+index cc266f89cdf2..1ec3b2900f9f 100644
+--- a/gcc/config/arm/mve.md
++++ b/gcc/config/arm/mve.md
+@@ -3965,14 +3965,14 @@
+ 
+ (define_insn "get_fpscr_nzcvqc"
+  [(set (match_operand:SI 0 "register_operand" "=r")
+-   (unspec_volatile:SI [(reg:SI VFPCC_REGNUM)] UNSPEC_GET_FPSCR_NZCVQC))]
++   (unspec:SI [(reg:SI VFPCC_REGNUM)] UNSPEC_GET_FPSCR_NZCVQC))]
+  "TARGET_HAVE_MVE"
+  "vmrs\\t%0, FPSCR_nzcvqc"
+  [(set_attr "type" "mve_move")])
+ 
+ (define_insn "set_fpscr_nzcvqc"
+  [(set (reg:SI VFPCC_REGNUM)
+-   (unspec_volatile:SI [(match_operand:SI 0 "register_operand" "r")]
++   (unspec:SI [(match_operand:SI 0 "register_operand" "r")]
+     VUNSPEC_SET_FPSCR_NZCVQC))]
+  "TARGET_HAVE_MVE"
+  "vmsr\\tFPSCR_nzcvqc, %0"
+@@ -3988,8 +3988,9 @@
+ 		      (match_operand:V4SI 2 "s_register_operand" "w")]
+ 	 VxCIQ))
+    (set (reg:SI VFPCC_REGNUM)
+-	(unspec:SI [(const_int 0)]
+-	 VxCIQ))
++	(unspec:SI [(match_dup 1)
++		    (match_dup 2)]
++	 <VxCIQ_carry>))
+   ]
+   "TARGET_HAVE_MVE"
+   "<mve_insn>.i32\t%q0, %q1, %q2"
+@@ -4009,8 +4010,11 @@
+ 		      (match_operand:V4BI 4 "vpr_register_operand" "Up")]
+ 	 VxCIQ_M))
+    (set (reg:SI VFPCC_REGNUM)
+-	(unspec:SI [(const_int 0)]
+-	 VxCIQ_M))
++    (unspec:SI [(match_dup 1)
++		(match_dup 2)
++		(match_dup 3)
++		(match_dup 4)]
++	 <VxCIQ_M_carry>))
+   ]
+   "TARGET_HAVE_MVE"
+   "vpst\;<mve_insn>t.i32\t%q0, %q2, %q3"
+@@ -4025,11 +4029,14 @@
+ (define_insn "@mve_<mve_insn>q_<supf>v4si"
+   [(set (match_operand:V4SI 0 "s_register_operand" "=w")
+ 	(unspec:V4SI [(match_operand:V4SI 1 "s_register_operand" "w")
+-		       (match_operand:V4SI 2 "s_register_operand" "w")]
++		      (match_operand:V4SI 2 "s_register_operand" "w")
++		      (reg:SI VFPCC_REGNUM)]
+ 	 VxCQ))
+    (set (reg:SI VFPCC_REGNUM)
+-	(unspec:SI [(reg:SI VFPCC_REGNUM)]
+-	 VxCQ))
++    (unspec:SI [(match_dup 1)
++		(match_dup 2)
++		(reg:SI VFPCC_REGNUM)]
++	 <VxCQ_carry>))
+   ]
+   "TARGET_HAVE_MVE"
+   "<mve_insn>.i32\t%q0, %q1, %q2"
+@@ -4047,11 +4054,16 @@
+ 	(unspec:V4SI [(match_operand:V4SI 1 "s_register_operand" "0")
+ 		      (match_operand:V4SI 2 "s_register_operand" "w")
+ 		      (match_operand:V4SI 3 "s_register_operand" "w")
+-		      (match_operand:V4BI 4 "vpr_register_operand" "Up")]
++		      (match_operand:V4BI 4 "vpr_register_operand" "Up")
++		      (reg:SI VFPCC_REGNUM)]
+ 	 VxCQ_M))
+    (set (reg:SI VFPCC_REGNUM)
+-	(unspec:SI [(reg:SI VFPCC_REGNUM)]
+-	 VxCQ_M))
++    (unspec:SI [(match_dup 1)
++		(match_dup 2)
++		(match_dup 3)
++		(match_dup 4)
++		(reg:SI VFPCC_REGNUM)]
++	 <VxCQ_M_carry>))
+   ]
+   "TARGET_HAVE_MVE"
+   "vpst\;<mve_insn>t.i32\t%q0, %q2, %q3"
+diff --git a/gcc/config/arm/unspecs.md b/gcc/config/arm/unspecs.md
+index a03609d1de48..ecc6d611529b 100644
+--- a/gcc/config/arm/unspecs.md
++++ b/gcc/config/arm/unspecs.md
+@@ -1189,21 +1189,37 @@
+   VLDRGBWBQ
+   VLDRGBWBQ_Z
+   VADCQ_U
++  VADCQ_U_carry
+   VADCQ_M_U
++  VADCQ_M_U_carry
+   VADCQ_S
++  VADCQ_S_carry
+   VADCQ_M_S
++  VADCQ_M_S_carry
+   VSBCIQ_U
++  VSBCIQ_U_carry
+   VSBCIQ_S
++  VSBCIQ_S_carry
+   VSBCIQ_M_U
++  VSBCIQ_M_U_carry
+   VSBCIQ_M_S
++  VSBCIQ_M_S_carry
+   VSBCQ_U
++  VSBCQ_U_carry
+   VSBCQ_S
++  VSBCQ_S_carry
+   VSBCQ_M_U
++  VSBCQ_M_U_carry
+   VSBCQ_M_S
++  VSBCQ_M_S_carry
+   VADCIQ_U
++  VADCIQ_U_carry
+   VADCIQ_M_U
++  VADCIQ_M_U_carry
+   VADCIQ_S
++  VADCIQ_S_carry
+   VADCIQ_M_S
++  VADCIQ_M_S_carry
+   VLD2Q
+   VLD4Q
+   VST2Q
+diff --git a/gcc/testsuite/gcc.target/arm/mve/intrinsics/vadcq-check-carry.c b/gcc/testsuite/gcc.target/arm/mve/intrinsics/vadcq-check-carry.c
+new file mode 100644
+index 000000000000..3a9b8debf982
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/arm/mve/intrinsics/vadcq-check-carry.c
+@@ -0,0 +1,48 @@
++/* { dg-do run } */
++/* { dg-require-effective-target arm_v8_1m_mve_ok } */
++/* { dg-require-effective-target arm_mve_hw } */
++/* { dg-options "-O2" } */
++/* { dg-add-options arm_v8_1m_mve } */
++
++#include "arm_mve.h"
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++#include <inttypes.h>
++#include <stdio.h>
++
++__attribute((noinline)) void print_uint32x4_t(const char *name, uint32x4_t val)
++{
++  printf("%s: %u, %u, %u, %u\n",
++	 name,
++	 vgetq_lane_u32(val, 0),
++         vgetq_lane_u32(val, 1),
++	 vgetq_lane_u32(val, 2),
++         vgetq_lane_u32(val, 3));
++}
++
++void __attribute__ ((noinline))  test_2(void)
++{
++  uint32x4_t v12, v18, v108;
++  unsigned v17 = 0;
++  v12 = vdupq_n_u32(1);
++  v18 = vadcq_u32(v12, v12, &v17);
++  v17 = 1;
++  v108 = vadcq_u32(v12, v12, &v17);
++  print_uint32x4_t("v108", v108);
++}
++
++int main()
++{
++  test_2();
++  return 0;
++}
++  
++#ifdef __cplusplus
++}
++#endif
++
++/* { dg-output "v108: 3, 2, 2, 2" } */
++/* { dg-final { scan-assembler-times {\tvmrs\t(?:ip|fp|r[0-9]+), FPSCR_nzcvqc} 3 } } */
+diff --git a/gcc/testsuite/gcc.target/arm/mve/intrinsics/vadcq_m_s32.c b/gcc/testsuite/gcc.target/arm/mve/intrinsics/vadcq_m_s32.c
+index 0d4cb7792549..1802c20a3971 100644
+--- a/gcc/testsuite/gcc.target/arm/mve/intrinsics/vadcq_m_s32.c
++++ b/gcc/testsuite/gcc.target/arm/mve/intrinsics/vadcq_m_s32.c
+@@ -1,6 +1,6 @@
+ /* { dg-require-effective-target arm_v8_1m_mve_ok } */
+ /* { dg-add-options arm_v8_1m_mve } */
+-/* { dg-additional-options "-O2" } */
++/* { dg-additional-options "-O2 -fno-schedule-insns -fno-schedule-insns2" } */
+ /* { dg-final { check-function-bodies "**" "" } } */
+ 
+ #include "arm_mve.h"
+diff --git a/gcc/testsuite/gcc.target/arm/mve/intrinsics/vadcq_m_u32.c b/gcc/testsuite/gcc.target/arm/mve/intrinsics/vadcq_m_u32.c
+index a0ba6825d8c9..64f221df8682 100644
+--- a/gcc/testsuite/gcc.target/arm/mve/intrinsics/vadcq_m_u32.c
++++ b/gcc/testsuite/gcc.target/arm/mve/intrinsics/vadcq_m_u32.c
+@@ -1,6 +1,6 @@
+ /* { dg-require-effective-target arm_v8_1m_mve_ok } */
+ /* { dg-add-options arm_v8_1m_mve } */
+-/* { dg-additional-options "-O2" } */
++/* { dg-additional-options "-O2 -fno-schedule-insns -fno-schedule-insns2" } */
+ /* { dg-final { check-function-bodies "**" "" } } */
+ 
+ #include "arm_mve.h"
+diff --git a/gcc/testsuite/gcc.target/arm/mve/intrinsics/vsbcq_m_s32.c b/gcc/testsuite/gcc.target/arm/mve/intrinsics/vsbcq_m_s32.c
+index 7a332610c693..da36d694ddfb 100644
+--- a/gcc/testsuite/gcc.target/arm/mve/intrinsics/vsbcq_m_s32.c
++++ b/gcc/testsuite/gcc.target/arm/mve/intrinsics/vsbcq_m_s32.c
+@@ -1,6 +1,6 @@
+ /* { dg-require-effective-target arm_v8_1m_mve_ok } */
+ /* { dg-add-options arm_v8_1m_mve } */
+-/* { dg-additional-options "-O2" } */
++/* { dg-additional-options "-O2 -fno-schedule-insns -fno-schedule-insns2" } */
+ /* { dg-final { check-function-bodies "**" "" } } */
+ 
+ #include "arm_mve.h"
+diff --git a/gcc/testsuite/gcc.target/arm/mve/intrinsics/vsbcq_m_u32.c b/gcc/testsuite/gcc.target/arm/mve/intrinsics/vsbcq_m_u32.c
+index 609021965022..555690f5fb80 100644
+--- a/gcc/testsuite/gcc.target/arm/mve/intrinsics/vsbcq_m_u32.c
++++ b/gcc/testsuite/gcc.target/arm/mve/intrinsics/vsbcq_m_u32.c
+@@ -1,6 +1,6 @@
+ /* { dg-require-effective-target arm_v8_1m_mve_ok } */
+ /* { dg-add-options arm_v8_1m_mve } */
+-/* { dg-additional-options "-O2" } */
++/* { dg-additional-options "-O2 -fno-schedule-insns -fno-schedule-insns2" } */
+ /* { dg-final { check-function-bodies "**" "" } } */
+ 
+ #include "arm_mve.h"
+-- 
+2.43.7
+
+

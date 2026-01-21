@@ -1,0 +1,44 @@
+From c69799fc153421fb1e82fd90bca12d4c4bcfda6e Mon Sep 17 00:00:00 2001
+From: Andre Vieira <andre.simoesdiasvieira@arm.com>
+Date: Tue, 25 Nov 2025 11:35:54 +0000
+Subject: [PATCH] arm: add extra sizes to Wstrinop-overflow-47.c warning tests
+
+A thumb2 target without a FPU like -mcpu=cortex-m3 will generate
+'vector(4) char' stores which lead to warnings with sizes that weren't being
+allowed before by the test.  This patch adds these sizes.
+
+gcc/testsuite/ChangeLog:
+
+	* gcc.dg/Wstringop-overflow-47.c: Adjust warnings to allow for 32-bit
+	stores.
+---
+ gcc/testsuite/gcc.dg/Wstringop-overflow-47.c | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/gcc/testsuite/gcc.dg/Wstringop-overflow-47.c b/gcc/testsuite/gcc.dg/Wstringop-overflow-47.c
+index aa5402a060f3..6fb64ae96e27 100644
+--- a/gcc/testsuite/gcc.dg/Wstringop-overflow-47.c
++++ b/gcc/testsuite/gcc.dg/Wstringop-overflow-47.c
+@@ -31,15 +31,15 @@ void nowarn_c32 (char c)
+ 
+ void warn_c32 (char c)
+ {
+-  extern char warn_a32[32];   // { dg-message "at offset (32|1|17) into destination object 'warn_a32' of size 32" "pr97027" }
++  extern char warn_a32[32];   // { dg-message "at offset (32|1|17|29) into destination object 'warn_a32' of size 32" "pr97027" }
+ 
+   void *p = warn_a32 + 1;
+-  *(C32*)p = (C32){ c };      // { dg-warning "writing (1 byte|16 bytes|32 bytes) into a region of size (0|15|31)" "pr97027" }
++  *(C32*)p = (C32){ c };      // { dg-warning "writing (1 byte|16 bytes|32 bytes|4 bytes) into a region of size (0|15|31|3)" "pr97027" }
+ 
+   /* Verify a local variable too. */
+   char a32[32];
+   p = a32 + 1;
+-  *(C32*)p = (C32){ c };      // { dg-warning "writing (1 byte|16 bytes|32 bytes) into a region of size (0|15|31)" "pr97027" }
++  *(C32*)p = (C32){ c };      // { dg-warning "writing (1 byte|16 bytes|32 bytes|4 bytes) into a region of size (0|15|31|3)" "pr97027" }
+   sink (p);
+ }
+ 
+-- 
+2.43.7
+
+

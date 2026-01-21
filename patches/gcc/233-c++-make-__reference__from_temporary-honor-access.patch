@@ -1,0 +1,95 @@
+From be07701934f75b112593f37d72cd8842ce969b79 Mon Sep 17 00:00:00 2001
+From: Marek Polacek <polacek@redhat.com>
+Date: Thu, 20 Nov 2025 13:57:43 -0500
+Subject: [PATCH] c++: make __reference_*_from_temporary honor access
+ [PR120529]
+
+This PR reports that our __reference_*_from_temporary ignore access
+control.  The reason is that we only check if implicit_conversion
+works, but not if the conversion can actually be performed, via
+convert_like.
+
+	PR c++/120529
+
+gcc/cp/ChangeLog:
+
+	* call.cc (ref_conv_binds_to_temporary): Don't ignore access control.
+
+gcc/testsuite/ChangeLog:
+
+	* g++.dg/ext/reference_xes_from_temporary1.C: New test.
+
+Reviewed-by: Jason Merrill <jason@redhat.com>
+(cherry picked from commit e82a8e51848b5a74edb530f7597861f7080662c3)
+---
+ gcc/cp/call.cc                                | 16 ++++++++---
+ .../ext/reference_xes_from_temporary1.C       | 28 +++++++++++++++++++
+ 2 files changed, 40 insertions(+), 4 deletions(-)
+ create mode 100644 gcc/testsuite/g++.dg/ext/reference_xes_from_temporary1.C
+
+diff --git a/gcc/cp/call.cc b/gcc/cp/call.cc
+index 6caac8963cc9..0044e0da7186 100644
+--- a/gcc/cp/call.cc
++++ b/gcc/cp/call.cc
+@@ -10143,11 +10143,19 @@ ref_conv_binds_to_temporary (tree type, tree expr, bool direct_init_p/*=false*/)
+   const int flags = direct_init_p ? LOOKUP_NORMAL : LOOKUP_IMPLICIT;
+   conversion *conv = implicit_conversion (type, TREE_TYPE (expr), expr,
+ 					  /*c_cast_p=*/false, flags, tf_none);
+-  tristate ret (tristate::TS_UNKNOWN);
+-  if (conv && !conv->bad_p)
+-    ret = tristate (conv_binds_ref_to_temporary (conv));
++  if (!conv || conv->bad_p)
++    return tristate::unknown ();
+ 
+-  return ret;
++  if (conv_binds_ref_to_temporary (conv))
++    {
++      /* Actually perform the conversion to check access control.  */
++      if (convert_like (conv, expr, tf_none) != error_mark_node)
++	return tristate (true);
++      else
++	return tristate::unknown ();
++    }
++
++  return tristate (false);
+ }
+ 
+ /* Call the trivial destructor for INSTANCE, which can be either an lvalue of
+diff --git a/gcc/testsuite/g++.dg/ext/reference_xes_from_temporary1.C b/gcc/testsuite/g++.dg/ext/reference_xes_from_temporary1.C
+new file mode 100644
+index 000000000000..274de05e7b7a
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/ext/reference_xes_from_temporary1.C
+@@ -0,0 +1,28 @@
++// PR c++/120529
++// { dg-do compile { target c++11 } }
++
++#define SA(X) static_assert((X),#X)
++
++class Dst {};
++
++class Src {
++private:
++    operator Dst() const;
++};
++
++class Src2 {
++protected:
++    operator Dst() const;
++};
++
++class Src3 {
++public:
++    operator Dst() const;
++};
++
++SA (!__reference_converts_from_temporary (Dst&&, Src));
++SA (!__reference_constructs_from_temporary (Dst&&, Src));
++SA (!__reference_converts_from_temporary (Dst&&, Src2));
++SA (!__reference_constructs_from_temporary (Dst&&, Src2));
++SA (__reference_converts_from_temporary (Dst&&, Src3));
++SA (__reference_constructs_from_temporary (Dst&&, Src3));
+-- 
+2.43.7
+
+

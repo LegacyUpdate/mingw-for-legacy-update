@@ -1,0 +1,31 @@
+From 50a3d36b4986683f3b86f3a0f2658213ab249e3f Mon Sep 17 00:00:00 2001
+From: Richard Biener <rguenther@suse.de>
+Date: Wed, 7 Jan 2026 13:57:31 +0100
+Subject: [PATCH] testsuite/123353 - require little-endian for testcase
+
+The following adjusts the testcase to only run on little-endian.
+
+	PR testsuite/123353
+	PR c/123156
+gcc/testsuite/
+	* gcc.dg/torture/builtin-shufflevector-pr123156.c: Require le.
+
+(cherry picked from commit 66cf83cfd91e19920f71c79b8d7f78a88f65187a)
+---
+ gcc/testsuite/gcc.dg/torture/builtin-shufflevector-pr123156.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/gcc/testsuite/gcc.dg/torture/builtin-shufflevector-pr123156.c b/gcc/testsuite/gcc.dg/torture/builtin-shufflevector-pr123156.c
+index ec220bcf39ca..7d3797496310 100644
+--- a/gcc/testsuite/gcc.dg/torture/builtin-shufflevector-pr123156.c
++++ b/gcc/testsuite/gcc.dg/torture/builtin-shufflevector-pr123156.c
+@@ -1,4 +1,4 @@
+-/* { dg-do run } */
++/* { dg-do run { target le } } */
+ 
+ #include <stdint.h>
+ 
+-- 
+2.43.7
+
+

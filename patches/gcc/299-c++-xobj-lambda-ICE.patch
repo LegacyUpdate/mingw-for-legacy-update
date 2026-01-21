@@ -1,0 +1,69 @@
+From 0836fd448bbe36267c179ab389d3a4c29297b53e Mon Sep 17 00:00:00 2001
+From: Jason Merrill <jason@redhat.com>
+Date: Fri, 9 Jan 2026 15:02:53 +0800
+Subject: [PATCH] c++: xobj lambda ICE [PR121854]
+
+Before r15-9757 we just ignored the object parameter in this testcase, but
+after it we get further and ICE on the assert in lambda_expr_this_capture.
+So let's also backport that hunk of r16-970.
+
+I'm still reluctant to backport all of the xobj lambda fixes, but perhaps
+the time for that is coming.
+
+	PR c++/121854
+
+gcc/cp/ChangeLog:
+
+	* lambda.cc (lambda_expr_this_capture): Don't assume
+	current_class_ref.
+
+gcc/testsuite/ChangeLog:
+
+	* g++.dg/cpp23/explicit-obj-lambda19.C: New test.
+---
+ gcc/cp/lambda.cc                                  |  5 +++--
+ .../g++.dg/cpp23/explicit-obj-lambda19.C          | 15 +++++++++++++++
+ 2 files changed, 18 insertions(+), 2 deletions(-)
+ create mode 100644 gcc/testsuite/g++.dg/cpp23/explicit-obj-lambda19.C
+
+diff --git a/gcc/cp/lambda.cc b/gcc/cp/lambda.cc
+index 9192653c0241..3c66db90da56 100644
+--- a/gcc/cp/lambda.cc
++++ b/gcc/cp/lambda.cc
+@@ -922,8 +922,9 @@ lambda_expr_this_capture (tree lambda, int add_capture_p)
+   else
+     {
+       /* To make sure that current_class_ref is for the lambda.  */
+-      gcc_assert (TYPE_MAIN_VARIANT (TREE_TYPE (current_class_ref))
+-		  == LAMBDA_EXPR_CLOSURE (lambda));
++      gcc_assert (!current_class_ref
++		  || (TYPE_MAIN_VARIANT (TREE_TYPE (current_class_ref))
++		      == LAMBDA_EXPR_CLOSURE (lambda)));
+ 
+       result = this_capture;
+ 
+diff --git a/gcc/testsuite/g++.dg/cpp23/explicit-obj-lambda19.C b/gcc/testsuite/g++.dg/cpp23/explicit-obj-lambda19.C
+new file mode 100644
+index 000000000000..bbf295cddf88
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/cpp23/explicit-obj-lambda19.C
+@@ -0,0 +1,15 @@
++// PR c++/121854
++// { dg-do compile { target c++23 } }
++
++struct S
++{
++    static void static_func(){}
++
++    void func()
++    {
++        auto lambda = [](this auto)
++        {
++            static_func();
++        };
++    }
++};
+-- 
+2.43.7
+
+

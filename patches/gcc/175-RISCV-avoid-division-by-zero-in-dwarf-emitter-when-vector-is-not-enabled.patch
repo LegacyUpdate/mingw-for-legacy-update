@@ -1,0 +1,85 @@
+From 9b1141fa8fc981f99cfabfbcc3cc23269d359c69 Mon Sep 17 00:00:00 2001
+From: Jeff Law <jlaw@ventanamicro.com>
+Date: Mon, 13 Oct 2025 14:33:10 -0600
+Subject: [PATCH] [RISC-V][PR target/120674] Avoid division by zero in dwarf
+ emitter when vector is not enabled
+
+This is a RISC-V specific failure in the dwarf2 emitter.  When vector is not
+enabled riscv_convert_vector_chunks sets the riscv_vector_chunks poly_int to
+[1, 0].
+
+riscv_dwarf_poly_indeterminite_value pulls out that 0 coefficient and uses that
+as FACTOR triggering a divide by zero here:
+
+>               /* Add COEFF * ((REGNO / FACTOR) - BIAS) to the value:
+>                  add COEFF * (REGNO / FACTOR) now and subtract
+>                  COEFF * BIAS from the final constant part.  */
+>               constant -= coeff * bias;
+>               add_loc_descr (&ret, new_reg_loc_descr (regno, 0));
+>               if (coeff % factor == 0)
+>                 coeff /= factor;
+>               else
+>                 {
+>                   int amount = exact_log2 (factor);
+>                   gcc_assert (amount >= 0);
+>                   add_loc_descr (&ret, int_loc_descriptor (amount));
+>                   add_loc_descr (&ret, new_loc_descr (DW_OP_shr, 0, 0));
+>                 }
+
+Per Robin's recommendation this patch adjusts
+riscv_dwarf_poly_indeterminite_value to never set FACTOR to 0, but instead
+detect this case and adjust its value to 1.
+
+That fixes the ICE and looks good across the board in my tester. Waiting on
+pre-commit CI, of course.
+
+	PR target/120674
+gcc/
+	* config/riscv/riscv.cc (riscv_dwarf_poly_indeterminite_value): Do not
+	set FACTOR to zero, for that case use one instead.
+
+gcc/testsuite
+
+	* gcc.target/riscv/pr120674.c: New test.
+
+(cherry picked from commit a92369a6be95c8df1525b02635b9e7c16fc3640e)
+---
+ gcc/config/riscv/riscv.cc                 | 7 +++++++
+ gcc/testsuite/gcc.target/riscv/pr120674.c | 6 ++++++
+ 2 files changed, 13 insertions(+)
+ create mode 100644 gcc/testsuite/gcc.target/riscv/pr120674.c
+
+diff --git a/gcc/config/riscv/riscv.cc b/gcc/config/riscv/riscv.cc
+index 472c2e60d9f5..314524ac1c87 100644
+--- a/gcc/config/riscv/riscv.cc
++++ b/gcc/config/riscv/riscv.cc
+@@ -11809,6 +11809,13 @@ riscv_dwarf_poly_indeterminate_value (unsigned int i, unsigned int *factor,
+   */
+   gcc_assert (i == 1);
+   *factor = BYTES_PER_RISCV_VECTOR.coeffs[1];
++
++  /* The factor will be zero if vector is not enabled.  That ultimately
++     causes problems in the dwarf2 emitter as the factor is used for
++     a division, causing a divide by zero.  */
++  if (*factor == 0)
++    *factor = 1;
++
+   *offset = 1;
+   return RISCV_DWARF_VLENB;
+ }
+diff --git a/gcc/testsuite/gcc.target/riscv/pr120674.c b/gcc/testsuite/gcc.target/riscv/pr120674.c
+new file mode 100644
+index 000000000000..ec8835feb24d
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/riscv/pr120674.c
+@@ -0,0 +1,6 @@
++/* { dg-do compile } */
++/* { dg-additional-options "-g -w -march=rv32gcv -mabi=ilp32" { target rv32 } } */
++/* { dg-additional-options "-g -w -march=rv64gcv -mabi=lp64d" { target rv64 } } */
++
++#pragma riscv intrinsic "vector"
++void GB_AxB_saxpy5_unrolled_rvv() { vfloat64m8_t vc; }
+-- 
+2.43.7
+
+

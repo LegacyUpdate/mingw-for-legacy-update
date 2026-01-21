@@ -1,0 +1,74 @@
+From 47cdd873eddcd4127812fb902961b88da26d333b Mon Sep 17 00:00:00 2001
+From: Richard Sandiford <richard.sandiford@arm.com>
+Date: Mon, 18 Aug 2025 12:15:21 +0100
+Subject: [PATCH] fwprop: Don't propagate asms [PR121253]
+
+For the reasons explained in the comment, fwprop shouldn't even
+try to propagate an asm definition.
+
+gcc/
+	PR rtl-optimization/121253
+	* fwprop.cc (forward_propagate_into): Don't propagate asm defs.
+
+gcc/testsuite/
+	PR rtl-optimization/121253
+	* gcc.target/aarch64/pr121253.c: New test.
+
+(cherry picked from commit e82c8413eda498163ae2e0ecc458ea0428708c30)
+---
+ gcc/fwprop.cc                               | 14 ++++++++++++++
+ gcc/testsuite/gcc.target/aarch64/pr121253.c | 16 ++++++++++++++++
+ 2 files changed, 30 insertions(+)
+ create mode 100644 gcc/testsuite/gcc.target/aarch64/pr121253.c
+
+diff --git a/gcc/fwprop.cc b/gcc/fwprop.cc
+index 4ee44adcde29..59df7cad0dee 100644
+--- a/gcc/fwprop.cc
++++ b/gcc/fwprop.cc
+@@ -836,6 +836,20 @@ forward_propagate_into (use_info *use, bool reg_prop_only = false)
+   if (def_insn->is_artificial ())
+     return false;
+ 
++  /* Do not propagate asms.  The only kind of propagation that would
++     succeed is propagation into a register move.  Such a propagation
++     is neutral if the destination of the move is a pseudo and unnecessarily
++     restricts the register allocator if the destination of the move is
++     a hard register.
++
++     Furthermore, unlike for a normal instruction, we cannot take a SET from an
++     asm and try dropping the CLOBBERs.  The recog process does not (and should
++     not try to) second-guess whether what the user wrote can be changed and
++     so it has to assume that any asm given to it is a fair reflection of
++     what the user wrote.  */
++  if (def_insn->is_asm ())
++    return false;
++
+   rtx_insn *def_rtl = def_insn->rtl ();
+   if (!NONJUMP_INSN_P (def_rtl))
+     return false;
+diff --git a/gcc/testsuite/gcc.target/aarch64/pr121253.c b/gcc/testsuite/gcc.target/aarch64/pr121253.c
+new file mode 100644
+index 000000000000..37de605c6462
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/aarch64/pr121253.c
+@@ -0,0 +1,16 @@
++/* { dg-options "-O" } */
++
++struct s128 {
++    long a, b;
++};
++
++struct s128 foo(void) {
++    struct s128 ret;
++    asm("mov %0, #0 \n\t"
++        "mov %R0, #0 \n\t"
++        "mov x0, #12345"
++        : "=r" (ret) : : "x0");
++    return ret;
++}
++
++/* { dg-final { scan-assembler-not {mov x0, #0} } } */
+-- 
+2.43.7
+
+

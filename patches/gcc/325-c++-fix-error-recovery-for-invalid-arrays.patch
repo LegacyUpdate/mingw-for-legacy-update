@@ -1,0 +1,73 @@
+From 5a2e515816038aa3636d578d6531e56b11ab6366 Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Sat, 3 Jan 2026 12:15:30 +0100
+Subject: [PATCH] c++: Fix error recovery for invalid arrays [PR123331]
+
+The following testcase ICEs since the conditional
+eltinit = build2 (INIT_EXPR, ...) has been added to cxx_eval_vec_init_1.
+
+If there are errors, eltinit will be error_mark_node and we can ICE during
+constant evaluation of that.
+
+Fixed by skipping it for error operands.
+
+2026-01-03  Jakub Jelinek  <jakub@redhat.com>
+
+	PR c++/123331
+	* constexpr.cc (cxx_eval_vec_init_1): Don't build INIT_EXPR if
+	eltinit is erroneous.
+
+	* g++.dg/other/pr123331.C: New test.
+
+(cherry picked from commit 66fbe318e2df40ff548bc22a7abe5fa8de88429c)
+---
+ gcc/cp/constexpr.cc                   |  4 +++-
+ gcc/testsuite/g++.dg/other/pr123331.C | 20 ++++++++++++++++++++
+ 2 files changed, 23 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/g++.dg/other/pr123331.C
+
+diff --git a/gcc/cp/constexpr.cc b/gcc/cp/constexpr.cc
+index e667c5221732..30885484a39b 100644
+--- a/gcc/cp/constexpr.cc
++++ b/gcc/cp/constexpr.cc
+@@ -5753,7 +5753,9 @@ cxx_eval_vec_init_1 (const constexpr_ctx *ctx, tree atype, tree init,
+ 	  eltinit = (perform_implicit_conversion_flags
+ 		     (elttype, eltinit, complain,
+ 		      LOOKUP_IMPLICIT|LOOKUP_NO_NARROWING));
+-	  if (CLASS_TYPE_P (elttype) && new_ctx.object)
++	  if (CLASS_TYPE_P (elttype)
++	      && new_ctx.object
++	      && !error_operand_p (eltinit))
+ 	    /* Clarify what object is being initialized (118285).  */
+ 	    eltinit = build2 (INIT_EXPR, elttype, new_ctx.object, eltinit);
+ 	  eltinit = cxx_eval_constant_expression (&new_ctx, eltinit, lval,
+diff --git a/gcc/testsuite/g++.dg/other/pr123331.C b/gcc/testsuite/g++.dg/other/pr123331.C
+new file mode 100644
+index 000000000000..ee2adcb1b2b5
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/other/pr123331.C
+@@ -0,0 +1,20 @@
++// PR c++/123331
++// { dg-do compile }
++// { dg-additional-options "-O2" }
++
++struct A { virtual void foo () = 0; };
++struct B { A a[1]; };	// { dg-error "cannot declare field 'B::a' to be of abstract type 'A'" }
++// { dg-error "cannot allocate an object of abstract type 'A'" "" { target *-*-* } .-1 }
++
++template <typename T>
++void
++bar (T x)
++{
++} 
++
++int
++main ()
++{
++  B b;
++  bar (b); 
++}
+-- 
+2.43.7
+
+

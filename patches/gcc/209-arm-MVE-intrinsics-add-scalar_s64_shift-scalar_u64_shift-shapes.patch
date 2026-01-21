@@ -1,0 +1,78 @@
+From 69bd3cbaff753888b6c57b9c02c318c253fd5e3e Mon Sep 17 00:00:00 2001
+From: Christophe Lyon <christophe.lyon@linaro.org>
+Date: Fri, 19 Sep 2025 12:35:35 +0000
+Subject: [PATCH] arm: [MVE intrinsics] add scalar_s64_shift scalar_u64_shift
+ shapes [PR122216]
+
+This patch adds the scalar_s64_shift and scalar_u64_shift shape
+descriptions.
+
+gcc/ChangeLog:
+
+	PR target/122216
+	* config/arm/arm-mve-builtins-shapes.cc (scalar_s64_shift): New.
+	(scalar_u64_shift): New.
+	* config/arm/arm-mve-builtins-shapes.h: Likewise.
+---
+ gcc/config/arm/arm-mve-builtins-shapes.cc | 30 +++++++++++++++++++++++
+ gcc/config/arm/arm-mve-builtins-shapes.h  |  2 ++
+ 2 files changed, 32 insertions(+)
+
+diff --git a/gcc/config/arm/arm-mve-builtins-shapes.cc b/gcc/config/arm/arm-mve-builtins-shapes.cc
+index aeb14530a082..f85b82af358a 100644
+--- a/gcc/config/arm/arm-mve-builtins-shapes.cc
++++ b/gcc/config/arm/arm-mve-builtins-shapes.cc
+@@ -1682,6 +1682,36 @@ struct mvn_def : public overloaded_base<0>
+ };
+ SHAPE (mvn)
+ 
++/* int64_t foo(int64_t, int32_t)
++
++   Example: asrl
++   int64_t [__arm_]arsl(int64_t value, int32_t shift)  */
++struct scalar_s64_shift_def : public nonoverloaded_base
++{
++  void
++  build (function_builder &b, const function_group_info &group,
++	 bool preserve_user_namespace) const override
++  {
++    build_all (b, "ss64,ss64,ss32", group, MODE_none, preserve_user_namespace);
++  }
++};
++SHAPE (scalar_s64_shift)
++
++/* uint64_t foo(uint64_t, int32_t)
++
++   Example: lsll.
++   uint64_t [__arm_]lsll(uint64_t value, int32_t shift)  */
++struct scalar_u64_shift_def : public nonoverloaded_base
++{
++  void
++  build (function_builder &b, const function_group_info &group,
++	 bool preserve_user_namespace) const override
++  {
++    build_all (b, "su64,su64,ss32", group, MODE_none, preserve_user_namespace);
++  }
++};
++SHAPE (scalar_u64_shift)
++
+ /* void vfoo[_t0](<X>_t *, <T0>[xN]_t)
+ 
+    where <X> might be tied to <t0> (for non-truncating stores) or might
+diff --git a/gcc/config/arm/arm-mve-builtins-shapes.h b/gcc/config/arm/arm-mve-builtins-shapes.h
+index 6b839c577c6b..f1838e6da423 100644
+--- a/gcc/config/arm/arm-mve-builtins-shapes.h
++++ b/gcc/config/arm/arm-mve-builtins-shapes.h
+@@ -66,6 +66,8 @@ namespace arm_mve
+     extern const function_shape *const load_ext_gather_offset;
+     extern const function_shape *const load_gather_base;
+     extern const function_shape *const mvn;
++    extern const function_shape *const scalar_s64_shift;
++    extern const function_shape *const scalar_u64_shift;
+     extern const function_shape *const store;
+     extern const function_shape *const store_scatter_base;
+     extern const function_shape *const store_scatter_offset;
+-- 
+2.43.7
+
+

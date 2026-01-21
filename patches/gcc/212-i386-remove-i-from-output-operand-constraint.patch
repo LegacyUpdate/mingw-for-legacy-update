@@ -1,0 +1,34 @@
+From 3bc54cfb35bd6428392904e067f58149cc74f694 Mon Sep 17 00:00:00 2001
+From: Uros Bizjak <ubizjak@gmail.com>
+Date: Fri, 14 Nov 2025 13:01:28 +0100
+Subject: [PATCH] i386: Remove 'i' from output operand constraint
+
+It is not possible to use 'i' as output operand constraint.
+
+gcc/ChangeLog:
+
+	* config/i386/i386.md (*sub<mode>_3):
+	Remove 'i' from operand 0 constraint.
+
+(cherry picked from commit 75d7819b8f8d480d8dde4c42b90279a6c6168f04)
+---
+ gcc/config/i386/i386.md | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/gcc/config/i386/i386.md b/gcc/config/i386/i386.md
+index bfd77ead1de3..767e3f837a2f 100644
+--- a/gcc/config/i386/i386.md
++++ b/gcc/config/i386/i386.md
+@@ -8677,7 +8677,7 @@
+   [(set (reg FLAGS_REG)
+ 	(compare (match_operand:SWI 1 "nonimmediate_operand" "0,0,rm,r")
+ 		 (match_operand:SWI 2 "<general_operand>" "<r><i>,<m>,r<i>,<m>")))
+-   (set (match_operand:SWI 0 "nonimmediate_operand" "=<r>m,<r>i,r,r")
++   (set (match_operand:SWI 0 "nonimmediate_operand" "=<r>m,<r>,r,r")
+ 	(minus:SWI (match_dup 1) (match_dup 2)))]
+   "ix86_match_ccmode (insn, CCmode)
+    && ix86_binary_operator_ok (MINUS, <MODE>mode, operands, TARGET_APX_NDD)"
+-- 
+2.43.7
+
+

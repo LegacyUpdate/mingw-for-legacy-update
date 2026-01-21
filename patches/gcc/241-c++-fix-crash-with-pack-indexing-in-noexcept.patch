@@ -1,0 +1,121 @@
+From 3945c6bd7e5d2ba8c776eb94814e4b95f08f3e05 Mon Sep 17 00:00:00 2001
+From: Marek Polacek <polacek@redhat.com>
+Date: Mon, 24 Nov 2025 17:31:22 -0500
+Subject: [PATCH] c++: fix crash with pack indexing in noexcept [PR121325]
+
+In my r15-6792 patch I added a call to tsubst in tsubst_pack_index
+to fully instantiate args#N in the pack.
+
+Here we are in an unevaluated context, but since the pack is
+a TREE_VEC, we call tsubst_template_args which has cp_evaluated
+at the beginning.  That causes a crash because we trip on the
+assert in tsubst_expr/PARM_DECL:
+
+  gcc_assert (cp_unevaluated_operand);
+
+because retrieve_local_specialization didn't find anything (becase
+there are no local_specializations yet).
+
+We can avoid the cp_evaluated by calling the new tsubst_tree_vec,
+which creates a new TREE_VEC and substitutes each element.
+
+	PR c++/121325
+
+gcc/cp/ChangeLog:
+
+	* pt.cc (tsubst_tree_vec): New.
+	(tsubst_pack_index): Call it.
+
+gcc/testsuite/ChangeLog:
+
+	* g++.dg/cpp26/pack-indexing18.C: New test.
+
+Reviewed-by: Patrick Palka <ppalka@redhat.com>
+(cherry picked from commit 856fae983bca6a934b74f47c7cd21e6919035fc0)
+---
+ gcc/cp/pt.cc                                 | 21 ++++++++++++-
+ gcc/testsuite/g++.dg/cpp26/pack-indexing18.C | 32 ++++++++++++++++++++
+ 2 files changed, 52 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/g++.dg/cpp26/pack-indexing18.C
+
+diff --git a/gcc/cp/pt.cc b/gcc/cp/pt.cc
+index 04f1d02e030b..a245b6ef7490 100644
+--- a/gcc/cp/pt.cc
++++ b/gcc/cp/pt.cc
+@@ -14093,6 +14093,25 @@ tsubst_pack_expansion (tree t, tree args, tsubst_flags_t complain,
+   return result;
+ }
+ 
++/* Substitute ARGS into T, which is a TREE_VEC.  This function creates a new
++   TREE_VEC rather than substituting the elements in-place.  */
++
++static tree
++tsubst_tree_vec (tree t, tree args, tsubst_flags_t complain, tree in_decl)
++{
++  const int len = TREE_VEC_LENGTH (t);
++  tree r = make_tree_vec (len);
++  for (int i = 0; i < len; ++i)
++    {
++      tree arg = TREE_VEC_ELT (t, i);
++      if (TYPE_P (arg))
++	TREE_VEC_ELT (r, i) = tsubst (arg, args, complain, in_decl);
++      else
++	TREE_VEC_ELT (r, i) = tsubst_expr (arg, args, complain, in_decl);
++    }
++  return r;
++}
++
+ /* Substitute ARGS into T, which is a pack index (i.e., PACK_INDEX_TYPE or
+    PACK_INDEX_EXPR).  Returns a single type or expression, a PACK_INDEX_*
+    node if only a partial substitution could be performed, or ERROR_MARK_NODE
+@@ -14110,7 +14129,7 @@ tsubst_pack_index (tree t, tree args, tsubst_flags_t complain, tree in_decl)
+ 	 a partially instantiated closure.  Let tsubst find the
+ 	 fully-instantiated one.  */
+       gcc_assert (TREE_CODE (pack) == TREE_VEC);
+-      pack = tsubst (pack, args, complain, in_decl);
++      pack = tsubst_tree_vec (pack, args, complain, in_decl);
+     }
+   if (TREE_CODE (pack) == TREE_VEC && TREE_VEC_LENGTH (pack) == 0)
+     {
+diff --git a/gcc/testsuite/g++.dg/cpp26/pack-indexing18.C b/gcc/testsuite/g++.dg/cpp26/pack-indexing18.C
+new file mode 100644
+index 000000000000..d3e3730408cb
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/cpp26/pack-indexing18.C
+@@ -0,0 +1,32 @@
++// PR c++/121325
++// { dg-do compile { target c++26 } }
++
++void f(auto... a) requires requires { []<int i = 0> noexcept(noexcept(a...[i])) { }(); } {}
++void g(auto... a) requires requires { []<int i = 0> { static_assert(noexcept(a...[i])); }(); } {}
++
++void
++h ()
++{
++  f (0);
++  g (0);
++}
++
++void foo () {}
++void bar () noexcept {}
++template<bool B>
++void baz () noexcept(B) {}
++
++template<typename... Ts>
++void
++x (Ts... ts) noexcept (noexcept (ts...[0]()))
++{
++}
++
++void
++y ()
++{
++  static_assert (!noexcept (x (foo)));
++  static_assert (noexcept (x (bar)));
++  static_assert (noexcept (x (baz<true>)));
++  static_assert (!noexcept (x (baz<false>)));
++}
+-- 
+2.43.7
+
+

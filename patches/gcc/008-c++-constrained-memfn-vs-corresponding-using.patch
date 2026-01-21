@@ -1,0 +1,136 @@
+From 9faa21a4de2b88366e363b6817ee751ea8d13f53 Mon Sep 17 00:00:00 2001
+From: Patrick Palka <ppalka@redhat.com>
+Date: Mon, 4 Aug 2025 16:51:00 -0400
+Subject: [PATCH] c++: constrained memfn vs corresponding using [PR121351]
+
+The b.f(42) calls in the below testcases started to get rejected as
+ambiguous after r15-3740 which corrected our inheritedness tiebreaker to
+only apply to constructors (and not all member functions) as per CWG2273.
+
+But arguably these calls should still be valid regardless of the
+tiebreaker because B::f corresponds to and therefore hides A::f, so
+there should only be a single candidate in the first place.  This
+doesn't happen because when determining correspondence we compare
+the members' uninstantiated constraints instead of their partially
+substituted constraints as in other declaration matching situations.
+It doesn't really make sense to compare uninstantiated constraints
+from two different template contexts.
+
+This patch fixes this by substituting in outer template arguments before
+comparing constraints of two potentially corresponding member functions.
+
+	PR c++/121351
+	PR c++/119859
+
+gcc/cp/ChangeLog:
+
+	* class.cc (add_method): Substitute outer template arguments
+	into constraints before comparing them if the declarations are
+	from different classes.
+
+gcc/testsuite/ChangeLog:
+
+	* g++.dg/cpp2a/concepts-using5.C: New test.
+	* g++.dg/cpp2a/concepts-using5a.C: New test.
+
+Reviewed-by: Jason Merrill <jason@redhat.com>
+(cherry picked from commit b9f1cc4e119da9205cb8438f0132c62a19afe4ae)
+---
+ gcc/cp/class.cc                               | 25 ++++++++++++++++++-
+ gcc/testsuite/g++.dg/cpp2a/concepts-using5.C  | 19 ++++++++++++++
+ gcc/testsuite/g++.dg/cpp2a/concepts-using5a.C | 20 +++++++++++++++
+ 3 files changed, 63 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/g++.dg/cpp2a/concepts-using5.C
+ create mode 100644 gcc/testsuite/g++.dg/cpp2a/concepts-using5a.C
+
+diff --git a/gcc/cp/class.cc b/gcc/cp/class.cc
+index 93ad9d6fd0b6..54ccd93b8994 100644
+--- a/gcc/cp/class.cc
++++ b/gcc/cp/class.cc
+@@ -1351,7 +1351,30 @@ add_method (tree type, tree method, bool via_using)
+       if (!compparms (parms1, parms2))
+ 	continue;
+ 
+-      if (!equivalently_constrained (fn, method))
++      tree fn_constraints = get_constraints (fn);
++      tree method_constraints = get_constraints (method);
++
++      if (fn_constraints && method_constraints
++	  && DECL_CONTEXT (fn) != type
++	  && !processing_template_decl)
++	{
++	  if (TREE_CODE (fn) == TEMPLATE_DECL)
++	    ++processing_template_decl;
++	  if (tree ti = CLASSTYPE_TEMPLATE_INFO (DECL_CONTEXT (fn)))
++	    fn_constraints = tsubst_constraint_info (fn_constraints,
++						     TI_ARGS (ti),
++						     tf_warning_or_error,
++						     fn);
++	  if (tree ti = CLASSTYPE_TEMPLATE_INFO (DECL_CONTEXT (method)))
++	    method_constraints = tsubst_constraint_info (method_constraints,
++							 TI_ARGS (ti),
++							 tf_warning_or_error,
++							 method);
++	  if (TREE_CODE (fn) == TEMPLATE_DECL)
++	    --processing_template_decl;
++	}
++
++      if (!equivalent_constraints (fn_constraints, method_constraints))
+ 	{
+ 	  if (processing_template_decl)
+ 	    /* We can't check satisfaction in dependent context, wait until
+diff --git a/gcc/testsuite/g++.dg/cpp2a/concepts-using5.C b/gcc/testsuite/g++.dg/cpp2a/concepts-using5.C
+new file mode 100644
+index 000000000000..d42b8a0167b9
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/cpp2a/concepts-using5.C
+@@ -0,0 +1,19 @@
++// PR c++/121351
++// { dg-do compile { target c++20 } }
++
++template<class T> concept C = true;
++
++template<class T>
++struct A {
++  template<class U> void f(U) requires C<T> = delete; // #1
++};
++
++struct B : A<int> {
++  using A::f;
++  template<class U> void f(U) requires C<int>; // #2
++};
++
++int main() {
++  B b;
++  b.f(42); // OK, #2 corresponds to and therefore hides #1
++}
+diff --git a/gcc/testsuite/g++.dg/cpp2a/concepts-using5a.C b/gcc/testsuite/g++.dg/cpp2a/concepts-using5a.C
+new file mode 100644
+index 000000000000..5d319481b480
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/cpp2a/concepts-using5a.C
+@@ -0,0 +1,20 @@
++// PR c++/121351
++// { dg-do compile { target c++20 } }
++// A version of concepts-using5a.C where B instead of A is a template.
++
++template<class T> concept C = true;
++
++struct A {
++  template<class U> void f(U) requires C<int> = delete; // #1
++};
++
++template<class T>
++struct B : A {
++  using A::f;
++  template<class U> void f(U) requires C<T>; // #2
++};
++
++int main() {
++  B<int> b;
++  b.f(42); // OK, #2 corresponds to and therefore hides #1
++}
+-- 
+2.43.7
+
+

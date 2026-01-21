@@ -1,0 +1,130 @@
+From 49a81006bdfbe251d59086c415c44394ea3edff1 Mon Sep 17 00:00:00 2001
+From: "hongtao.liu" <hongtao.liu@intel.com>
+Date: Tue, 16 Sep 2025 03:23:45 +0200
+Subject: [PATCH] Remove SPR/GNR/DMR from avx512_{move,store}_by pieces tune.
+
+Align move_max with prefer_vector_width for SPR/GNR/DMR similar as
+below commit.
+
+commit 6ea25c041964bf63014fcf7bb68fb1f5a0a4e123
+Author: liuhongt <hongtao.liu@intel.com>
+Date:   Thu Aug 15 12:54:07 2024 +0800
+
+    Align ix86_{move_max,store_max} with vectorizer.
+
+    When none of mprefer-vector-width, avx256_optimal/avx128_optimal,
+    avx256_store_by_pieces/avx512_store_by_pieces is specified, GCC will
+    set ix86_{move_max,store_max} as max available vector length except
+    for AVX part.
+
+                  if (TARGET_AVX512F_P (opts->x_ix86_isa_flags)
+                      && TARGET_EVEX512_P (opts->x_ix86_isa_flags2))
+                    opts->x_ix86_move_max = PVW_AVX512;
+                  else
+                    opts->x_ix86_move_max = PVW_AVX128;
+
+    So for -mavx2, vectorizer will choose 256-bit for vectorization, but
+    128-bit is used for struct copy, there could be a potential STLF issue
+    due to this "misalign".
+
+gcc/ChangeLog:
+
+	* config/i386/x86-tune.def (X86_TUNE_AVX512_MOVE_BY_PIECES):
+	Remove SPR/GNR/DMR.
+	(X86_TUNE_AVX512_STORE_BY_PIECES): Ditto.
+
+gcc/testsuite/ChangeLog:
+
+	* gcc.target/i386/pieces-memcpy-18.c: Use -mtune=znver5
+	instead of -mtune=sapphirerapids.
+	* gcc.target/i386/pieces-memcpy-21.c: Ditto.
+	* gcc.target/i386/pieces-memset-46.c: Ditto.
+	* gcc.target/i386/pieces-memset-49.c: Ditto.
+
+(cherry picked from commit dd713d0f3fc88778a9b3d4f8f1895a3cd6c145ca)
+---
+ gcc/config/i386/x86-tune.def                     | 8 ++++----
+ gcc/testsuite/gcc.target/i386/pieces-memcpy-18.c | 2 +-
+ gcc/testsuite/gcc.target/i386/pieces-memcpy-21.c | 2 +-
+ gcc/testsuite/gcc.target/i386/pieces-memset-46.c | 2 +-
+ gcc/testsuite/gcc.target/i386/pieces-memset-49.c | 2 +-
+ 5 files changed, 8 insertions(+), 8 deletions(-)
+
+diff --git a/gcc/config/i386/x86-tune.def b/gcc/config/i386/x86-tune.def
+index e6044c6032e4..e72a49a5674e 100644
+--- a/gcc/config/i386/x86-tune.def
++++ b/gcc/config/i386/x86-tune.def
+@@ -607,6 +607,8 @@ DEF_TUNE (X86_TUNE_AVX256_AVOID_VEC_PERM,
+ /* X86_TUNE_AVX256_SPLIT_REGS: if true, AVX512 ops are split into two AVX256 ops.  */
+ DEF_TUNE (X86_TUNE_AVX512_SPLIT_REGS, "avx512_split_regs", m_ZNVER4)
+ 
++/* It's better to align MOVE_MAX with prefer_vector_width to reduce
++   risk of STLF stalls(small store followed by big load.)  */
+ /* X86_TUNE_AVX256_MOVE_BY_PIECES: Optimize move_by_pieces with 256-bit
+    AVX instructions.  */
+ DEF_TUNE (X86_TUNE_AVX256_MOVE_BY_PIECES, "avx256_move_by_pieces",
+@@ -620,14 +622,12 @@ DEF_TUNE (X86_TUNE_AVX256_STORE_BY_PIECES, "avx256_store_by_pieces",
+ /* X86_TUNE_AVX512_MOVE_BY_PIECES: Optimize move_by_pieces with 512-bit
+    AVX instructions.  */
+ DEF_TUNE (X86_TUNE_AVX512_MOVE_BY_PIECES, "avx512_move_by_pieces",
+-	  m_SAPPHIRERAPIDS | m_GRANITERAPIDS | m_GRANITERAPIDS_D
+-	  | m_DIAMONDRAPIDS | m_ZNVER4 | m_ZNVER5)
++	   m_ZNVER4 | m_ZNVER5)
+ 
+ /* X86_TUNE_AVX512_STORE_BY_PIECES: Optimize store_by_pieces with 512-bit
+    AVX instructions.  */
+ DEF_TUNE (X86_TUNE_AVX512_STORE_BY_PIECES, "avx512_store_by_pieces",
+-	  m_SAPPHIRERAPIDS | m_GRANITERAPIDS | m_GRANITERAPIDS_D
+-	  | m_DIAMONDRAPIDS | m_ZNVER4 | m_ZNVER5)
++	  m_ZNVER4 | m_ZNVER5)
+ 
+ /* X86_TUNE_AVX512_TWO_EPILOGUES: Use two vector epilogues for 512-bit
+    vectorized loops.  */
+diff --git a/gcc/testsuite/gcc.target/i386/pieces-memcpy-18.c b/gcc/testsuite/gcc.target/i386/pieces-memcpy-18.c
+index b15a0db9ff0c..b4995ac0598c 100644
+--- a/gcc/testsuite/gcc.target/i386/pieces-memcpy-18.c
++++ b/gcc/testsuite/gcc.target/i386/pieces-memcpy-18.c
+@@ -1,5 +1,5 @@
+ /* { dg-do compile } */
+-/* { dg-options "-O2 -march=sapphirerapids" } */
++/* { dg-options "-O2 -march=znver5" } */
+ 
+ extern char *dst, *src;
+ 
+diff --git a/gcc/testsuite/gcc.target/i386/pieces-memcpy-21.c b/gcc/testsuite/gcc.target/i386/pieces-memcpy-21.c
+index ef439f20f74d..804a2989d640 100644
+--- a/gcc/testsuite/gcc.target/i386/pieces-memcpy-21.c
++++ b/gcc/testsuite/gcc.target/i386/pieces-memcpy-21.c
+@@ -1,5 +1,5 @@
+ /* { dg-do compile } */
+-/* { dg-options "-O2 -mtune=sapphirerapids -march=x86-64 -mavx2" } */
++/* { dg-options "-O2 -mtune=znver5 -march=x86-64 -mavx2" } */
+ 
+ extern char *dst, *src;
+ 
+diff --git a/gcc/testsuite/gcc.target/i386/pieces-memset-46.c b/gcc/testsuite/gcc.target/i386/pieces-memset-46.c
+index be1b054eed2b..43d636ee3ff8 100644
+--- a/gcc/testsuite/gcc.target/i386/pieces-memset-46.c
++++ b/gcc/testsuite/gcc.target/i386/pieces-memset-46.c
+@@ -1,5 +1,5 @@
+ /* { dg-do compile } */
+-/* { dg-options "-O2 -march=sapphirerapids" } */
++/* { dg-options "-O2 -march=znver5" } */
+ 
+ extern char *dst;
+ 
+diff --git a/gcc/testsuite/gcc.target/i386/pieces-memset-49.c b/gcc/testsuite/gcc.target/i386/pieces-memset-49.c
+index ad43f89a9bd8..ca4933ac1d80 100644
+--- a/gcc/testsuite/gcc.target/i386/pieces-memset-49.c
++++ b/gcc/testsuite/gcc.target/i386/pieces-memset-49.c
+@@ -1,5 +1,5 @@
+ /* { dg-do compile } */
+-/* { dg-options "-O2 -mtune=sapphirerapids -march=x86-64 -mavx2" } */
++/* { dg-options "-O2 -mtune=znver5 -march=x86-64 -mavx2" } */
+ 
+ extern char *dst;
+ 
+-- 
+2.43.7
+
+

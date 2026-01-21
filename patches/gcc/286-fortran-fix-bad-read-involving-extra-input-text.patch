@@ -1,0 +1,135 @@
+From 216c4bed3e10a7093cc9f326be37f43213e75534 Mon Sep 17 00:00:00 2001
+From: Jerry DeLisle <jvdelisle@gcc.gnu.org>
+Date: Sun, 14 Dec 2025 13:23:36 -0800
+Subject: [PATCH] Fortran: Fix bad read involving extra input text.
+
+	The problem here involved DTIO mixed with non-DTIO
+	variables in list formatted reads.  The previous fix to
+	PR105361 broke the test case here by mis-handling the
+	end of file conditions. It was found that the code could
+	be significantly reduced as well.
+
+	PR libfortran/122936
+
+libgfortran/ChangeLog:
+
+	* io/list_read.c (finish_list_read): Remove the use of hit_eof
+	and free_line. Simplify the logic. Add comments to clarify.
+
+gcc/testsuite/ChangeLog:
+
+	* gfortran.dg/pr122936.f90: New test.
+
+(cherry picked from commit 381fc8ed0f1530d0c30d5dbb6119b370fd91ba68)
+---
+ gcc/testsuite/gfortran.dg/pr122936.f90 | 43 ++++++++++++++++++++++++++
+ libgfortran/io/list_read.c             | 27 ++++++++++------
+ 2 files changed, 61 insertions(+), 9 deletions(-)
+ create mode 100644 gcc/testsuite/gfortran.dg/pr122936.f90
+
+diff --git a/gcc/testsuite/gfortran.dg/pr122936.f90 b/gcc/testsuite/gfortran.dg/pr122936.f90
+new file mode 100644
+index 000000000000..88fa2cb050b3
+--- /dev/null
++++ b/gcc/testsuite/gfortran.dg/pr122936.f90
+@@ -0,0 +1,43 @@
++! { dg-do run }
++! PR122936, derived from the original provided by the reporter.
++! Before the patch this gave a runtime error.
++module test_io
++    TYPE :: MYTYPE
++        REAL :: value
++    END TYPE
++    INTERFACE read(formatted)
++        MODULE PROCEDURE read_formatted
++    END INTERFACE
++    PUBLIC :: read(formatted)
++contains
++    ! Formatted Input
++    SUBROUTINE read_formatted(dtv, unit, iotype, v_list, iostat, iomsg)
++        CLASS(MYTYPE), INTENT(INOUT) :: dtv
++        INTEGER, INTENT(IN)      :: unit
++        CHARACTER(*), INTENT(IN) :: iotype
++        INTEGER, INTENT(IN)      :: v_list(:)
++        INTEGER, INTENT(OUT)     :: iostat
++        CHARACTER(*), INTENT(INOUT) :: iomsg
++
++        REAL   :: tmp
++
++        READ(unit, FMT = *, IOSTAT=iostat, IOMSG=iomsg) tmp
++        IF (iostat == 0) dtv%value = tmp
++    END SUBROUTINE read_formatted
++
++end module
++
++PROGRAM MAIN
++    USE test_io
++    INTEGER, PARAMETER  :: NIN = 15
++    TYPE(MYTYPE)       :: V11, V12, V13
++    INTEGER            :: V21, V22, V23
++    OPEN(NIN, status='scratch')
++    WRITE(NIN,*) "    2.5 9 1.5, AValue for V1"
++    WRITE(NIN,*) "    15 2.4 17,  BValue for V2"
++    REWIND(NIN)
++    READ(NIN, FMT = *) V11, V23, V12
++    READ(NIN, FMT = *) V21, V13, V22
++    CLOSE(NIN)
++END PROGRAM MAIN
++
+diff --git a/libgfortran/io/list_read.c b/libgfortran/io/list_read.c
+index 7c22f61e5a70..c20900841e38 100644
+--- a/libgfortran/io/list_read.c
++++ b/libgfortran/io/list_read.c
+@@ -2554,6 +2554,7 @@ finish_list_read (st_parameter_dt *dtp)
+       return;
+     }
+ 
++  /* Only perform the following cleanup on external files or the stdin file.  */
+   if (!is_internal_unit (dtp))
+     {
+       int c;
+@@ -2561,23 +2562,31 @@ finish_list_read (st_parameter_dt *dtp)
+       /* Set the next_char and push_char worker functions.  */
+       set_workers (dtp);
+ 
+-      if (likely (dtp->u.p.child_saved_iostat == LIBERROR_OK)
+-	      && ((dtp->common.flags & IOPARM_DT_HAS_UDTIO) == 0))
++      /* Make sure there were no errors from a DTIO child read.  */
++      if (likely (dtp->u.p.child_saved_iostat == LIBERROR_OK))
+ 	{
++	  /* Peek ahead to see where we are in the parent read.  */
+ 	  c = next_char (dtp);
+-	  if (c == EOF)
++	  unget_char (dtp, c);
++
++	  /* If the last read used DTIO, handle end conditions differently.  */
++	  if ((dtp->common.flags & IOPARM_DT_HAS_UDTIO) != 0)
+ 	    {
+-	      free_line (dtp);
+-	      hit_eof (dtp);
+-	      return;
++	      if ((c == EOF) || (c == ' '))
++		return;
++	    }
++	  else
++	    {
++	      if (c == EOF)
++		{
++		  hit_eof (dtp);
++		  return;
++		}
+ 	    }
+ 	  if (c != '\n')
+ 	    eat_line (dtp);
+ 	}
+     }
+-
+-  free_line (dtp);
+-
+ }
+ 
+ /*			NAMELIST INPUT
+-- 
+2.43.7
+
+

@@ -1,0 +1,59 @@
+From 1f476791517302f4c3f05af4d7bfb75c572fc3dc Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Wed, 10 Sep 2025 12:39:11 +0200
+Subject: [PATCH] testsuite: Only scan for known file extensions in lto.exp
+
+This is something that has bothered me for a few years but I've only found
+time for it now.
+The glob used for finding *_1.* etc. counterparts to the *_0.* tests is too
+broad, so if one has say next to *_1.c file also *_1.c~ or *_1.c.~1~
+or *_1.c.orig or *_1.c.bak etc. files, lto.exp will report a warning and the
+test will fail.
+So, e.g. in rpm build if some backported commit in patch form adds some
+gcc/testsuite/*.dg/lto/ test and one uses -b option to patch, if one doesn't
+remove the backup files, the test will fail.
+
+Looking through all the *.dg/lto/ directories, I only see c, C, ii, f, f90
+and d extensions used right now for the *_1.* files (and higher), while for
+the *_0.* files also m, mm and f03 extensions are used.
+
+So, the following patch only searches for those (plus for Fortran uses the
+extensions searched by the gfortran.dg/lto/ driver, i.e. \[fF\]{,90,95,03,08}
+, not just f, f90 and f03).
+
+Tested on x86_64-linux and verified I got exactly the same number of
+grep '^Executing.on.host.*_[1-9]\.' testsuite/*/*.log
+before/after this patch when doing make check RUNTESTFLAGS=lto.exp
+except for 2 new ones which were previously failed because I had backup
+files for 2 tests.
+
+2025-09-10  Jakub Jelinek  <jakub@redhat.com>
+
+	* lib/lto.exp (lto-execute-1): Search for _1.* etc. files
+	only with a list of known extensions.
+
+(cherry picked from commit 2bb8cd3609f5997b5a22925267b675808127311a)
+---
+ gcc/testsuite/lib/lto.exp | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/gcc/testsuite/lib/lto.exp b/gcc/testsuite/lib/lto.exp
+index 81519b580e13..9231e8550afb 100644
+--- a/gcc/testsuite/lib/lto.exp
++++ b/gcc/testsuite/lib/lto.exp
+@@ -659,9 +659,9 @@ proc lto-execute-1 { src1 sid } {
+     set i 1
+     set done 0
+     while { !$done } {
+-	set names [glob -nocomplain -types f -- "${dir}/${base}_${i}.*"]
++	set names [glob -nocomplain -types f -- "${dir}/${base}_${i}.{c,C,ii,\[fF\]{,90,95,03,08},d,m,mm}"]
+ 	if { [llength ${names}] > 1 } {
+-	    warning "lto-execute: more than one file matched ${dir}/${base}_${i}.*"
++	    warning "lto-execute: more than one file matched ${dir}/${base}_${i}.{c,C,ii,\[fF\]{,90,95,03,08},d,m,mm}"
+ 	}
+ 	if { [llength ${names}] == 1 } {
+ 	    lappend src_list [lindex ${names} 0]
+-- 
+2.43.7
+
+

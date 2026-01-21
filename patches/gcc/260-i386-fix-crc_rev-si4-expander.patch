@@ -1,0 +1,94 @@
+From d6b210bc7f9f13be241cf6e16bc39e4885c45a2e Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Thu, 4 Dec 2025 12:17:45 +0100
+Subject: [PATCH] i386: Fix crc_rev<SWI124:mode>si4 expander [PR122991]
+
+The following testcase ICEs on x86_64, because the crc_rev_optab expander
+assumes the last operand will be a CONST_INT.  That assumption comes from
+it being created with
+  rtx polynomial;
+  if (TREE_CODE (rhs3) != INTEGER_CST)
+    {
+      error ("third argument to %<crc%> builtins must be a constant");
+      polynomial = const0_rtx;
+    }
+  else
+    polynomial = convert_to_mode (TYPE_MODE (result_type), expand_normal (rhs3), 0);
+and so it doesn't bother adding a predicate for it.
+Except that maybe_legitimize_operands which expand_insn calls has:
+         This avoids duplicate rtl and ensures that tied operands
+         remain tied.
+
+         This search is linear, but NOPS is bounded at compile time
+         to a small number (current a single digit).  */
+      unsigned int j = 0;
+      for (; j < i; ++j)
+        if (can_reuse_operands_p (icode, opno + j, opno + i, &ops[j], &ops[i])
+            && rtx_equal_p (orig_values[j], orig_values[i])
+            && ops[j].value
+            && insn_operand_matches (icode, opno + i, ops[j].value))
+          {
+            ops[i].value = copy_rtx (ops[j].value);
+            break;
+          }
+in it, so if one of the earlier operands has equal original value to the
+polynomial argument, but has a predicate like register_operand or
+nonimmediate_operand, the earlier iteration forced that value into a pseudo
+and when the last operand doesn't have a predicate, this happily reuses that
+pseudo as the last operand.  And then it either with RTL checking fails on
+INTVAL use on that operand, or without rtl checking ICEs during expansion of
+the insn e.g. using table lookup.
+
+The following patch fixes it by using const_int_operand predicate for it.
+That is what loongarch and riscv backends use for it too.  Aarch64 doesn't
+and I'll send a fix for that once tested on aarch64-linux.
+
+2025-12-04  Jakub Jelinek  <jakub@redhat.com>
+
+	PR target/122991
+	* gcc.dg/pr122991.c: New test.
+
+(cherry picked from commit 37062ea54ad571a4ea1be0d9d65d0ddd4008e118)
+---
+ gcc/testsuite/gcc.dg/pr122991.c | 28 ++++++++++++++++++++++++++++
+ 1 file changed, 28 insertions(+)
+ create mode 100644 gcc/testsuite/gcc.dg/pr122991.c
+
+diff --git a/gcc/testsuite/gcc.dg/pr122991.c b/gcc/testsuite/gcc.dg/pr122991.c
+new file mode 100644
+index 000000000000..6b27a2dbebcc
+--- /dev/null
++++ b/gcc/testsuite/gcc.dg/pr122991.c
+@@ -0,0 +1,28 @@
++/* PR target/122991 */
++/* { dg-do compile } */
++/* { dg-options "-O2" } */
++/* { dg-additional-options "-msse4" { target i?86-*-* x86_64-*-* } } */
++
++int
++foo ()
++{
++  return __builtin_rev_crc32_data32 (0, 0, 0);
++}
++
++int
++bar ()
++{
++  return __builtin_rev_crc32_data32 (-1U, -1U, -1U);
++}
++
++int
++baz ()
++{
++  return __builtin_crc32_data32 (0, 0, 0);
++}
++
++int
++qux ()
++{
++  return __builtin_crc32_data32 (-1U, -1U, -1U);
++}
+-- 
+2.43.7
+
+

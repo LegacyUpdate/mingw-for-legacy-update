@@ -1,0 +1,790 @@
+From 4cf9d4ebdd68a724eb41044cd8f2a4d466d81c7f Mon Sep 17 00:00:00 2001
+From: Richard Sandiford <richard.sandiford@arm.com>
+Date: Thu, 14 Aug 2025 17:56:50 +0100
+Subject: [PATCH] aarch64: Use VNx16BI for more permutations [PR121294]
+
+The patterns for the predicate forms of svtrn1/2, svuzp1/2,
+and svzip1/2 are shared with aarch64_vectorize_vec_perm_const.
+The .H, .S, and .D forms operate on VNx8BI, VNx4BI, and VNx2BI
+respectively.  Thus, for all four element widths, there is one
+significant bit per element, for both the inputs and the output.
+
+That's appropriate for aarch64_vectorize_vec_perm_const but not
+for the ACLE intrinsics, where every bit of the output is
+significant, and where every bit of the selected input elements
+is therefore also significant.  The current expansion can lead
+the optimisers to simplify inputs by changing the upper bits
+of the input elements (since the current patterns claim that
+those bits don't matter), which in turn leads to wrong code.
+
+The ACLE expansion should operate on VNx16BI instead, for all
+element widths.
+
+There was already a pattern for a VNx16BI-only form of TRN1, for
+constructing certain predicate constants.  The patch generalises it to
+handle the other five permutations as well.  For the reasons given in
+the comments, this is done by making the permutation unspec an operand
+to a new UNSPEC_PERMUTE_PRED, rather than overloading the existing
+unspecs, and rather than adding a new unspec for each permutation.
+
+gcc/
+	PR target/121294
+	* config/aarch64/iterators.md (UNSPEC_TRN1_CONV): Delete.
+	(UNSPEC_PERMUTE_PRED): New unspec.
+	* config/aarch64/aarch64-sve.md (@aarch64_sve_trn1_conv<mode>):
+	Replace with...
+	(@aarch64_sve_<perm_insn><mode>_acle)
+	(*aarch64_sve_<perm_insn><mode>_acle): ...these new patterns.
+	* config/aarch64/aarch64.cc (aarch64_expand_sve_const_pred_trn):
+	Update accordingly.
+	* config/aarch64/aarch64-sve-builtins-functions.h
+	(binary_permute::expand): Use the new _acle patterns for
+	predicate operations.
+
+gcc/testsuite/
+	PR target/121294
+	* gcc.target/aarch64/sve/acle/general/perm_2.c: New test.
+	* gcc.target/aarch64/sve/acle/general/perm_3.c: Likewise.
+	* gcc.target/aarch64/sve/acle/general/perm_4.c: Likewise.
+	* gcc.target/aarch64/sve/acle/general/perm_5.c: Likewise.
+	* gcc.target/aarch64/sve/acle/general/perm_6.c: Likewise.
+	* gcc.target/aarch64/sve/acle/general/perm_7.c: Likewise.
+---
+ .../aarch64/aarch64-sve-builtins-functions.h  |  5 +-
+ gcc/config/aarch64/aarch64-sve.md             | 37 +++++--
+ gcc/config/aarch64/aarch64.cc                 |  3 +-
+ gcc/config/aarch64/iterators.md               |  4 +-
+ .../aarch64/sve/acle/general/perm_2.c         | 96 +++++++++++++++++++
+ .../aarch64/sve/acle/general/perm_3.c         | 96 +++++++++++++++++++
+ .../aarch64/sve/acle/general/perm_4.c         | 96 +++++++++++++++++++
+ .../aarch64/sve/acle/general/perm_5.c         | 96 +++++++++++++++++++
+ .../aarch64/sve/acle/general/perm_6.c         | 96 +++++++++++++++++++
+ .../aarch64/sve/acle/general/perm_7.c         | 96 +++++++++++++++++++
+ 10 files changed, 613 insertions(+), 12 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.target/aarch64/sve/acle/general/perm_2.c
+ create mode 100644 gcc/testsuite/gcc.target/aarch64/sve/acle/general/perm_3.c
+ create mode 100644 gcc/testsuite/gcc.target/aarch64/sve/acle/general/perm_4.c
+ create mode 100644 gcc/testsuite/gcc.target/aarch64/sve/acle/general/perm_5.c
+ create mode 100644 gcc/testsuite/gcc.target/aarch64/sve/acle/general/perm_6.c
+ create mode 100644 gcc/testsuite/gcc.target/aarch64/sve/acle/general/perm_7.c
+
+diff --git a/gcc/config/aarch64/aarch64-sve-builtins-functions.h b/gcc/config/aarch64/aarch64-sve-builtins-functions.h
+index 6f1c6948df29..0a914a27099e 100644
+--- a/gcc/config/aarch64/aarch64-sve-builtins-functions.h
++++ b/gcc/config/aarch64/aarch64-sve-builtins-functions.h
+@@ -630,7 +630,10 @@ public:
+   rtx
+   expand (function_expander &e) const override
+   {
+-    insn_code icode = code_for_aarch64_sve (m_unspec, e.vector_mode (0));
++    auto mode = e.vector_mode (0);
++    insn_code icode = (e.type_suffix (0).bool_p
++		       ? code_for_aarch64_sve_acle (m_unspec, mode)
++		       : code_for_aarch64_sve (m_unspec, mode));
+     return e.use_exact_insn (icode);
+   }
+ 
+diff --git a/gcc/config/aarch64/aarch64-sve.md b/gcc/config/aarch64/aarch64-sve.md
+index f8f744c263b9..2161907c3273 100644
+--- a/gcc/config/aarch64/aarch64-sve.md
++++ b/gcc/config/aarch64/aarch64-sve.md
+@@ -9285,18 +9285,39 @@
+   "<perm_insn>\t%0.<Vetype>, %1.<Vetype>, %2.<Vetype>"
+ )
+ 
+-;; Special purpose permute used by the predicate generation instructions.
+-;; Unlike the normal permute patterns, these instructions operate on VNx16BI
+-;; regardless of the element size, so that all input and output bits are
+-;; well-defined.  Operand 3 then indicates the size of the permute.
+-(define_insn "@aarch64_sve_trn1_conv<mode>"
++;; Special-purpose permutes used by the ACLE intrinsics and predicate
++;; generation instructions.  Unlike the normal permute patterns, these
++;; instructions operate on VNx16BI regardless of the element size, so that
++;; all input and output bits are well-defined.  Operand 3 then indicates
++;; the size of the permute.
++;;
++;; To make generation easier, this pattern embeds the permute type as the
++;; fourth operand to the unspec.  On the one hand, this avoids overloading
++;; unspecs like UNSPEC_ZIP1 to represent two different operations.  On the
++;; other hand, it avoids having a separate unspec for each variant, and
++;; having to map from one kind of unspec to the other.
++(define_expand "@aarch64_sve_<perm_insn><mode>_acle"
++  [(set (match_operand:VNx16BI 0 "register_operand")
++	(unspec:VNx16BI [(match_operand:VNx16BI 1 "register_operand")
++			 (match_operand:VNx16BI 2 "register_operand")
++			 (match_dup:PRED_ALL 3)
++			 (const_int PERMUTE)]
++			UNSPEC_PERMUTE_PRED))]
++  "TARGET_SVE"
++  {
++    operands[3] = CONST0_RTX (<MODE>mode);
++  }
++)
++
++(define_insn "*aarch64_sve_<perm_insn><mode>_acle"
+   [(set (match_operand:VNx16BI 0 "register_operand" "=Upa")
+ 	(unspec:VNx16BI [(match_operand:VNx16BI 1 "register_operand" "Upa")
+ 			 (match_operand:VNx16BI 2 "register_operand" "Upa")
+-			 (match_operand:PRED_ALL 3 "aarch64_simd_imm_zero")]
+-			UNSPEC_TRN1_CONV))]
++			 (match_operand:PRED_ALL 3 "aarch64_simd_imm_zero")
++			 (const_int PERMUTE)]
++			UNSPEC_PERMUTE_PRED))]
+   "TARGET_SVE"
+-  "trn1\t%0.<PRED_ALL:Vetype>, %1.<PRED_ALL:Vetype>, %2.<PRED_ALL:Vetype>"
++  "<perm_insn>\t%0.<PRED_ALL:Vetype>, %1.<PRED_ALL:Vetype>, %2.<PRED_ALL:Vetype>"
+ )
+ 
+ ;; =========================================================================
+diff --git a/gcc/config/aarch64/aarch64.cc b/gcc/config/aarch64/aarch64.cc
+index 6d6b6552a719..859ada781f99 100644
+--- a/gcc/config/aarch64/aarch64.cc
++++ b/gcc/config/aarch64/aarch64.cc
+@@ -6088,8 +6088,7 @@ aarch64_expand_sve_const_pred_trn (rtx target, rtx_vector_builder &builder,
+      operands but permutes them as though they had mode MODE.  */
+   machine_mode mode = aarch64_sve_pred_mode (permute_size).require ();
+   target = aarch64_target_reg (target, GET_MODE (a));
+-  rtx type_reg = CONST0_RTX (mode);
+-  emit_insn (gen_aarch64_sve_trn1_conv (mode, target, a, b, type_reg));
++  emit_insn (gen_aarch64_sve_acle (UNSPEC_TRN1, mode, target, a, b));
+   return target;
+ }
+ 
+diff --git a/gcc/config/aarch64/iterators.md b/gcc/config/aarch64/iterators.md
+index 146453b05168..c4544ecf2f32 100644
+--- a/gcc/config/aarch64/iterators.md
++++ b/gcc/config/aarch64/iterators.md
+@@ -902,7 +902,6 @@
+     UNSPEC_UZP2Q	; Used in aarch64-sve.md.
+     UNSPEC_ZIP1Q	; Used in aarch64-sve.md.
+     UNSPEC_ZIP2Q	; Used in aarch64-sve.md.
+-    UNSPEC_TRN1_CONV	; Used in aarch64-sve.md.
+     UNSPEC_COND_CMPEQ_WIDE ; Used in aarch64-sve.md.
+     UNSPEC_COND_CMPGE_WIDE ; Used in aarch64-sve.md.
+     UNSPEC_COND_CMPGT_WIDE ; Used in aarch64-sve.md.
+@@ -1157,6 +1156,9 @@
+     UNSPEC_LUTI2	; Used in aarch64-simd.md.
+     UNSPEC_LUTI4	; Used in aarch64-simd.md.
+ 
++    ;; All used in aarch64-sve.md
++    UNSPEC_PERMUTE_PRED
++
+     ;; All used in aarch64-sve2.md
+     UNSPEC_ADDQV
+     UNSPEC_ANDQV
+diff --git a/gcc/testsuite/gcc.target/aarch64/sve/acle/general/perm_2.c b/gcc/testsuite/gcc.target/aarch64/sve/acle/general/perm_2.c
+new file mode 100644
+index 000000000000..9b3daaa04e3a
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/aarch64/sve/acle/general/perm_2.c
+@@ -0,0 +1,96 @@
++/* { dg-options "-O2" } */
++/* { dg-final { check-function-bodies "**" "" } } */
++
++#include <arm_sve.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++/*
++** test1:
++**	...
++**	ptrue	(p[0-3])\.h, all
++**	...
++**	trn1	p0\.h, p[0-3]\.h, \1\.h
++**	ret
++*/
++svbool_t
++test1 ()
++{
++  return svtrn1_b16 (svptrue_b8 (), svptrue_b16 ());
++}
++
++/*
++** test2:
++**	...
++**	ptrue	(p[0-3])\.h, all
++**	...
++**	trn1	p0\.h, \1\.h, p[0-3]\.h
++**	ret
++*/
++svbool_t
++test2 ()
++{
++  return svtrn1_b16 (svptrue_b16 (), svptrue_b8 ());
++}
++
++/*
++** test3:
++**	...
++**	ptrue	(p[0-3])\.s, all
++**	...
++**	trn1	p0\.s, p[0-3]\.s, \1\.s
++**	ret
++*/
++svbool_t
++test3 ()
++{
++  return svtrn1_b32 (svptrue_b8 (), svptrue_b32 ());
++}
++
++/*
++** test4:
++**	...
++**	ptrue	(p[0-3])\.s, all
++**	...
++**	trn1	p0\.s, \1\.s, p[0-3]\.s
++**	ret
++*/
++svbool_t
++test4 ()
++{
++  return svtrn1_b32 (svptrue_b32 (), svptrue_b8 ());
++}
++
++/*
++** test5:
++**	...
++**	ptrue	(p[0-3])\.d, all
++**	...
++**	trn1	p0\.d, p[0-3]\.d, \1\.d
++**	ret
++*/
++svbool_t
++test5 ()
++{
++  return svtrn1_b64 (svptrue_b8 (), svptrue_b64 ());
++}
++
++/*
++** test6:
++**	...
++**	ptrue	(p[0-3])\.d, all
++**	...
++**	trn1	p0\.d, \1\.d, p[0-3]\.d
++**	ret
++*/
++svbool_t
++test6 ()
++{
++  return svtrn1_b64 (svptrue_b64 (), svptrue_b8 ());
++}
++
++#ifdef __cplusplus
++}
++#endif
+diff --git a/gcc/testsuite/gcc.target/aarch64/sve/acle/general/perm_3.c b/gcc/testsuite/gcc.target/aarch64/sve/acle/general/perm_3.c
+new file mode 100644
+index 000000000000..678c541053fe
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/aarch64/sve/acle/general/perm_3.c
+@@ -0,0 +1,96 @@
++/* { dg-options "-O2" } */
++/* { dg-final { check-function-bodies "**" "" } } */
++
++#include <arm_sve.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++/*
++** test1:
++**	...
++**	ptrue	(p[0-3])\.h, all
++**	...
++**	trn2	p0\.h, p[0-3]\.h, \1\.h
++**	ret
++*/
++svbool_t
++test1 ()
++{
++  return svtrn2_b16 (svptrue_b8 (), svptrue_b16 ());
++}
++
++/*
++** test2:
++**	...
++**	ptrue	(p[0-3])\.h, all
++**	...
++**	trn2	p0\.h, \1\.h, p[0-3]\.h
++**	ret
++*/
++svbool_t
++test2 ()
++{
++  return svtrn2_b16 (svptrue_b16 (), svptrue_b8 ());
++}
++
++/*
++** test3:
++**	...
++**	ptrue	(p[0-3])\.s, all
++**	...
++**	trn2	p0\.s, p[0-3]\.s, \1\.s
++**	ret
++*/
++svbool_t
++test3 ()
++{
++  return svtrn2_b32 (svptrue_b8 (), svptrue_b32 ());
++}
++
++/*
++** test4:
++**	...
++**	ptrue	(p[0-3])\.s, all
++**	...
++**	trn2	p0\.s, \1\.s, p[0-3]\.s
++**	ret
++*/
++svbool_t
++test4 ()
++{
++  return svtrn2_b32 (svptrue_b32 (), svptrue_b8 ());
++}
++
++/*
++** test5:
++**	...
++**	ptrue	(p[0-3])\.d, all
++**	...
++**	trn2	p0\.d, p[0-3]\.d, \1\.d
++**	ret
++*/
++svbool_t
++test5 ()
++{
++  return svtrn2_b64 (svptrue_b8 (), svptrue_b64 ());
++}
++
++/*
++** test6:
++**	...
++**	ptrue	(p[0-3])\.d, all
++**	...
++**	trn2	p0\.d, \1\.d, p[0-3]\.d
++**	ret
++*/
++svbool_t
++test6 ()
++{
++  return svtrn2_b64 (svptrue_b64 (), svptrue_b8 ());
++}
++
++#ifdef __cplusplus
++}
++#endif
+diff --git a/gcc/testsuite/gcc.target/aarch64/sve/acle/general/perm_4.c b/gcc/testsuite/gcc.target/aarch64/sve/acle/general/perm_4.c
+new file mode 100644
+index 000000000000..28c601860ed1
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/aarch64/sve/acle/general/perm_4.c
+@@ -0,0 +1,96 @@
++/* { dg-options "-O2" } */
++/* { dg-final { check-function-bodies "**" "" } } */
++
++#include <arm_sve.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++/*
++** test1:
++**	...
++**	ptrue	(p[0-3])\.h, all
++**	...
++**	zip1	p0\.h, p[0-3]\.h, \1\.h
++**	ret
++*/
++svbool_t
++test1 ()
++{
++  return svzip1_b16 (svptrue_b8 (), svptrue_b16 ());
++}
++
++/*
++** test2:
++**	...
++**	ptrue	(p[0-3])\.h, all
++**	...
++**	zip1	p0\.h, \1\.h, p[0-3]\.h
++**	ret
++*/
++svbool_t
++test2 ()
++{
++  return svzip1_b16 (svptrue_b16 (), svptrue_b8 ());
++}
++
++/*
++** test3:
++**	...
++**	ptrue	(p[0-3])\.s, all
++**	...
++**	zip1	p0\.s, p[0-3]\.s, \1\.s
++**	ret
++*/
++svbool_t
++test3 ()
++{
++  return svzip1_b32 (svptrue_b8 (), svptrue_b32 ());
++}
++
++/*
++** test4:
++**	...
++**	ptrue	(p[0-3])\.s, all
++**	...
++**	zip1	p0\.s, \1\.s, p[0-3]\.s
++**	ret
++*/
++svbool_t
++test4 ()
++{
++  return svzip1_b32 (svptrue_b32 (), svptrue_b8 ());
++}
++
++/*
++** test5:
++**	...
++**	ptrue	(p[0-3])\.d, all
++**	...
++**	zip1	p0\.d, p[0-3]\.d, \1\.d
++**	ret
++*/
++svbool_t
++test5 ()
++{
++  return svzip1_b64 (svptrue_b8 (), svptrue_b64 ());
++}
++
++/*
++** test6:
++**	...
++**	ptrue	(p[0-3])\.d, all
++**	...
++**	zip1	p0\.d, \1\.d, p[0-3]\.d
++**	ret
++*/
++svbool_t
++test6 ()
++{
++  return svzip1_b64 (svptrue_b64 (), svptrue_b8 ());
++}
++
++#ifdef __cplusplus
++}
++#endif
+diff --git a/gcc/testsuite/gcc.target/aarch64/sve/acle/general/perm_5.c b/gcc/testsuite/gcc.target/aarch64/sve/acle/general/perm_5.c
+new file mode 100644
+index 000000000000..a8aec2b5efbf
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/aarch64/sve/acle/general/perm_5.c
+@@ -0,0 +1,96 @@
++/* { dg-options "-O2" } */
++/* { dg-final { check-function-bodies "**" "" } } */
++
++#include <arm_sve.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++/*
++** test1:
++**	...
++**	ptrue	(p[0-3])\.h, all
++**	...
++**	zip2	p0\.h, p[0-3]\.h, \1\.h
++**	ret
++*/
++svbool_t
++test1 ()
++{
++  return svzip2_b16 (svptrue_b8 (), svptrue_b16 ());
++}
++
++/*
++** test2:
++**	...
++**	ptrue	(p[0-3])\.h, all
++**	...
++**	zip2	p0\.h, \1\.h, p[0-3]\.h
++**	ret
++*/
++svbool_t
++test2 ()
++{
++  return svzip2_b16 (svptrue_b16 (), svptrue_b8 ());
++}
++
++/*
++** test3:
++**	...
++**	ptrue	(p[0-3])\.s, all
++**	...
++**	zip2	p0\.s, p[0-3]\.s, \1\.s
++**	ret
++*/
++svbool_t
++test3 ()
++{
++  return svzip2_b32 (svptrue_b8 (), svptrue_b32 ());
++}
++
++/*
++** test4:
++**	...
++**	ptrue	(p[0-3])\.s, all
++**	...
++**	zip2	p0\.s, \1\.s, p[0-3]\.s
++**	ret
++*/
++svbool_t
++test4 ()
++{
++  return svzip2_b32 (svptrue_b32 (), svptrue_b8 ());
++}
++
++/*
++** test5:
++**	...
++**	ptrue	(p[0-3])\.d, all
++**	...
++**	zip2	p0\.d, p[0-3]\.d, \1\.d
++**	ret
++*/
++svbool_t
++test5 ()
++{
++  return svzip2_b64 (svptrue_b8 (), svptrue_b64 ());
++}
++
++/*
++** test6:
++**	...
++**	ptrue	(p[0-3])\.d, all
++**	...
++**	zip2	p0\.d, \1\.d, p[0-3]\.d
++**	ret
++*/
++svbool_t
++test6 ()
++{
++  return svzip2_b64 (svptrue_b64 (), svptrue_b8 ());
++}
++
++#ifdef __cplusplus
++}
++#endif
+diff --git a/gcc/testsuite/gcc.target/aarch64/sve/acle/general/perm_6.c b/gcc/testsuite/gcc.target/aarch64/sve/acle/general/perm_6.c
+new file mode 100644
+index 000000000000..3405004dfb78
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/aarch64/sve/acle/general/perm_6.c
+@@ -0,0 +1,96 @@
++/* { dg-options "-O2" } */
++/* { dg-final { check-function-bodies "**" "" } } */
++
++#include <arm_sve.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++/*
++** test1:
++**	...
++**	ptrue	(p[0-3])\.h, all
++**	...
++**	uzp1	p0\.h, p[0-3]\.h, \1\.h
++**	ret
++*/
++svbool_t
++test1 ()
++{
++  return svuzp1_b16 (svptrue_b8 (), svptrue_b16 ());
++}
++
++/*
++** test2:
++**	...
++**	ptrue	(p[0-3])\.h, all
++**	...
++**	uzp1	p0\.h, \1\.h, p[0-3]\.h
++**	ret
++*/
++svbool_t
++test2 ()
++{
++  return svuzp1_b16 (svptrue_b16 (), svptrue_b8 ());
++}
++
++/*
++** test3:
++**	...
++**	ptrue	(p[0-3])\.s, all
++**	...
++**	uzp1	p0\.s, p[0-3]\.s, \1\.s
++**	ret
++*/
++svbool_t
++test3 ()
++{
++  return svuzp1_b32 (svptrue_b8 (), svptrue_b32 ());
++}
++
++/*
++** test4:
++**	...
++**	ptrue	(p[0-3])\.s, all
++**	...
++**	uzp1	p0\.s, \1\.s, p[0-3]\.s
++**	ret
++*/
++svbool_t
++test4 ()
++{
++  return svuzp1_b32 (svptrue_b32 (), svptrue_b8 ());
++}
++
++/*
++** test5:
++**	...
++**	ptrue	(p[0-3])\.d, all
++**	...
++**	uzp1	p0\.d, p[0-3]\.d, \1\.d
++**	ret
++*/
++svbool_t
++test5 ()
++{
++  return svuzp1_b64 (svptrue_b8 (), svptrue_b64 ());
++}
++
++/*
++** test6:
++**	...
++**	ptrue	(p[0-3])\.d, all
++**	...
++**	uzp1	p0\.d, \1\.d, p[0-3]\.d
++**	ret
++*/
++svbool_t
++test6 ()
++{
++  return svuzp1_b64 (svptrue_b64 (), svptrue_b8 ());
++}
++
++#ifdef __cplusplus
++}
++#endif
+diff --git a/gcc/testsuite/gcc.target/aarch64/sve/acle/general/perm_7.c b/gcc/testsuite/gcc.target/aarch64/sve/acle/general/perm_7.c
+new file mode 100644
+index 000000000000..1758d00850c9
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/aarch64/sve/acle/general/perm_7.c
+@@ -0,0 +1,96 @@
++/* { dg-options "-O2" } */
++/* { dg-final { check-function-bodies "**" "" } } */
++
++#include <arm_sve.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++/*
++** test1:
++**	...
++**	ptrue	(p[0-3])\.h, all
++**	...
++**	uzp2	p0\.h, p[0-3]\.h, \1\.h
++**	ret
++*/
++svbool_t
++test1 ()
++{
++  return svuzp2_b16 (svptrue_b8 (), svptrue_b16 ());
++}
++
++/*
++** test2:
++**	...
++**	ptrue	(p[0-3])\.h, all
++**	...
++**	uzp2	p0\.h, \1\.h, p[0-3]\.h
++**	ret
++*/
++svbool_t
++test2 ()
++{
++  return svuzp2_b16 (svptrue_b16 (), svptrue_b8 ());
++}
++
++/*
++** test3:
++**	...
++**	ptrue	(p[0-3])\.s, all
++**	...
++**	uzp2	p0\.s, p[0-3]\.s, \1\.s
++**	ret
++*/
++svbool_t
++test3 ()
++{
++  return svuzp2_b32 (svptrue_b8 (), svptrue_b32 ());
++}
++
++/*
++** test4:
++**	...
++**	ptrue	(p[0-3])\.s, all
++**	...
++**	uzp2	p0\.s, \1\.s, p[0-3]\.s
++**	ret
++*/
++svbool_t
++test4 ()
++{
++  return svuzp2_b32 (svptrue_b32 (), svptrue_b8 ());
++}
++
++/*
++** test5:
++**	...
++**	ptrue	(p[0-3])\.d, all
++**	...
++**	uzp2	p0\.d, p[0-3]\.d, \1\.d
++**	ret
++*/
++svbool_t
++test5 ()
++{
++  return svuzp2_b64 (svptrue_b8 (), svptrue_b64 ());
++}
++
++/*
++** test6:
++**	...
++**	ptrue	(p[0-3])\.d, all
++**	...
++**	uzp2	p0\.d, \1\.d, p[0-3]\.d
++**	ret
++*/
++svbool_t
++test6 ()
++{
++  return svuzp2_b64 (svptrue_b64 (), svptrue_b8 ());
++}
++
++#ifdef __cplusplus
++}
++#endif
+-- 
+2.43.7
+
+

@@ -1,0 +1,82 @@
+From 9aafd06ebe7c2363d1693f4b051f511ef2bcc2fd Mon Sep 17 00:00:00 2001
+From: Jonathan Wakely <jwakely@redhat.com>
+Date: Thu, 25 Sep 2025 17:23:28 +0100
+Subject: [PATCH] libstdc++: Fix unsafe comma operators in <random> [PR122062]
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf8
+Content-Transfer-Encoding: 8bit
+
+This fixes a 'for' loop in std::piecewise_linear_distribution that
+increments two iterators with a comma operator between them, making it
+vulnerable to evil overloads of the comma operator.
+
+It also changes a 'for' loop used by some other distributions, even
+though those are only used with std::vector<double>::iterator and so
+won't find any overloaded commas.
+
+libstdc++-v3/ChangeLog:
+
+	PR libstdc++/122062
+	* include/bits/random.tcc (__detail::__normalize): Use void cast
+	for operands of comma operator.
+	(piecewise_linear_distribution): Likewise.
+	* testsuite/26_numerics/random/piecewise_linear_distribution/cons/122062.cc:
+	New test.
+
+Reviewed-by: Tomasz KamiÅski <tkaminsk@redhat.com>
+Reviewed-by: Hewill Kang <hewillk@gmail.com>
+(cherry picked from commit 11ce485bcffac0db005d77e100420535e54d0aa5)
+---
+ libstdc++-v3/include/bits/random.tcc             |  4 ++--
+ .../piecewise_linear_distribution/cons/122062.cc | 16 ++++++++++++++++
+ 2 files changed, 18 insertions(+), 2 deletions(-)
+ create mode 100644 libstdc++-v3/testsuite/26_numerics/random/piecewise_linear_distribution/cons/122062.cc
+
+diff --git a/libstdc++-v3/include/bits/random.tcc b/libstdc++-v3/include/bits/random.tcc
+index 752d707a5e4e..9f5b03ba38f4 100644
+--- a/libstdc++-v3/include/bits/random.tcc
++++ b/libstdc++-v3/include/bits/random.tcc
+@@ -83,7 +83,7 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
+       __normalize(_InputIterator __first, _InputIterator __last,
+ 		  _OutputIterator __result, const _Tp& __factor)
+       {
+-	for (; __first != __last; ++__first, ++__result)
++	for (; __first != __last; ++__first, (void) ++__result)
+ 	  *__result = *__first / __factor;
+ 	return __result;
+       }
+@@ -3075,7 +3075,7 @@ namespace __detail
+ 		 _InputIteratorW __wbegin)
+       : _M_int(), _M_den(), _M_cp(), _M_m()
+       {
+-	for (; __bbegin != __bend; ++__bbegin, ++__wbegin)
++	for (; __bbegin != __bend; ++__bbegin, (void) ++__wbegin)
+ 	  {
+ 	    _M_int.push_back(*__bbegin);
+ 	    _M_den.push_back(*__wbegin);
+diff --git a/libstdc++-v3/testsuite/26_numerics/random/piecewise_linear_distribution/cons/122062.cc b/libstdc++-v3/testsuite/26_numerics/random/piecewise_linear_distribution/cons/122062.cc
+new file mode 100644
+index 000000000000..0f0caa7f89b4
+--- /dev/null
++++ b/libstdc++-v3/testsuite/26_numerics/random/piecewise_linear_distribution/cons/122062.cc
+@@ -0,0 +1,16 @@
++// { dg-do compile { target c++11 } }
++
++// PR libstdc++/122062
++// piecewise_linear_distribution(firstB, lastB, firstW) invokes comma operator
++
++#include <random>
++#include <testsuite_iterators.h>
++
++void
++test_pr122062()
++{
++  double b[1]{};
++  double w[1]{};
++  __gnu_test::random_access_container<double> B(b), W(w);
++  std::piecewise_linear_distribution<double> p(B.begin(), B.end(), W.begin());
++}
+-- 
+2.43.7
+
+

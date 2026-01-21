@@ -1,0 +1,111 @@
+From eeb6091821b39c6df060a58cc740284e3b4f0f97 Mon Sep 17 00:00:00 2001
+From: Richard Biener <rguenther@suse.de>
+Date: Mon, 8 Dec 2025 11:06:54 +0100
+Subject: [PATCH] tree-optimization/123040 - handle nary -> ifn simplification
+ in VN
+
+The following handles (by rejecting) simplifications that end up
+turning a VN NARY operation into a call which would be a VN REFERENCE
+and is unexpected and not handled.
+
+	PR tree-optimization/123040
+	* tree-ssa-sccvn.cc (vn_nary_build_or_lookup_1): Only insert
+	nary results.
+
+	* g++.dg/torture/pr123040.C: New testcase.
+
+(cherry picked from commit 5a6d911ca2e253297bc2f3be9d9db2a71a244a94)
+---
+ gcc/testsuite/g++.dg/torture/pr123040.C | 62 +++++++++++++++++++++++++
+ gcc/tree-ssa-sccvn.cc                   |  5 +-
+ 2 files changed, 66 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/g++.dg/torture/pr123040.C
+
+diff --git a/gcc/testsuite/g++.dg/torture/pr123040.C b/gcc/testsuite/g++.dg/torture/pr123040.C
+new file mode 100644
+index 000000000000..b948b13534ab
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/torture/pr123040.C
+@@ -0,0 +1,62 @@
++// { dg-do compile }
++// { dg-additional-options "-std=gnu++20" }
++
++template <int kBytes, typename From, typename To>
++void CopyBytes(From from, To to) {
++  __builtin_memcpy(to, from, kBytes);
++}
++template <typename From, typename To> void CopySameSize(From *from, To to) {
++  CopyBytes<sizeof(From)>(from, to);
++}
++template <typename> using MakeUnsigned = char;
++template <typename Lane, int N> struct Simd {
++  using T = Lane;
++  static constexpr int kPrivateLanes = N;
++  template <typename NewT> using Rebind = Simd<NewT, 0>;
++};
++template <class D> using TFromD = D::T;
++template <class T, class D> using Rebind = D::template Rebind<T>;
++template <class D> using RebindToUnsigned = Rebind<MakeUnsigned<D>, D>;
++template <typename T, int> struct Vec128 {
++  using PrivateT = T;
++  static constexpr int kPrivateN = 6;
++  T raw[16];
++};
++template <class V> using DFromV = Simd<typename V::PrivateT, V::kPrivateN>;
++template <class D> Vec128<TFromD<D>, D::kPrivateLanes> Zero(D);
++template <class D> using VFromD = decltype(Zero(D()));
++template <class D, class VFrom> VFromD<D> BitCast(D, VFrom v) {
++  VFromD<D> to;
++  CopySameSize(&v, to.raw);
++  return to;
++}
++template <int N> Vec128<signed char, N> And(Vec128<signed char, N> b) {
++  Vec128<signed char, N> a;
++  DFromV<decltype(a)> d;
++  RebindToUnsigned<decltype(d)> du;
++  auto au(a);
++  auto bu = BitCast(du, b);
++  for (int i = 0; i < N; ++i)
++    au.raw[i] &= bu.raw[i];
++  return au;
++}
++void Or(Vec128<signed char, 16>);
++template <int N> void IfVecThenElse(Vec128<signed char, N> yes) {
++  Vec128 __trans_tmp_2 = And(yes);
++  Or(__trans_tmp_2);
++}
++template <int N> void IfThenElseZero(Vec128<signed char, N> yes) {
++  IfVecThenElse(yes);
++}
++Vec128<signed char, 16> Abs_a;
++char MaskedAbs___trans_tmp_5;
++void MaskedAbs() {
++  Vec128<signed char, 16> __trans_tmp_4;
++  for (int i = 0; i < 16; ++i) {
++    MaskedAbs___trans_tmp_5 = Abs_a.raw[i] ? -Abs_a.raw[i] : 0;
++    Abs_a.raw[i] = MaskedAbs___trans_tmp_5;
++  }
++  __trans_tmp_4 = Abs_a;
++  Vec128 __trans_tmp_3 = __trans_tmp_4;
++  IfThenElseZero(__trans_tmp_3);
++}
+diff --git a/gcc/tree-ssa-sccvn.cc b/gcc/tree-ssa-sccvn.cc
+index a217bab88762..9d679824eaf5 100644
+--- a/gcc/tree-ssa-sccvn.cc
++++ b/gcc/tree-ssa-sccvn.cc
+@@ -2527,7 +2527,10 @@ vn_nary_build_or_lookup_1 (gimple_match_op *res_op, bool insert,
+   else
+     {
+       tree val = vn_lookup_simplify_result (res_op);
+-      if (!val && insert)
++      /* ???  In weird cases we can end up with internal-fn calls,
++	 but this isn't expected so throw the result away.  See
++	 PR123040 for an example.  */
++      if (!val && insert && res_op->code.is_tree_code ())
+ 	{
+ 	  gimple_seq stmts = NULL;
+ 	  result = maybe_push_res_to_seq (res_op, &stmts);
+-- 
+2.43.7
+
+

@@ -1,0 +1,104 @@
+From 332e891a8a42a9ba971174c8282864fbc1976b7f Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Wed, 6 Aug 2025 11:28:37 +0200
+Subject: [PATCH] bitint: Fix up handling of uninitialized mul/div/float cast
+ operands [PR121127]
+
+handle_operand_addr (used for the cases where we use libgcc APIs, so
+multiplication, division, modulo, casts of _BitInt to float/dfp) when it
+sees default definition of an SSA_NAME which is not PARM_DECL (i.e.
+uninitialized one) just allocates single uninitialized limb, there is no
+need to waste more memory on it, it can just tell libgcc that it has
+64-bit precision, not say 1024 bit etc.
+Unfortunately, doing this runs into some asserts when we have a narrowing
+cast of the uninitialized SSA_NAME (but still large/huge _BitInt).
+
+The following patch fixes that by using a magic value in *prec_stored
+for the uninitialized cases (0) and just don't do any *prec tweaks for
+narrowing casts from that.  precs still needs to be maintained as before,
+that one is used for big endian adjustment.
+
+2025-08-06  Jakub Jelinek  <jakub@redhat.com>
+
+	PR tree-optimization/121127
+	* gimple-lower-bitint.cc (bitint_large_huge::handle_operand_addr): For
+	uninitialized SSA_NAME, set *prec_stored to 0 rather than *prec.
+	Handle that case in narrowing casts.  If prec_stored is non-NULL,
+	set *prec_stored to prec_stored_val.
+
+	* gcc.dg/bitint-125.c: New test.
+
+(cherry picked from commit d175a6b119b8ab177ab9d9fb81dcac1794d18ad6)
+---
+ gcc/gimple-lower-bitint.cc        | 10 +++++++---
+ gcc/testsuite/gcc.dg/bitint-125.c | 15 +++++++++++++++
+ 2 files changed, 22 insertions(+), 3 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.dg/bitint-125.c
+
+diff --git a/gcc/gimple-lower-bitint.cc b/gcc/gimple-lower-bitint.cc
+index 6fefc8347629..23f3162e1d99 100644
+--- a/gcc/gimple-lower-bitint.cc
++++ b/gcc/gimple-lower-bitint.cc
+@@ -2213,7 +2213,7 @@ range_to_prec (tree op, gimple *stmt)
+    from that precision, if it is negative, the operand is sign-extended
+    from -*PREC.  If PREC_STORED is NULL, it is the toplevel call,
+    otherwise *PREC_STORED is prec from the innermost call without
+-   range optimizations.  */
++   range optimizations (0 for uninitialized SSA_NAME).  */
+ 
+ tree
+ bitint_large_huge::handle_operand_addr (tree op, gimple *stmt,
+@@ -2318,7 +2318,7 @@ bitint_large_huge::handle_operand_addr (tree op, gimple *stmt,
+ 	    {
+ 	      *prec = TYPE_UNSIGNED (TREE_TYPE (op)) ? limb_prec : -limb_prec;
+ 	      if (prec_stored)
+-		*prec_stored = *prec;
++		*prec_stored = 0;
+ 	      tree var = create_tmp_var (m_limb_type);
+ 	      TREE_ADDRESSABLE (var) = 1;
+ 	      ret = build_fold_addr_expr (var);
+@@ -2346,6 +2346,8 @@ bitint_large_huge::handle_operand_addr (tree op, gimple *stmt,
+ 		  tree rhs_type = TREE_TYPE (rhs1);
+ 		  int prec_stored_val = 0;
+ 		  ret = handle_operand_addr (rhs1, g, &prec_stored_val, prec);
++		  if (prec_stored)
++		    *prec_stored = prec_stored_val;
+ 		  if (TYPE_PRECISION (lhs_type) > TYPE_PRECISION (rhs_type))
+ 		    {
+ 		      if (TYPE_UNSIGNED (lhs_type)
+@@ -2354,7 +2356,9 @@ bitint_large_huge::handle_operand_addr (tree op, gimple *stmt,
+ 		    }
+ 		  else
+ 		    {
+-		      if (*prec > 0 && *prec < TYPE_PRECISION (lhs_type))
++		      if (prec_stored_val == 0)
++			/* Non-widening cast of uninitialized value.  */;
++		      else if (*prec > 0 && *prec < TYPE_PRECISION (lhs_type))
+ 			;
+ 		      else if (TYPE_UNSIGNED (lhs_type))
+ 			{
+diff --git a/gcc/testsuite/gcc.dg/bitint-125.c b/gcc/testsuite/gcc.dg/bitint-125.c
+new file mode 100644
+index 000000000000..5ef0e327d54f
+--- /dev/null
++++ b/gcc/testsuite/gcc.dg/bitint-125.c
+@@ -0,0 +1,15 @@
++/* PR tree-optimization/121127 */
++/* { dg-do compile { target bitint } } */
++/* { dg-options "-O2 -w" } */
++
++#if __BITINT_MAXWIDTH__ >= 576
++_BitInt(575)
++foo (void)
++{
++  _BitInt(576) d;
++  _BitInt(575) e = d * 42wb;
++  return e;
++}
++#else
++int i;
++#endif
+-- 
+2.43.7
+
+

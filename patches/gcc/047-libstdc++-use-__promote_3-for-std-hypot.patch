@@ -1,0 +1,48 @@
+From 5d3d024b1e9e7ac0d8e05c0ff016b24f306b9ad5 Mon Sep 17 00:00:00 2001
+From: Jonathan Wakely <jwakely@redhat.com>
+Date: Tue, 15 Jul 2025 21:29:33 +0100
+Subject: [PATCH] libstdc++: Use __promote_3 for std::hypot [PR121097]
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf8
+Content-Transfer-Encoding: 8bit
+
+The __promoted_t alias is only defined when __cpp_fold_expressions is
+defined, which might not be the case for some hypothetical C++17
+compilers.
+
+Change the 3-arg std::hypot to just use __gnu_cxx::__promote_3 which is
+always available.
+
+libstdc++-v3/ChangeLog:
+
+	PR libstdc++/121097
+	* include/c_global/cmath (hypot): Use __promote_3 instead of
+	__promoted.
+
+Reviewed-by: Tomasz KamiÅski <tkaminsk@redhat.com>
+(cherry picked from commit f4932c59df387a505de69a5a1015a03caa4ccf08)
+---
+ libstdc++-v3/include/c_global/cmath | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/libstdc++-v3/include/c_global/cmath b/libstdc++-v3/include/c_global/cmath
+index 27c21ca19eb6..65a3b8144f35 100644
+--- a/libstdc++-v3/include/c_global/cmath
++++ b/libstdc++-v3/include/c_global/cmath
+@@ -3792,10 +3792,10 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
+   { return std::__hypot3<long double>(__x, __y, __z); }
+ 
+   template<typename _Tp, typename _Up, typename _Vp>
+-    __gnu_cxx::__promoted_t<_Tp, _Up, _Vp>
++    typename __gnu_cxx::__promote_3<_Tp, _Up, _Vp>::__type
+     hypot(_Tp __x, _Up __y, _Vp __z)
+     {
+-      using __type = __gnu_cxx::__promoted_t<_Tp, _Up, _Vp>;
++      using __type = typename __gnu_cxx::__promote_3<_Tp, _Up, _Vp>::__type;
+       return std::__hypot3<__type>(__x, __y, __z);
+     }
+ 
+-- 
+2.43.7
+
+

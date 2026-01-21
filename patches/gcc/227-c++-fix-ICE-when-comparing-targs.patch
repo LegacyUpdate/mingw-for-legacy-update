@@ -1,0 +1,124 @@
+From 66ead3e6507073db227c6dbc4bc1409498d2fa14 Mon Sep 17 00:00:00 2001
+From: Marek Polacek <polacek@redhat.com>
+Date: Tue, 18 Nov 2025 15:23:20 -0500
+Subject: [PATCH] c++: fix ICE when comparing targs [PR119580]
+
+In r10-7816, cp_tree_equal/TEMPLATE_ID_EXPR was changed to use
+comp_template_args to compare the targs.  This makes sense, but
+comp_template_args won't deal with an error_mark_node.  We created
+a BASELINK for S::foo<T::value_type>, but since value_type couldn't
+be looked up, we ended up with an error_mark_node instead of a TREE_VEC
+of arguments for the TEMPLATE_ID_EXPR in the BASELINK.
+
+It seems reasonable not to create such a TEMPLATE_ID_EXPR by checking
+the result of tsubst_template_args like we do in so many other places.
+This changes the diagnostic in three tests, but it's only the followup
+error message after complaining about the type/value mismatch.
+
+	PR c++/119580
+
+gcc/cp/ChangeLog:
+
+	* pt.cc (tsubst_baselink): Return error_mark_node if
+	tsubst_template_args returned error_mark_node.
+
+gcc/testsuite/ChangeLog:
+
+	* g++.dg/template/crash106.C: Adjust expected diagnostics.
+	* g++.dg/template/crash112.C: Likewise.
+	* g++.dg/template/dependent-args1.C: Likewise.
+	* g++.dg/cpp0x/pr119580.C: New test.
+
+Reviewed-by: Jason Merrill <jason@redhat.com>
+(cherry picked from commit e2faea35a1edf6fca4d98800a1d9566db04a133b)
+---
+ gcc/cp/pt.cc                                    |  2 ++
+ gcc/testsuite/g++.dg/cpp0x/pr119580.C           | 16 ++++++++++++++++
+ gcc/testsuite/g++.dg/template/crash106.C        |  4 ++--
+ gcc/testsuite/g++.dg/template/crash112.C        |  4 +---
+ gcc/testsuite/g++.dg/template/dependent-args1.C |  6 ++----
+ 5 files changed, 23 insertions(+), 9 deletions(-)
+ create mode 100644 gcc/testsuite/g++.dg/cpp0x/pr119580.C
+
+diff --git a/gcc/cp/pt.cc b/gcc/cp/pt.cc
+index 1b51d32228d8..04f1d02e030b 100644
+--- a/gcc/cp/pt.cc
++++ b/gcc/cp/pt.cc
+@@ -17449,6 +17449,8 @@ tsubst_baselink (tree baselink, tree object_type,
+       if (template_args)
+ 	template_args = tsubst_template_args (template_args, args,
+ 					      complain, in_decl);
++      if (template_args == error_mark_node)
++	return error_mark_node;
+     }
+ 
+   tree binfo_type = BINFO_TYPE (BASELINK_BINFO (baselink));
+diff --git a/gcc/testsuite/g++.dg/cpp0x/pr119580.C b/gcc/testsuite/g++.dg/cpp0x/pr119580.C
+new file mode 100644
+index 000000000000..598ddbb0e61d
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/cpp0x/pr119580.C
+@@ -0,0 +1,16 @@
++// PR c++/119580
++// { dg-do compile { target c++11 } }
++
++template<typename> struct V;
++template<typename> class C;
++class F;
++
++struct S {
++  template<typename>
++  static void foo ();
++  template<typename T, typename>
++  C<decltype(S::foo<T::value_type>)> foo ();
++  decltype(foo<V<F>>()) *a;
++};
++
++S s;
+diff --git a/gcc/testsuite/g++.dg/template/crash106.C b/gcc/testsuite/g++.dg/template/crash106.C
+index 35cedb55b0bf..bb71e29b1a6f 100644
+--- a/gcc/testsuite/g++.dg/template/crash106.C
++++ b/gcc/testsuite/g++.dg/template/crash106.C
+@@ -7,6 +7,6 @@ struct A
+   template<T> void foo(); // { dg-error "type" "" { target c++17_down } }
+ };
+ 
+-template<T N = 0.0, void (A::*)() = &A::foo<N> > struct B {}; // { dg-error "type|declared|could not convert" "" { target c++17_down } }
++template<T N = 0.0, void (A::*)() = &A::foo<N> > struct B {}; // { dg-error "type|not a member" "" { target c++17_down } }
+ 
+-B<> b; // { dg-message "" "" { target c++17_down } }
++B<> b; // { dg-error "invalid" "" { target c++17_down } }
+diff --git a/gcc/testsuite/g++.dg/template/crash112.C b/gcc/testsuite/g++.dg/template/crash112.C
+index ff35764c7c7a..a60b23325621 100644
+--- a/gcc/testsuite/g++.dg/template/crash112.C
++++ b/gcc/testsuite/g++.dg/template/crash112.C
+@@ -9,9 +9,7 @@ template<void (A::*)()> struct B {};
+ 
+ template<int> struct C
+ {
+-  B<&A::foo<int int> > b; // { dg-error "declaration|type" }
++  B<&A::foo<int int> > b; // { dg-error "declaration|not a member" }
+ };
+ 
+ C<0> c;
+-
+-// { dg-prune-output "could not convert" }
+diff --git a/gcc/testsuite/g++.dg/template/dependent-args1.C b/gcc/testsuite/g++.dg/template/dependent-args1.C
+index 8fffbf85317a..1f16206c7068 100644
+--- a/gcc/testsuite/g++.dg/template/dependent-args1.C
++++ b/gcc/testsuite/g++.dg/template/dependent-args1.C
+@@ -6,8 +6,6 @@ struct A
+   template<int> void foo();
+ };
+ 
+-template<int N, void (A::*)() = &A::foo<N> > struct B {};
++template<int N, void (A::*)() = &A::foo<N> > struct B {};  // { dg-error "not a member" }
+ 
+-B<int> b; // { dg-error "type/value mismatch|expected a constant|invalid type" }
+-
+-// { dg-prune-output "(could not convert|no match)" }
++B<int> b; // { dg-error "type/value mismatch|invalid" }
+-- 
+2.43.7
+
+

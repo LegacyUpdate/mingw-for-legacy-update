@@ -1,0 +1,299 @@
+From f3d0c95570d59bef636625c8ed4c68a1884bab1b Mon Sep 17 00:00:00 2001
+From: Tamar Christina <tamar.christina@arm.com>
+Date: Fri, 17 Oct 2025 15:43:04 +0100
+Subject: [PATCH] AArch64: Extend intrinsics framework to account for merging
+ predications without gp [PR121604]
+
+In PR121604 the problem was noted that currently the SVE intrinsics
+infrastructure assumes that for any predicated operation that the GP is at the
+first argument position which has a svbool_t or for a unary merging operation
+that it's in the second position.
+
+However you have intrinsics like fmov_lane which have an svbool_t but it's not
+a GP.
+
+You also have instructions like BRKB which work only on predicates so it
+incorrectly determines the first operand to be the GP, while that's the
+inactive lanes.
+
+However during apply_predication we do have the information about where the GP
+is.  This patch re-organizes the code to record this information into the
+function_instance such that folders have access to this information.
+
+For functions that are outliers like pmov_lane we can now override the
+availability of the intrinsics having a GP.
+
+gcc/ChangeLog:
+
+	PR target/121604
+	* config/aarch64/aarch64-sve-builtins-shapes.cc (apply_predication):
+	Store gp_index.
+	(struct pmov_to_vector_lane_def): Mark instruction as has no GP.
+	* config/aarch64/aarch64-sve-builtins.h (function_instance::gp_value,
+	function_instance::inactive_values, function_instance::gp_index,
+	function_shape::has_gp_argument_p): New.
+	* config/aarch64/aarch64-sve-builtins.cc (gimple_folder::fold_pfalse):
+	Simplify code and use GP helpers.
+
+gcc/testsuite/ChangeLog:
+
+	PR target/121604
+	* gcc.target/aarch64/sve/pr121604_brk.c: New test.
+	* gcc.target/aarch64/sve2/pr121604_pmov.c: New test.
+
+Co-authored-by: Jennifer Schmitz <jschmitz@nvidia.com>
+(cherry picked from commit d1965b1fd8938f35f78be503e36b98b406751e21)
+---
+ .../aarch64/aarch64-sve-builtins-shapes.cc    | 28 ++++++++++++-
+ gcc/config/aarch64/aarch64-sve-builtins.cc    | 22 +++++-----
+ gcc/config/aarch64/aarch64-sve-builtins.h     | 40 +++++++++++++++++++
+ .../gcc.target/aarch64/sve/pr121604_brk.c     | 25 ++++++++++++
+ .../gcc.target/aarch64/sve2/pr121604_pmov.c   | 16 ++++++++
+ 5 files changed, 117 insertions(+), 14 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.target/aarch64/sve/pr121604_brk.c
+ create mode 100644 gcc/testsuite/gcc.target/aarch64/sve2/pr121604_pmov.c
+
+diff --git a/gcc/config/aarch64/aarch64-sve-builtins-shapes.cc b/gcc/config/aarch64/aarch64-sve-builtins-shapes.cc
+index af23a154d0e8..8349221797b3 100644
+--- a/gcc/config/aarch64/aarch64-sve-builtins-shapes.cc
++++ b/gcc/config/aarch64/aarch64-sve-builtins-shapes.cc
+@@ -21,7 +21,10 @@
+ #include "system.h"
+ #include "coretypes.h"
+ #include "tm.h"
++#include "basic-block.h"
+ #include "tree.h"
++#include "function.h"
++#include "gimple.h"
+ #include "rtl.h"
+ #include "tm_p.h"
+ #include "memmodel.h"
+@@ -68,23 +71,36 @@ za_group_is_pure_overload (const function_group_info &group)
+    types in ARGUMENT_TYPES.  RETURN_TYPE is the type returned by the
+    function.  */
+ static void
+-apply_predication (const function_instance &instance, tree return_type,
++apply_predication (function_instance &instance, tree return_type,
+ 		   vec<tree> &argument_types)
+ {
++  /* Initially mark the function as not being predicated.  */
++  instance.gp_index = -1;
++
+   /* There are currently no SME ZA instructions that have both merging and
+      unpredicated forms, so for simplicity, the predicates are always included
+      in the original format string.  */
+   if (instance.pred != PRED_none && instance.pred != PRED_za_m)
+     {
+       argument_types.quick_insert (0, instance.gp_type ());
++      instance.gp_index = 0;
+       /* For unary merge operations, the first argument is a vector with
+ 	 the same type as the result.  For unary_convert_narrowt it also
+ 	 provides the "bottom" half of active elements, and is present
+ 	 for all types of predication.  */
+       auto nargs = argument_types.length () - 1;
+       if (instance.shape->has_merge_argument_p (instance, nargs))
+-	argument_types.quick_insert (0, return_type);
++	{
++	  argument_types.quick_insert (0, return_type);
++	  instance.gp_index = 1;
++	}
+     }
++
++  /* In this case the predicate type we added above is a non-governing
++     predicate operand (and there is no GP), so update the gp_index value
++     accordingly.  */
++  if (!instance.shape->has_gp_argument_p (instance))
++    instance.gp_index = -1;
+ }
+ 
+ /* Parse and move past an element type in FORMAT and return it as a type
+@@ -3301,6 +3317,14 @@ struct pmov_to_vector_lane_def : public overloaded_base<0>
+        but it doesn't currently have the necessary information.  */
+     return c.require_immediate_range (1, 1, bytes - 1);
+   }
++
++  /* This function has a predicate argument, and is a merging instruction, but
++     the predicate is not a GP.  */
++  bool
++  has_gp_argument_p (const function_instance &) const override
++  {
++    return false;
++  }
+ };
+ SHAPE (pmov_to_vector_lane)
+ 
+diff --git a/gcc/config/aarch64/aarch64-sve-builtins.cc b/gcc/config/aarch64/aarch64-sve-builtins.cc
+index 24feb7ce1578..ad0d38934e21 100644
+--- a/gcc/config/aarch64/aarch64-sve-builtins.cc
++++ b/gcc/config/aarch64/aarch64-sve-builtins.cc
+@@ -3630,24 +3630,22 @@ gimple_folder::redirect_pred_x ()
+ gimple *
+ gimple_folder::fold_pfalse ()
+ {
+-  if (pred == PRED_none)
++  tree gp = gp_value (call);
++  /* If there isn't a GP then we can't do any folding as the instruction isn't
++     predicated.  */
++  if (!gp)
+     return nullptr;
+-  tree arg0 = gimple_call_arg (call, 0);
++
+   if (pred == PRED_m)
+     {
+-      /* Unary function shapes with _m predication are folded to the
+-	 inactive vector (arg0), while other function shapes are folded
+-	 to op1 (arg1).  */
+-      tree arg1 = gimple_call_arg (call, 1);
+-      if (is_pfalse (arg1))
+-	return fold_call_to (arg0);
+-      if (is_pfalse (arg0))
+-	return fold_call_to (arg1);
++      tree val = inactive_values (call);
++      if (is_pfalse (gp))
++	return fold_call_to (val);
+       return nullptr;
+     }
+-  if ((pred == PRED_x || pred == PRED_z) && is_pfalse (arg0))
++  if ((pred == PRED_x || pred == PRED_z) && is_pfalse (gp))
+     return fold_call_to (build_zero_cst (TREE_TYPE (lhs)));
+-  if (pred == PRED_implicit && is_pfalse (arg0))
++  if (pred == PRED_implicit && is_pfalse (gp))
+     {
+       unsigned int flags = call_properties ();
+       /* Folding to lhs = {0, ...} is not appropriate for intrinsics with
+diff --git a/gcc/config/aarch64/aarch64-sve-builtins.h b/gcc/config/aarch64/aarch64-sve-builtins.h
+index c145b8065ae3..7e1539a0c722 100644
+--- a/gcc/config/aarch64/aarch64-sve-builtins.h
++++ b/gcc/config/aarch64/aarch64-sve-builtins.h
+@@ -402,6 +402,8 @@ public:
+   bool could_trap_p () const;
+ 
+   vector_type_index gp_type_index () const;
++  tree gp_value (gcall *) const;
++  tree inactive_values (gcall *) const;
+   tree gp_type () const;
+ 
+   unsigned int vectors_per_tuple () const;
+@@ -435,6 +437,7 @@ public:
+   group_suffix_index group_suffix_id;
+   predication_index pred;
+   fpm_mode_index fpm_mode;
++  int gp_index;
+ };
+ 
+ class registered_function;
+@@ -800,6 +803,8 @@ public:
+   virtual bool has_merge_argument_p (const function_instance &,
+ 				     unsigned int) const;
+ 
++  virtual bool has_gp_argument_p (const function_instance &) const;
++
+   virtual bool explicit_type_suffix_p (unsigned int) const = 0;
+ 
+   /* True if the group suffix is present in overloaded names.
+@@ -948,6 +953,33 @@ function_instance::gp_type () const
+   return acle_vector_types[0][gp_type_index ()];
+ }
+ 
++/* Return the tree value that should be used as the governing predicate of
++   this function.  If none then return NULL_TREE.  */
++inline tree
++function_instance::gp_value (gcall *call) const
++{
++  if (gp_index < 0)
++    return NULL_TREE;
++
++  return gimple_call_arg (call, gp_index);
++}
++
++/* Return the tree value that should be used for the inactive lanes should this
++   function be a predicated function with a gp.  Otherwise return NULL_TREE.  */
++inline tree
++function_instance::inactive_values (gcall *call) const
++{
++  if (gp_index < 0)
++    return NULL_TREE;
++
++  /* Function is unary with m predicate.  */
++  if (gp_index == 1)
++    return gimple_call_arg (call, 0);
++
++  /* Else the inactive values are the next element.  */
++  return gimple_call_arg (call, 1);
++}
++
+ /* If the function operates on tuples of vectors, return the number
+    of vectors in the tuples, otherwise return 1.  */
+ inline unsigned int
+@@ -1122,6 +1154,14 @@ function_shape::has_merge_argument_p (const function_instance &instance,
+   return nargs == 1 && instance.pred == PRED_m;
+ }
+ 
++/* Return true if INSTANCE has an predicate argument that can be used as the global
++   predicate.  */
++inline bool
++function_shape::has_gp_argument_p (const function_instance &instance) const
++{
++  return instance.pred != PRED_none;
++}
++
+ /* Return the mode of the result of a call.  */
+ inline machine_mode
+ function_expander::result_mode () const
+diff --git a/gcc/testsuite/gcc.target/aarch64/sve/pr121604_brk.c b/gcc/testsuite/gcc.target/aarch64/sve/pr121604_brk.c
+new file mode 100644
+index 000000000000..a474a20554d3
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/aarch64/sve/pr121604_brk.c
+@@ -0,0 +1,25 @@
++/* { dg-do compile } */
++/* { dg-options "-O2" } */
++/* { dg-final { check-function-bodies "**" "" "" } } */
++
++#include <arm_sve.h>
++
++/*
++** foo:
++**	ptrue	p0\.b, all
++**	brkb	p0\.b, p0/z, p0\.b
++**	ret
++*/
++svbool_t foo () {
++  return svbrkb_b_m (svpfalse (), svptrue_b8 (), svptrue_b8 ());
++}
++
++/*
++** bar:
++**	ptrue	p0\.b, all
++**	brka	p0\.b, p0/z, p0\.b
++**	ret
++*/
++svbool_t bar () {
++  return svbrka_b_m (svpfalse (), svptrue_b8 (), svptrue_b8 ());
++}
+diff --git a/gcc/testsuite/gcc.target/aarch64/sve2/pr121604_pmov.c b/gcc/testsuite/gcc.target/aarch64/sve2/pr121604_pmov.c
+new file mode 100644
+index 000000000000..16844ee4add3
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/aarch64/sve2/pr121604_pmov.c
+@@ -0,0 +1,16 @@
++/* { dg-do compile } */
++/* { dg-options "-O2 -march=armv8.2-a+sve2p1" } */
++/* { dg-final { check-function-bodies "**" "" "" } } */
++
++#include <arm_sve.h>
++
++/*
++** f:
++**	pfalse	p([0-7]+)\.b
++**	mov	z0\.b, #-1
++**	pmov	z0\[1\], p\1\.d
++**	ret
++*/
++svuint64_t f () {
++    return svpmov_lane_u64_m (svdup_u64 (~0UL), svpfalse (), 1);
++}
+-- 
+2.43.7
+
+

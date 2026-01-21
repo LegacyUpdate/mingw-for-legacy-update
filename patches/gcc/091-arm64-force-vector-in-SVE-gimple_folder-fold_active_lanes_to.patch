@@ -1,0 +1,249 @@
+From a584cd72498711d9775ab102828d185f37db7229 Mon Sep 17 00:00:00 2001
+From: Jennifer Schmitz <jschmitz@nvidia.com>
+Date: Thu, 28 Aug 2025 03:10:27 -0700
+Subject: [PATCH] aarch64: Force vector in SVE
+ gimple_folder::fold_active_lanes_to.
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf8
+Content-Transfer-Encoding: 8bit
+
+An ICE was reported in the following test case:
+svint8_t foo(svbool_t pg, int8_t op2) {
+      return svmul_n_s8_z(pg, svdup_s8(1), op2);
+}
+with a type mismatch in âvec_cond_exprâ:
+_4 = VEC_COND_EXPR <v16_2(D), v32_3(D), { 0, ... }>;
+
+The reason is that svmul_impl::fold folds calls where one of the operands
+is all ones to the other operand using
+gimple_folder::fold_active_lanes_to. However, we implicitly assumed
+that the argument that is passed to fold_active_lanes_to is a vector
+type. In the given test case op2 is a scalar type, resulting in the type
+mismatch in the vec_cond_expr.
+
+This patch fixes the ICE by forcing a vector type of the argument
+in fold_active_lanes_to before the statement with the vec_cond_expr.
+
+In the initial version of this patch, the force_vector statement was placed in
+svmul_impl::fold, but it was moved to fold_active_lanes_to to align it with
+fold_const_binary which takes care of the fixup from scalar to vector
+type using vector_const_binop.
+
+The patch was bootstrapped and tested on aarch64-linux-gnu, no regression.
+OK for trunk?
+OK to backport to GCC 15?
+
+Signed-off-by: Jennifer Schmitz <jschmitz@nvidia.com>
+
+gcc/
+	PR target/121602
+	* config/aarch64/aarch64-sve-builtins.cc
+	(gimple_folder::fold_active_lanes_to): Add force_vector
+	statement.
+
+gcc/testsuite/
+	PR target/121602
+	* gcc.target/aarch64/sve/acle/asm/mul_s16.c: New test.
+	* gcc.target/aarch64/sve/acle/asm/mul_s32.c: Likewise.
+	* gcc.target/aarch64/sve/acle/asm/mul_s64.c: Likewise.
+	* gcc.target/aarch64/sve/acle/asm/mul_s8.c: Likewise.
+	* gcc.target/aarch64/sve/acle/asm/mul_u16.c: Likewise.
+	* gcc.target/aarch64/sve/acle/asm/mul_u32.c: Likewise.
+	* gcc.target/aarch64/sve/acle/asm/mul_u64.c: Likewise.
+	* gcc.target/aarch64/sve/acle/asm/mul_u8.c: Likewise.
+---
+ gcc/config/aarch64/aarch64-sve-builtins.cc             |  1 +
+ .../gcc.target/aarch64/sve/acle/asm/mul_s16.c          | 10 ++++++++++
+ .../gcc.target/aarch64/sve/acle/asm/mul_s32.c          | 10 ++++++++++
+ .../gcc.target/aarch64/sve/acle/asm/mul_s64.c          | 10 ++++++++++
+ gcc/testsuite/gcc.target/aarch64/sve/acle/asm/mul_s8.c | 10 ++++++++++
+ .../gcc.target/aarch64/sve/acle/asm/mul_u16.c          | 10 ++++++++++
+ .../gcc.target/aarch64/sve/acle/asm/mul_u32.c          | 10 ++++++++++
+ .../gcc.target/aarch64/sve/acle/asm/mul_u64.c          | 10 ++++++++++
+ gcc/testsuite/gcc.target/aarch64/sve/acle/asm/mul_u8.c | 10 ++++++++++
+ 9 files changed, 81 insertions(+)
+
+diff --git a/gcc/config/aarch64/aarch64-sve-builtins.cc b/gcc/config/aarch64/aarch64-sve-builtins.cc
+index 909d9e524e1e..3facc42843e3 100644
+--- a/gcc/config/aarch64/aarch64-sve-builtins.cc
++++ b/gcc/config/aarch64/aarch64-sve-builtins.cc
+@@ -3799,6 +3799,7 @@ gimple_folder::fold_active_lanes_to (tree x)
+ 
+   gimple_seq stmts = NULL;
+   tree pred = convert_pred (stmts, vector_type (0), 0);
++  x = force_vector (stmts, TREE_TYPE (lhs), x);
+   gsi_insert_seq_before (gsi, stmts, GSI_SAME_STMT);
+   return gimple_build_assign (lhs, VEC_COND_EXPR, pred, x, vec_inactive);
+ }
+diff --git a/gcc/testsuite/gcc.target/aarch64/sve/acle/asm/mul_s16.c b/gcc/testsuite/gcc.target/aarch64/sve/acle/asm/mul_s16.c
+index e9b6bf83b032..4148097cc63c 100644
+--- a/gcc/testsuite/gcc.target/aarch64/sve/acle/asm/mul_s16.c
++++ b/gcc/testsuite/gcc.target/aarch64/sve/acle/asm/mul_s16.c
+@@ -331,6 +331,16 @@ TEST_UNIFORM_Z (mul_1op1_s16_z_tied2, svint16_t,
+ 		z0 = svmul_s16_z (p0, svdup_s16 (1), z0),
+ 		z0 = svmul_z (p0, svdup_s16 (1), z0))
+ 
++/*
++** mul_1op1n_s16_z:
++**	movprfx	z0\.h, p0/z, z0\.h
++**	mov	z0\.h, p0/m, w0
++**	ret
++*/
++TEST_UNIFORM_ZX (mul_1op1n_s16_z, svint16_t, int16_t,
++	z0 = svmul_n_s16_z (p0, svdup_s16 (1), x0),
++	z0 = svmul_z (p0, svdup_s16 (1), x0))
++
+ /*
+ ** mul_3_s16_z_tied1:
+ **	mov	(z[0-9]+\.h), #3
+diff --git a/gcc/testsuite/gcc.target/aarch64/sve/acle/asm/mul_s32.c b/gcc/testsuite/gcc.target/aarch64/sve/acle/asm/mul_s32.c
+index 71c476f48ca3..2c53e3f14d64 100644
+--- a/gcc/testsuite/gcc.target/aarch64/sve/acle/asm/mul_s32.c
++++ b/gcc/testsuite/gcc.target/aarch64/sve/acle/asm/mul_s32.c
+@@ -341,6 +341,16 @@ TEST_UNIFORM_Z (mul_1op1_s32_z_tied2, svint32_t,
+ 		z0 = svmul_s32_z (p0, svdup_s32 (1), z0),
+ 		z0 = svmul_z (p0, svdup_s32 (1), z0))
+ 
++/*
++** mul_1op1n_s32_z:
++**	movprfx	z0\.s, p0/z, z0\.s
++**	mov	z0\.s, p0/m, w0
++**	ret
++*/
++TEST_UNIFORM_ZX (mul_1op1n_s32_z, svint32_t, int32_t,
++	z0 = svmul_n_s32_z (p0, svdup_s32 (1), x0),
++	z0 = svmul_z (p0, svdup_s32 (1), x0))
++
+ /*
+ ** mul_3_s32_z_tied1:
+ **	mov	(z[0-9]+\.s), #3
+diff --git a/gcc/testsuite/gcc.target/aarch64/sve/acle/asm/mul_s64.c b/gcc/testsuite/gcc.target/aarch64/sve/acle/asm/mul_s64.c
+index a34dc27740a8..55342a13f8bd 100644
+--- a/gcc/testsuite/gcc.target/aarch64/sve/acle/asm/mul_s64.c
++++ b/gcc/testsuite/gcc.target/aarch64/sve/acle/asm/mul_s64.c
+@@ -340,6 +340,16 @@ TEST_UNIFORM_Z (mul_1op1_s64_z_tied2, svint64_t,
+ 		z0 = svmul_s64_z (p0, svdup_s64 (1), z0),
+ 		z0 = svmul_z (p0, svdup_s64 (1), z0))
+ 
++/*
++** mul_1op1n_s64_z:
++**	movprfx	z0\.d, p0/z, z0\.d
++**	mov	z0\.d, p0/m, x0
++**	ret
++*/
++TEST_UNIFORM_ZX (mul_1op1n_s64_z, svint64_t, int64_t,
++	z0 = svmul_n_s64_z (p0, svdup_s64 (1), x0),
++	z0 = svmul_z (p0, svdup_s64 (1), x0))
++
+ /*
+ ** mul_2_s64_z_tied1:
+ **	movprfx	z0.d, p0/z, z0.d
+diff --git a/gcc/testsuite/gcc.target/aarch64/sve/acle/asm/mul_s8.c b/gcc/testsuite/gcc.target/aarch64/sve/acle/asm/mul_s8.c
+index 683e15eccecb..786a424eeead 100644
+--- a/gcc/testsuite/gcc.target/aarch64/sve/acle/asm/mul_s8.c
++++ b/gcc/testsuite/gcc.target/aarch64/sve/acle/asm/mul_s8.c
+@@ -331,6 +331,16 @@ TEST_UNIFORM_Z (mul_1op1_s8_z_tied2, svint8_t,
+ 		z0 = svmul_s8_z (p0, svdup_s8 (1), z0),
+ 		z0 = svmul_z (p0, svdup_s8 (1), z0))
+ 
++/*
++** mul_1op1n_s8_z:
++**	movprfx	z0\.b, p0/z, z0\.b
++**	mov	z0\.b, p0/m, w0
++**	ret
++*/
++TEST_UNIFORM_ZX (mul_1op1n_s8_z, svint8_t, int8_t,
++	z0 = svmul_n_s8_z (p0, svdup_s8 (1), x0),
++	z0 = svmul_z (p0, svdup_s8 (1), x0))
++
+ /*
+ ** mul_3_s8_z_tied1:
+ **	mov	(z[0-9]+\.b), #3
+diff --git a/gcc/testsuite/gcc.target/aarch64/sve/acle/asm/mul_u16.c b/gcc/testsuite/gcc.target/aarch64/sve/acle/asm/mul_u16.c
+index e228dc5995df..ed08635382d5 100644
+--- a/gcc/testsuite/gcc.target/aarch64/sve/acle/asm/mul_u16.c
++++ b/gcc/testsuite/gcc.target/aarch64/sve/acle/asm/mul_u16.c
+@@ -312,6 +312,16 @@ TEST_UNIFORM_Z (mul_1op1_u16_z_tied2, svuint16_t,
+ 		z0 = svmul_u16_z (p0, svdup_u16 (1), z0),
+ 		z0 = svmul_z (p0, svdup_u16 (1), z0))
+ 
++/*
++** mul_1op1n_u16_z:
++**	movprfx	z0\.h, p0/z, z0\.h
++**	mov	z0\.h, p0/m, w0
++**	ret
++*/
++TEST_UNIFORM_ZX (mul_1op1n_u16_z, svuint16_t, uint16_t,
++	z0 = svmul_n_u16_z (p0, svdup_u16 (1), x0),
++	z0 = svmul_z (p0, svdup_u16 (1), x0))
++
+ /*
+ ** mul_3_u16_z_tied1:
+ **	mov	(z[0-9]+\.h), #3
+diff --git a/gcc/testsuite/gcc.target/aarch64/sve/acle/asm/mul_u32.c b/gcc/testsuite/gcc.target/aarch64/sve/acle/asm/mul_u32.c
+index e8f52c9d7854..f82ac4269e8f 100644
+--- a/gcc/testsuite/gcc.target/aarch64/sve/acle/asm/mul_u32.c
++++ b/gcc/testsuite/gcc.target/aarch64/sve/acle/asm/mul_u32.c
+@@ -312,6 +312,16 @@ TEST_UNIFORM_Z (mul_1op1_u32_z_tied2, svuint32_t,
+ 		z0 = svmul_u32_z (p0, svdup_u32 (1), z0),
+ 		z0 = svmul_z (p0, svdup_u32 (1), z0))
+ 
++/*
++** mul_1op1n_u32_z:
++**	movprfx	z0\.s, p0/z, z0\.s
++**	mov	z0\.s, p0/m, w0
++**	ret
++*/
++TEST_UNIFORM_ZX (mul_1op1n_u32_z, svuint32_t, uint32_t,
++	z0 = svmul_n_u32_z (p0, svdup_u32 (1), x0),
++	z0 = svmul_z (p0, svdup_u32 (1), x0))
++
+ /*
+ ** mul_3_u32_z_tied1:
+ **	mov	(z[0-9]+\.s), #3
+diff --git a/gcc/testsuite/gcc.target/aarch64/sve/acle/asm/mul_u64.c b/gcc/testsuite/gcc.target/aarch64/sve/acle/asm/mul_u64.c
+index 2ccdc3642c52..9f1bfff5fd2f 100644
+--- a/gcc/testsuite/gcc.target/aarch64/sve/acle/asm/mul_u64.c
++++ b/gcc/testsuite/gcc.target/aarch64/sve/acle/asm/mul_u64.c
+@@ -333,6 +333,16 @@ TEST_UNIFORM_Z (mul_1op1_u64_z_tied2, svuint64_t,
+ 		z0 = svmul_u64_z (p0, svdup_u64 (1), z0),
+ 		z0 = svmul_z (p0, svdup_u64 (1), z0))
+ 
++/*
++** mul_1op1n_u64_z:
++**	movprfx	z0\.d, p0/z, z0\.d
++**	mov	z0\.d, p0/m, x0
++**	ret
++*/
++TEST_UNIFORM_ZX (mul_1op1n_u64_z, svuint64_t, uint64_t,
++	z0 = svmul_n_u64_z (p0, svdup_u64 (1), x0),
++	z0 = svmul_z (p0, svdup_u64 (1), x0))
++
+ /*
+ ** mul_2_u64_z_tied1:
+ **	movprfx	z0.d, p0/z, z0.d
+diff --git a/gcc/testsuite/gcc.target/aarch64/sve/acle/asm/mul_u8.c b/gcc/testsuite/gcc.target/aarch64/sve/acle/asm/mul_u8.c
+index 8e53a4821f05..b2c1edf5ff82 100644
+--- a/gcc/testsuite/gcc.target/aarch64/sve/acle/asm/mul_u8.c
++++ b/gcc/testsuite/gcc.target/aarch64/sve/acle/asm/mul_u8.c
+@@ -312,6 +312,16 @@ TEST_UNIFORM_Z (mul_1op1_u8_z_tied2, svuint8_t,
+ 		z0 = svmul_u8_z (p0, svdup_u8 (1), z0),
+ 		z0 = svmul_z (p0, svdup_u8 (1), z0))
+ 
++/*
++** mul_1op1n_u8_z:
++**	movprfx	z0\.b, p0/z, z0\.b
++**	mov	z0\.b, p0/m, w0
++**	ret
++*/
++TEST_UNIFORM_ZX (mul_1op1n_u8_z, svuint8_t, uint8_t,
++	z0 = svmul_n_u8_z (p0, svdup_u8 (1), x0),
++	z0 = svmul_z (p0, svdup_u8 (1), x0))
++
+ /*
+ ** mul_3_u8_z_tied1:
+ **	mov	(z[0-9]+\.b), #3
+-- 
+2.43.7
+
+

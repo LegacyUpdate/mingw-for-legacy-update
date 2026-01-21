@@ -1,0 +1,33 @@
+From ceb6f7938534ed7faf1b1b9324365435bac9715c Mon Sep 17 00:00:00 2001
+From: "H.J. Lu" <hjl.tools@gmail.com>
+Date: Fri, 24 Oct 2025 16:23:19 +0800
+Subject: [PATCH] x86: builtin-fabs-2.c: Also scan (%edi) for x32
+
+Adjust gcc.target/i386/builtin-fabs-2.c to scan both (%rdi) and (%edi).
+
+	PR target/122323
+	* gcc.target/i386/builtin-fabs-2.c: Also scan (%edi)for x32.
+
+Signed-off-by: H.J. Lu <hjl.tools@gmail.com>
+(cherry picked from commit 77c8be11d85d9f204d2eb1ba3c5d0cbf3cbce277)
+---
+ gcc/testsuite/gcc.target/i386/builtin-fabs-2.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/gcc/testsuite/gcc.target/i386/builtin-fabs-2.c b/gcc/testsuite/gcc.target/i386/builtin-fabs-2.c
+index 093fd2ef8b91..dba3f8f4b532 100644
+--- a/gcc/testsuite/gcc.target/i386/builtin-fabs-2.c
++++ b/gcc/testsuite/gcc.target/i386/builtin-fabs-2.c
+@@ -8,7 +8,7 @@
+ **foo:
+ **...
+ **	ja	.L[0-9]+
+-**	movss	4\(%rdi\), %xmm1
++**	movss	4\(%(e|r)di\), %xmm1
+ **	orps	%xmm1, %xmm0
+ **	comiss	%xmm0, %xmm2
+ **	seta	%al
+-- 
+2.43.7
+
+

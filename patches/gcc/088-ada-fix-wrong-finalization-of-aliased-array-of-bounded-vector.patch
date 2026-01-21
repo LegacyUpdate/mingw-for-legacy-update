@@ -1,0 +1,62 @@
+From 3846068c8e43fac6720030d3a601cbfee3f277e7 Mon Sep 17 00:00:00 2001
+From: Eric Botcazou <ebotcazou@adacore.com>
+Date: Wed, 3 Sep 2025 09:17:39 +0200
+Subject: [PATCH] ada: Fix wrong finalization of aliased array of bounded
+ vector
+
+The problem is that Apply_Discriminant_Check introduces an unnecessary
+temporary for an assignment where both sides have the same constrained
+subtype but the left-hand side is an aliased component.
+
+This comes from an approximation in the implementation introduced long
+time ago to deal with aliased unconstrained objects in Ada 95, more
+specifically to still generate a check when both sides have the same
+unconstrained subtype in this case; it is replaced by an explicit test
+that the common subtype is constrained.
+
+gcc/ada/ChangeLog:
+
+	* checks.adb (Apply_Discriminant_Check): Remove undocumented test
+	on Is_Aliased_View applied to the left-hand side to skip the check
+	in the case where the subtypes are the same, and replace it with a
+	test that the subtypes are constrained.
+---
+ gcc/ada/checks.adb | 15 ++++++---------
+ 1 file changed, 6 insertions(+), 9 deletions(-)
+
+diff --git a/gcc/ada/checks.adb b/gcc/ada/checks.adb
+index 6a98292d1cc1..1b1ff4c5ea5b 100644
+--- a/gcc/ada/checks.adb
++++ b/gcc/ada/checks.adb
+@@ -1539,21 +1539,18 @@ package body Checks is
+          return;
+       end if;
+ 
+-      --  Suppress checks if the subtypes are the same. The check must be
+-      --  preserved in an assignment to a formal, because the constraint is
+-      --  given by the actual.
++      --  Suppress checks if the subtypes are the same and constrained. The
++      --  check must be preserved in an assignment to a formal, because the
++      --  constraint is given by the actual.
+ 
+       if Nkind (Original_Node (N)) /= N_Allocator
++        and then (if Do_Access then Designated_Type (Typ) else Typ) = S_Typ
++        and then Is_Constrained (S_Typ)
+         and then (No (Lhs)
+                    or else not Is_Entity_Name (Lhs)
+                    or else No (Param_Entity (Lhs)))
+       then
+-         if (Etype (N) = Typ
+-              or else (Do_Access and then Designated_Type (Typ) = S_Typ))
+-           and then (No (Lhs) or else not Is_Aliased_View (Lhs))
+-         then
+-            return;
+-         end if;
++         return;
+ 
+       --  We can also eliminate checks on allocators with a subtype mark that
+       --  coincides with the context type. The context type may be a subtype
+-- 
+2.43.7
+
+

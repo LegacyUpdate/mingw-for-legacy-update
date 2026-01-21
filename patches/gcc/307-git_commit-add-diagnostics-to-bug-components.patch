@@ -1,0 +1,30 @@
+From e8238de6161614ea239df47b671f3f070b054c9a Mon Sep 17 00:00:00 2001
+From: David Malcolm <dmalcolm@redhat.com>
+Date: Mon, 28 Jul 2025 10:56:07 -0400
+Subject: [PATCH] git_commit.py: add "diagnostics" to bug components
+
+contrib/ChangeLog
+	* gcc-changelog/git_commit.py: Add "diagnostics" to bug
+	components.
+
+(cherry picked from commit 95f517dc7796ba1694755ce13b226e2358a89d8e)
+---
+ contrib/gcc-changelog/git_commit.py | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/contrib/gcc-changelog/git_commit.py b/contrib/gcc-changelog/git_commit.py
+index 5645f80ebb9b..aadf593c47e3 100755
+--- a/contrib/gcc-changelog/git_commit.py
++++ b/contrib/gcc-changelog/git_commit.py
+@@ -97,6 +97,7 @@ bug_components = {
+     'd',
+     'debug',
+     'demangler',
++    'diagnostics',
+     'driver',
+     'fastjar',
+     'fortran',
+-- 
+2.43.7
+
+

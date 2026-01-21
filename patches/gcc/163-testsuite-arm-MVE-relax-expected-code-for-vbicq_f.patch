@@ -1,0 +1,38 @@
+From 96c8dc35f942920ab177e8470564acff090d05ed Mon Sep 17 00:00:00 2001
+From: Christophe Lyon <christophe.lyon@linaro.org>
+Date: Thu, 23 Oct 2025 07:59:20 +0000
+Subject: [PATCH] testsuite: arm: [MVE] Relax expected code for vbicq_f
+ [PR122223]
+
+The original versions of the pr122223.c test only took into account
+code generated with -mfloat-abi=hard, which uses q0.
+
+With -mfloat-abi=softfp, this can be any Q register, so replace q0
+with a suitable regex.
+
+gcc/testsuite/ChangeLog:
+
+	PR target/122223
+	* gcc.target/arm/mve/intrinsics/pr122223.c: Relax expected code.
+
+(cherry picked from commit a52888dc71924afb6cd187b0e5f18d2be4c68a07)
+---
+ gcc/testsuite/gcc.target/arm/mve/intrinsics/pr122223.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/gcc/testsuite/gcc.target/arm/mve/intrinsics/pr122223.c b/gcc/testsuite/gcc.target/arm/mve/intrinsics/pr122223.c
+index 59e757a1ab7a..045815c630e6 100644
+--- a/gcc/testsuite/gcc.target/arm/mve/intrinsics/pr122223.c
++++ b/gcc/testsuite/gcc.target/arm/mve/intrinsics/pr122223.c
+@@ -21,5 +21,5 @@ float32x4_t foo() {
+ }
+ #endif
+ 
+-/* { dg-final { scan-assembler-not "vmov.f32\tq0, #0.0" } } */
+-/* { dg-final { scan-assembler "vmov.f32\tq0, #1.0" } } */
++/* { dg-final { scan-assembler-not "vmov.f32\tq\[0-9\]+, #0.0" } } */
++/* { dg-final { scan-assembler "vmov.f32\tq\[0-9\]+, #1.0" } } */
+-- 
+2.43.7
+
+

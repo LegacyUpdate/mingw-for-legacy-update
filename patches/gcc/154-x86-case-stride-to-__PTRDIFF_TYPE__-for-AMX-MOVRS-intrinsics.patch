@@ -1,0 +1,77 @@
+From 9f6cae5b99d83b31959d899d77cb450078a1c242 Mon Sep 17 00:00:00 2001
+From: "Hu, Lin1" <lin1.hu@intel.com>
+Date: Fri, 10 Oct 2025 14:30:19 +0800
+Subject: [PATCH] x86: Cast stride to __PTRDIFF_TYPE__ for AMX-MOVRS
+ intrinsics. [PR122119]
+
+On 64-bit windows, long can't be used, because it is 32 bits. Use
+__PTRDIFF_TYPE__ instead of long.
+
+gcc/ChangeLog:
+
+	PR target/122119
+	* config/i386/amxmovrsintrin.h
+	(_tile_loaddrs_internal): Use __PTRDIFF_TYPE__ instead of long.
+	(_tile_loaddrst1_internal): Ditto.
+	(_tile_2rpntlvwz0rs_internal): Ditto.
+	(_tile_2rpntlvwz0rst1_internal): Ditto.
+	(_tile_2rpntlvwz1rs_internal): Ditto.
+	(_tile_2rpntlvwz1rst1_internal): Ditto.
+---
+ gcc/config/i386/amxmovrsintrin.h | 12 ++++++------
+ 1 file changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/gcc/config/i386/amxmovrsintrin.h b/gcc/config/i386/amxmovrsintrin.h
+index 97969f894ff4..2bc9f127138d 100644
+--- a/gcc/config/i386/amxmovrsintrin.h
++++ b/gcc/config/i386/amxmovrsintrin.h
+@@ -40,13 +40,13 @@
+ __asm__ volatile					  \
+   ("{tileloaddrs\t(%0,%1,1), %%tmm"#tdst		  \
+      "|tileloaddrs\t%%tmm"#tdst", [%0+%1*1]}"		  \
+-   :: "r" ((const void*) (base)), "r" ((long) (stride)))
++   :: "r" ((const void*) (base)), "r" ((__PTRDIFF_TYPE__) (stride)))
+ 
+ #define _tile_loaddrst1_internal(tdst, base, stride)	  \
+ __asm__ volatile					  \
+   ("{tileloaddrst1\t(%0,%1,1), %%tmm"#tdst		  \
+      "|tileloaddrst1\t%%tmm"#tdst", [%0+%1*1]}"		  \
+-   :: "r" ((const void*) (base)), "r" ((long) (stride)))
++   :: "r" ((const void*) (base)), "r" ((__PTRDIFF_TYPE__) (stride)))
+ 
+ #define _tile_loaddrs(tdst, base, stride)		  \
+   _tile_loaddrs_internal(tdst, base, stride)
+@@ -69,25 +69,25 @@ __asm__ volatile					  \
+   __asm__ volatile					  \
+   ("{t2rpntlvwz0rs\t(%0,%1,1), %%tmm"#tdst		  \
+      "|t2rpntlvwz0rs\t%%tmm"#tdst", [%0+%1*1]}"	  \
+-   :: "r" ((const void*) (base)), "r" ((long) (stride)))
++   :: "r" ((const void*) (base)), "r" ((__PTRDIFF_TYPE__) (stride)))
+ 
+ #define _tile_2rpntlvwz0rst1_internal(tdst, base, stride) \
+   __asm__ volatile					  \
+   ("{t2rpntlvwz0rst1\t(%0,%1,1), %%tmm"#tdst		  \
+      "|t2rpntlvwz0rst1\t%%tmm"#tdst", [%0+%1*1]}"	  \
+-   :: "r" ((const void*) (base)), "r" ((long) (stride)))
++   :: "r" ((const void*) (base)), "r" ((__PTRDIFF_TYPE__) (stride)))
+ 
+ #define _tile_2rpntlvwz1rs_internal(tdst, base, stride)	  \
+   __asm__ volatile					  \
+   ("{t2rpntlvwz1rs\t(%0,%1,1), %%tmm"#tdst		  \
+      "|t2rpntlvwz1rs\t%%tmm"#tdst", [%0+%1*1]}"		  \
+-   :: "r" ((const void*) (base)), "r" ((long) (stride)))
++   :: "r" ((const void*) (base)), "r" ((__PTRDIFF_TYPE__) (stride)))
+ 
+ #define _tile_2rpntlvwz1rst1_internal(tdst, base, stride) \
+   __asm__ volatile					  \
+   ("{t2rpntlvwz1rst1\t(%0,%1,1), %%tmm"#tdst		  \
+      "|t2rpntlvwz1rst1\t%%tmm"#tdst", [%0+%1*1]}"	  \
+-   :: "r" ((const void*) (base)), "r" ((long) (stride)))
++   :: "r" ((const void*) (base)), "r" ((__PTRDIFF_TYPE__) (stride)))
+ 
+ #define _tile_2rpntlvwz0rs(tdst, base, stride)		  \
+   _tile_2rpntlvwz0rs_internal(tdst, base, stride)
+-- 
+2.43.7
+
+

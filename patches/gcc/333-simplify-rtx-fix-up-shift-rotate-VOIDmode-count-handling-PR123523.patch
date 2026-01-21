@@ -1,0 +1,122 @@
+From c5801eac61cb18c222faf78b852c07367e9942c9 Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Mon, 12 Jan 2026 10:06:47 +0100
+Subject: [PATCH] simplify-rtx: Fix up shift/rotate VOIDmode count handling
+ [PR123523]
+
+The following testcase ICEs on i686-linux, because the HW in that
+case implements the shift as shifting by 64-bit count (anything larger
+or equal to number of bits in the first operand's element results
+in 0 or sign copies), so the machine description implements it as
+such as well.
+Now, because shifts/rotates can have different modes on the first
+and second operand, when the second one has VOIDmode (i.e. CONST_INT,
+I think CONST_WIDE_INT has non-VOIDmode and CONST_DOUBLE with VOIDmode
+is hopefully very rarely used), we need to choose some mode for the
+wide_int conversion.  And so far we've been choosing BITS_PER_WORD/word_mode
+or the mode of the first operand's element, whichever is wider.
+That works fine on 64-bit targets, CONST_INT has always at most 64 bits,
+but for 32-bit targets uses SImode.
+
+Because HOST_BITS_PER_WIDE_INT is always 64, the following patch just
+uses that plus DImode instead of BITS_PER_WORD and word_mode.
+
+2026-01-12  Jakub Jelinek  <jakub@redhat.com>
+
+	PR rtl-optimization/123523
+	* simplify-rtx.cc (simplify_const_binary_operation): Use
+	DImode for VOIDmode shift and truncation counts if int_mode
+	is narrower than HOST_BITS_PER_WIDE_INT rather than
+	word_mode if int_mode it is narrower than BITS_PER_WORD.
+
+	* gcc.target/i386/pr123523.c: New test.
+
+(cherry picked from commit dd8df074c9ceaa723e82f06bef8714f46ecccb18)
+---
+ gcc/simplify-rtx.cc                      | 21 +++++++++++----------
+ gcc/testsuite/gcc.target/i386/pr123523.c | 24 ++++++++++++++++++++++++
+ 2 files changed, 35 insertions(+), 10 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.target/i386/pr123523.c
+
+diff --git a/gcc/simplify-rtx.cc b/gcc/simplify-rtx.cc
+index 8d4cbf1371a3..f8c12d64f0bc 100644
+--- a/gcc/simplify-rtx.cc
++++ b/gcc/simplify-rtx.cc
+@@ -5618,11 +5618,11 @@ simplify_const_binary_operation (enum rtx_code code, machine_mode mode,
+ 	    /* The shift count might be in SImode while int_mode might
+ 	       be narrower.  On IA-64 it is even DImode.  If the shift
+ 	       count is too large and doesn't fit into int_mode, we'd
+-	       ICE.  So, if int_mode is narrower than word, use
+-	       word_mode for the shift count.  */
++	       ICE.  So, if int_mode is narrower than
++	       HOST_BITS_PER_WIDE_INT, use DImode for the shift count.  */
+ 	    if (GET_MODE (op1) == VOIDmode
+-		&& GET_MODE_PRECISION (int_mode) < BITS_PER_WORD)
+-	      pop1 = rtx_mode_t (op1, word_mode);
++		&& GET_MODE_PRECISION (int_mode) < HOST_BITS_PER_WIDE_INT)
++	      pop1 = rtx_mode_t (op1, DImode);
+ 
+ 	    wide_int wop1 = pop1;
+ 	    if (SHIFT_COUNT_TRUNCATED)
+@@ -5673,11 +5673,11 @@ simplify_const_binary_operation (enum rtx_code code, machine_mode mode,
+ 	    /* The rotate count might be in SImode while int_mode might
+ 	       be narrower.  On IA-64 it is even DImode.  If the shift
+ 	       count is too large and doesn't fit into int_mode, we'd
+-	       ICE.  So, if int_mode is narrower than word, use
+-	       word_mode for the shift count.  */
++	       ICE.  So, if int_mode is narrower than
++	       HOST_BITS_PER_WIDE_INT, use DImode for the shift count.  */
+ 	    if (GET_MODE (op1) == VOIDmode
+-		&& GET_MODE_PRECISION (int_mode) < BITS_PER_WORD)
+-	      pop1 = rtx_mode_t (op1, word_mode);
++		&& GET_MODE_PRECISION (int_mode) < HOST_BITS_PER_WIDE_INT)
++	      pop1 = rtx_mode_t (op1, DImode);
+ 
+ 	    if (wi::neg_p (pop1))
+ 	      return NULL_RTX;
+@@ -5778,8 +5778,9 @@ simplify_const_binary_operation (enum rtx_code code, machine_mode mode,
+ 	      wide_int shift
+ 		= rtx_mode_t (op1,
+ 			      GET_MODE (op1) == VOIDmode
+-			      && GET_MODE_PRECISION (int_mode) < BITS_PER_WORD
+-			      ? word_mode : mode);
++			      && (GET_MODE_PRECISION (int_mode)
++				  < HOST_BITS_PER_WIDE_INT)
++			      ? DImode : mode);
+ 	      if (SHIFT_COUNT_TRUNCATED)
+ 		shift = wi::umod_trunc (shift, GET_MODE_PRECISION (int_mode));
+ 	      else if (wi::geu_p (shift, GET_MODE_PRECISION (int_mode)))
+diff --git a/gcc/testsuite/gcc.target/i386/pr123523.c b/gcc/testsuite/gcc.target/i386/pr123523.c
+new file mode 100644
+index 000000000000..cd5a674c431a
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/i386/pr123523.c
+@@ -0,0 +1,24 @@
++/* PR rtl-optimization/123523 */
++/* { dg-do compile } */
++/* { dg-options "-O -mavx512vl -mavx512bw" } */
++
++typedef __attribute__((__vector_size__ (16))) short V;
++typedef __attribute__((__vector_size__ (32))) short W;
++
++char c;
++W *p, *q;
++short s;
++
++void
++bar (V v, int, int, int, int, int, int, void *)
++{
++  W w = __builtin_ia32_psrlw256_mask ((W) { }, v, *p, 0);
++  short x = __builtin_ia32_pcmpgtw256_mask (w, *q, 0);
++  __builtin_mul_overflow (x, c, &s);
++}
++
++void
++foo ()
++{
++  bar ((V){0, -14}, 0, 0, 0, 0, 0, 0, q);
++}
+-- 
+2.43.7
+
+

@@ -1,0 +1,220 @@
+From ee46a136fa8fe30bf2a3dc7c524ad46719e146eb Mon Sep 17 00:00:00 2001
+From: Lulu Cheng <chenglulu@loongson.cn>
+Date: Thu, 16 Oct 2025 15:45:09 +0800
+Subject: [PATCH] LoongArch: Move vector templates of and xor ior to simd.md.
+
+gcc/ChangeLog:
+
+	* config/loongarch/lasx.md (xor<mode>3): Delete.
+	(ior<mode>3): Delete.
+	(and<mode>3): Delete.
+	* config/loongarch/lsx.md (xor<mode>3): Delete.
+	(ior<mode>3): Delete.
+	(and<mode>3): Delete.
+	* config/loongarch/simd.md (xor<mode>3): Define.
+	(ior<mode>3): Likewise.
+	(and<mode>3): Likewise.
+
+(cherry picked from commit 03c25c976da07b260f7acb757688eefb22ff9017)
+---
+ gcc/config/loongarch/lasx.md | 53 ------------------------------------
+ gcc/config/loongarch/lsx.md  | 53 ------------------------------------
+ gcc/config/loongarch/simd.md | 53 ++++++++++++++++++++++++++++++++++++
+ 3 files changed, 53 insertions(+), 106 deletions(-)
+
+diff --git a/gcc/config/loongarch/lasx.md b/gcc/config/loongarch/lasx.md
+index 9df572beb9e1..8b9e3268832c 100644
+--- a/gcc/config/loongarch/lasx.md
++++ b/gcc/config/loongarch/lasx.md
+@@ -792,59 +792,6 @@
+   [(set_attr "type" "simd_div")
+    (set_attr "mode" "<MODE>")])
+ 
+-(define_insn "xor<mode>3"
+-  [(set (match_operand:LASX 0 "register_operand" "=f,f,f")
+-	(xor:LASX
+-	  (match_operand:LASX 1 "register_operand" "f,f,f")
+-	  (match_operand:LASX 2 "reg_or_vector_same_val_operand" "f,YC,Urv8")))]
+-  "ISA_HAS_LASX"
+-  "@
+-   xvxor.v\t%u0,%u1,%u2
+-   xvbitrevi.%v0\t%u0,%u1,%V2
+-   xvxori.b\t%u0,%u1,%B2"
+-  [(set_attr "type" "simd_logic,simd_bit,simd_logic")
+-   (set_attr "mode" "<MODE>")])
+-
+-(define_insn "ior<mode>3"
+-  [(set (match_operand:LASX 0 "register_operand" "=f,f,f")
+-	(ior:LASX
+-	  (match_operand:LASX 1 "register_operand" "f,f,f")
+-	  (match_operand:LASX 2 "reg_or_vector_same_val_operand" "f,YC,Urv8")))]
+-  "ISA_HAS_LASX"
+-  "@
+-   xvor.v\t%u0,%u1,%u2
+-   xvbitseti.%v0\t%u0,%u1,%V2
+-   xvori.b\t%u0,%u1,%B2"
+-  [(set_attr "type" "simd_logic,simd_bit,simd_logic")
+-   (set_attr "mode" "<MODE>")])
+-
+-(define_insn "and<mode>3"
+-  [(set (match_operand:LASX 0 "register_operand" "=f,f,f")
+-	(and:LASX
+-	  (match_operand:LASX 1 "register_operand" "f,f,f")
+-	  (match_operand:LASX 2 "reg_or_vector_same_val_operand" "f,YZ,Urv8")))]
+-  "ISA_HAS_LASX"
+-{
+-  switch (which_alternative)
+-    {
+-    case 0:
+-      return "xvand.v\t%u0,%u1,%u2";
+-    case 1:
+-      {
+-	rtx elt0 = CONST_VECTOR_ELT (operands[2], 0);
+-	unsigned HOST_WIDE_INT val = ~UINTVAL (elt0);
+-	operands[2] = loongarch_gen_const_int_vector (<MODE>mode, val & (-val));
+-	return "xvbitclri.%v0\t%u0,%u1,%V2";
+-      }
+-    case 2:
+-      return "xvandi.b\t%u0,%u1,%B2";
+-    default:
+-      gcc_unreachable ();
+-    }
+-}
+-  [(set_attr "type" "simd_logic,simd_bit,simd_logic")
+-   (set_attr "mode" "<MODE>")])
+-
+ (define_insn "one_cmpl<mode>2"
+   [(set (match_operand:ILASX 0 "register_operand" "=f")
+ 	(not:ILASX (match_operand:ILASX 1 "register_operand" "f")))]
+diff --git a/gcc/config/loongarch/lsx.md b/gcc/config/loongarch/lsx.md
+index cf48a16b69ea..5424b47c9ed2 100644
+--- a/gcc/config/loongarch/lsx.md
++++ b/gcc/config/loongarch/lsx.md
+@@ -654,59 +654,6 @@
+   [(set_attr "type" "simd_div")
+    (set_attr "mode" "<MODE>")])
+ 
+-(define_insn "xor<mode>3"
+-  [(set (match_operand:LSX 0 "register_operand" "=f,f,f")
+-	(xor:LSX
+-	  (match_operand:LSX 1 "register_operand" "f,f,f")
+-	  (match_operand:LSX 2 "reg_or_vector_same_val_operand" "f,YC,Urv8")))]
+-  "ISA_HAS_LSX"
+-  "@
+-   vxor.v\t%w0,%w1,%w2
+-   vbitrevi.%v0\t%w0,%w1,%V2
+-   vxori.b\t%w0,%w1,%B2"
+-  [(set_attr "type" "simd_logic,simd_bit,simd_logic")
+-   (set_attr "mode" "<MODE>")])
+-
+-(define_insn "ior<mode>3"
+-  [(set (match_operand:LSX 0 "register_operand" "=f,f,f")
+-	(ior:LSX
+-	  (match_operand:LSX 1 "register_operand" "f,f,f")
+-	  (match_operand:LSX 2 "reg_or_vector_same_val_operand" "f,YC,Urv8")))]
+-  "ISA_HAS_LSX"
+-  "@
+-   vor.v\t%w0,%w1,%w2
+-   vbitseti.%v0\t%w0,%w1,%V2
+-   vori.b\t%w0,%w1,%B2"
+-  [(set_attr "type" "simd_logic,simd_bit,simd_logic")
+-   (set_attr "mode" "<MODE>")])
+-
+-(define_insn "and<mode>3"
+-  [(set (match_operand:LSX 0 "register_operand" "=f,f,f")
+-	(and:LSX
+-	  (match_operand:LSX 1 "register_operand" "f,f,f")
+-	  (match_operand:LSX 2 "reg_or_vector_same_val_operand" "f,YZ,Urv8")))]
+-  "ISA_HAS_LSX"
+-{
+-  switch (which_alternative)
+-    {
+-    case 0:
+-      return "vand.v\t%w0,%w1,%w2";
+-    case 1:
+-      {
+-	rtx elt0 = CONST_VECTOR_ELT (operands[2], 0);
+-	unsigned HOST_WIDE_INT val = ~UINTVAL (elt0);
+-	operands[2] = loongarch_gen_const_int_vector (<MODE>mode, val & (-val));
+-	return "vbitclri.%v0\t%w0,%w1,%V2";
+-      }
+-    case 2:
+-      return "vandi.b\t%w0,%w1,%B2";
+-    default:
+-      gcc_unreachable ();
+-    }
+-}
+-  [(set_attr "type" "simd_logic,simd_bit,simd_logic")
+-   (set_attr "mode" "<MODE>")])
+-
+ (define_insn "one_cmpl<mode>2"
+   [(set (match_operand:ILSX 0 "register_operand" "=f")
+ 	(not:ILSX (match_operand:ILSX 1 "register_operand" "f")))]
+diff --git a/gcc/config/loongarch/simd.md b/gcc/config/loongarch/simd.md
+index 88ab138a8c66..aa677f8f28e1 100644
+--- a/gcc/config/loongarch/simd.md
++++ b/gcc/config/loongarch/simd.md
+@@ -983,6 +983,59 @@
+   DONE;
+ })
+ 
++(define_insn "xor<mode>3"
++  [(set (match_operand:ALLVEC 0 "register_operand" "=f,f,f")
++	(xor:ALLVEC
++	  (match_operand:ALLVEC 1 "register_operand" "f,f,f")
++	  (match_operand:ALLVEC 2 "reg_or_vector_same_val_operand" "f,YC,Urv8")))]
++  ""
++  "@
++   <x>vxor.v\t%<wu>0,%<wu>1,%<wu>2
++   <x>vbitrevi.%v0\t%<wu>0,%<wu>1,%V2
++   <x>vxori.b\t%<wu>0,%<wu>1,%B2"
++  [(set_attr "type" "simd_logic,simd_bit,simd_logic")
++   (set_attr "mode" "<MODE>")])
++
++(define_insn "ior<mode>3"
++  [(set (match_operand:ALLVEC 0 "register_operand" "=f,f,f")
++	(ior:ALLVEC
++	  (match_operand:ALLVEC 1 "register_operand" "f,f,f")
++	  (match_operand:ALLVEC 2 "reg_or_vector_same_val_operand" "f,YC,Urv8")))]
++  ""
++  "@
++   <x>vor.v\t%<wu>0,%<wu>1,%<wu>2
++   <x>vbitseti.%v0\t%<wu>0,%<wu>1,%V2
++   <x>vori.b\t%<wu>0,%<wu>1,%B2"
++  [(set_attr "type" "simd_logic,simd_bit,simd_logic")
++   (set_attr "mode" "<MODE>")])
++
++(define_insn "and<mode>3"
++  [(set (match_operand:ALLVEC 0 "register_operand" "=f,f,f")
++	(and:ALLVEC
++	  (match_operand:ALLVEC 1 "register_operand" "f,f,f")
++	  (match_operand:ALLVEC 2 "reg_or_vector_same_val_operand" "f,YZ,Urv8")))]
++  ""
++{
++  switch (which_alternative)
++    {
++    case 0:
++      return "<x>vand.v\t%<wu>0,%<wu>1,%<wu>2";
++    case 1:
++      {
++	rtx elt0 = CONST_VECTOR_ELT (operands[2], 0);
++	unsigned HOST_WIDE_INT val = ~UINTVAL (elt0);
++	operands[2] = loongarch_gen_const_int_vector (<MODE>mode, val & (-val));
++	return "<x>vbitclri.%v0\t%<wu>0,%<wu>1,%V2";
++      }
++    case 2:
++      return "<x>vandi.b\t%<wu>0,%<wu>1,%B2";
++    default:
++      gcc_unreachable ();
++    }
++}
++  [(set_attr "type" "simd_logic,simd_bit,simd_logic")
++   (set_attr "mode" "<MODE>")])
++
+ ; The LoongArch SX Instructions.
+ (include "lsx.md")
+ 
+-- 
+2.43.7
+
+

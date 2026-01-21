@@ -1,0 +1,79 @@
+From 52438e5e5808b6e8783fc59b77e028615946fbf3 Mon Sep 17 00:00:00 2001
+From: Richard Biener <rguenther@suse.de>
+Date: Tue, 26 Aug 2025 10:34:01 +0200
+Subject: [PATCH] tree-optimization/121659 - bogus swap of reduction operands
+
+The following addresses a bogus swapping of SLP operands of a
+reduction operation which gets STMT_VINFO_REDUC_IDX out of sync
+with the SLP operand order.  In fact the most obvious mistake is
+that we simply swap operands even on the first stmt even when
+there's no difference in the comparison operators (for == and !=
+at least).  But there are more latent issues that I noticed and
+fixed up in the process.
+
+	PR tree-optimization/121659
+	* tree-vect-slp.cc (vect_build_slp_tree_1): Do not allow
+	matching up comparison operators by swapping if that would
+	disturb STMT_VINFO_REDUC_IDX.  Make sure to only
+	actually mark operands for swapping when there was a
+	mismatch and we're not processing the first stmt.
+
+	* gcc.dg/vect/pr121659.c: New testcase.
+
+(cherry picked from commit 68e692eed9e8e8c47d83586ee08f40c27fa3a78d)
+---
+ gcc/testsuite/gcc.dg/vect/pr121659.c | 11 +++++++++++
+ gcc/tree-vect-slp.cc                 | 11 ++++++++---
+ 2 files changed, 19 insertions(+), 3 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.dg/vect/pr121659.c
+
+diff --git a/gcc/testsuite/gcc.dg/vect/pr121659.c b/gcc/testsuite/gcc.dg/vect/pr121659.c
+new file mode 100644
+index 000000000000..19d5f8c37f37
+--- /dev/null
++++ b/gcc/testsuite/gcc.dg/vect/pr121659.c
+@@ -0,0 +1,11 @@
++/* { dg-do compile } */
++
++_Bool a;
++void b(_Bool c[][3])
++{
++  for (short d = 0; d < 100; d++)
++    for (int e = 1; e < 21; e += 4)
++      a ^= !c[1][1];
++  for (;;)
++    ;
++}
+diff --git a/gcc/tree-vect-slp.cc b/gcc/tree-vect-slp.cc
+index b2af2682e582..961f7ad3bd65 100644
+--- a/gcc/tree-vect-slp.cc
++++ b/gcc/tree-vect-slp.cc
+@@ -1363,7 +1363,9 @@ vect_build_slp_tree_1 (vec_info *vinfo, unsigned char *swap,
+ 		    && (TREE_CODE_CLASS (tree_code (first_stmt_code))
+ 			== tcc_comparison)
+ 		    && (swap_tree_comparison (tree_code (first_stmt_code))
+-			== tree_code (rhs_code))))
++			== tree_code (rhs_code))
++		    && (first_reduc_idx == -1
++			|| REDUC_GROUP_FIRST_ELEMENT (stmt_info))))
+ 	      || (ldst_p
+ 		  && (STMT_VINFO_GROUPED_ACCESS (stmt_info)
+ 		      != STMT_VINFO_GROUPED_ACCESS (first_stmt_info)))
+@@ -1579,8 +1581,11 @@ vect_build_slp_tree_1 (vec_info *vinfo, unsigned char *swap,
+ 		}
+ 	    }
+ 
+-	  if (rhs_code.is_tree_code ()
+-	      && TREE_CODE_CLASS ((tree_code)rhs_code) == tcc_comparison
++	  if (i != 0
++	      && first_stmt_code != rhs_code
++	      && first_stmt_code.is_tree_code ()
++	      && rhs_code.is_tree_code ()
++	      && TREE_CODE_CLASS ((tree_code)first_stmt_code) == tcc_comparison
+ 	      && (swap_tree_comparison ((tree_code)first_stmt_code)
+ 		  == (tree_code)rhs_code))
+ 	    swap[i] = 1;
+-- 
+2.43.7
+
+

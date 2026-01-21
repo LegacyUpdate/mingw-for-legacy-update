@@ -1,0 +1,121 @@
+From 0abf53c10f45abc88435d727ae3e9de7ceeedf77 Mon Sep 17 00:00:00 2001
+From: Alex Coplan <alex.coplan@arm.com>
+Date: Tue, 15 Jul 2025 10:37:58 +0100
+Subject: [PATCH] aarch64: Fix predication of FP8 FDOT insns [PR120986]
+
+The predication of the SVE2 FP8 dot product insns was relying on the
+architectural dependency:
+
+FEAT_FP8DOT2 => FEAT_FP8DOT4
+
+which was relaxed in GCC as of
+r15-7480-g299a8e2dc667e795991bc439d2cad5ea5bd379e2, thus leading to
+unrecognisable insn ICEs when compiling a two-way FDOT with just
++fp8dot2.  This patch introduces a new mode iterator which selectively
+enables the appropriate mode(s) depending on which of the FP8DOT{2,4}
+features are available, and uses it to fix the predication of the
+patterns.
+
+gcc/ChangeLog:
+
+	PR target/120986
+	* config/aarch64/aarch64-sve2.md (@aarch64_sve_dot<mode>):
+	Switch mode iterator from SVE_FULL_HSF to new iterator;
+	remove insn predicate as this is now taken care of by conditions
+	in the mode iterator.
+	(@aarch64_sve_dot_lane<mode>): Likewise.
+	* config/aarch64/iterators.md (SVE_FULL_HSF_FP8_FDOT): New.
+
+gcc/testsuite/ChangeLog:
+
+	PR target/120986
+	* gcc.target/aarch64/pr120986-1.c: New test.
+
+(cherry picked from commit 75eabf69d805b7effb5e50f0ed53f45d6a2f596a)
+---
+ gcc/config/aarch64/aarch64-sve2.md            | 16 ++++++++--------
+ gcc/config/aarch64/iterators.md               |  6 ++++++
+ gcc/testsuite/gcc.target/aarch64/pr120986-1.c | 10 ++++++++++
+ 3 files changed, 24 insertions(+), 8 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.target/aarch64/pr120986-1.c
+
+diff --git a/gcc/config/aarch64/aarch64-sve2.md b/gcc/config/aarch64/aarch64-sve2.md
+index 5860e417979a..fb9c0fcc39ee 100644
+--- a/gcc/config/aarch64/aarch64-sve2.md
++++ b/gcc/config/aarch64/aarch64-sve2.md
+@@ -2161,14 +2161,14 @@
+ ;; - FDOT (2-way, indexed) (FP8DOT2)
+ ;; -------------------------------------------------------------------------
+ (define_insn "@aarch64_sve_dot<mode>"
+-  [(set (match_operand:SVE_FULL_HSF 0 "register_operand")
+-	(unspec:SVE_FULL_HSF
+-	  [(match_operand:SVE_FULL_HSF 1 "register_operand")
++  [(set (match_operand:SVE_FULL_HSF_FP8_FDOT 0 "register_operand")
++	(unspec:SVE_FULL_HSF_FP8_FDOT
++	  [(match_operand:SVE_FULL_HSF_FP8_FDOT 1 "register_operand")
+ 	   (match_operand:VNx16QI 2 "register_operand")
+ 	   (match_operand:VNx16QI 3 "register_operand")
+ 	   (reg:DI FPM_REGNUM)]
+ 	  UNSPEC_DOT_FP8))]
+-  "TARGET_SSVE_FP8DOT4 && !(<MODE>mode == VNx8HFmode && !TARGET_SSVE_FP8DOT2)"
++  ""
+   {@ [ cons: =0 , 1 , 2 , 3 ; attrs: movprfx ]
+      [ w        , 0 , w , w ; *              ] fdot\t%0.<Vetype>, %2.b, %3.b
+      [ ?&w      , w , w , w ; yes            ] movprfx\t%0, %1\;fdot\t%0.<Vetype>, %2.b, %3.b
+@@ -2176,15 +2176,15 @@
+ )
+ 
+ (define_insn "@aarch64_sve_dot_lane<mode>"
+-  [(set (match_operand:SVE_FULL_HSF 0 "register_operand")
+-	(unspec:SVE_FULL_HSF
+-	  [(match_operand:SVE_FULL_HSF 1 "register_operand")
++  [(set (match_operand:SVE_FULL_HSF_FP8_FDOT 0 "register_operand")
++	(unspec:SVE_FULL_HSF_FP8_FDOT
++	  [(match_operand:SVE_FULL_HSF_FP8_FDOT 1 "register_operand")
+ 	   (match_operand:VNx16QI 2 "register_operand")
+ 	   (match_operand:VNx16QI 3 "register_operand")
+ 	   (match_operand:SI 4 "const_int_operand")
+ 	   (reg:DI FPM_REGNUM)]
+ 	  UNSPEC_DOT_LANE_FP8))]
+-  "TARGET_SSVE_FP8DOT4 && !(<MODE>mode == VNx8HFmode && !TARGET_SSVE_FP8DOT2)"
++  ""
+   {@ [ cons: =0 , 1 , 2 , 3 ; attrs: movprfx ]
+      [ w        , 0 , w , y ; *              ] fdot\t%0.<Vetype>, %2.b, %3.b[%4]
+      [ ?&w      , w , w , y ; yes            ] movprfx\t%0, %1\;fdot\t%0.<Vetype>, %2.b, %3.b[%4]
+diff --git a/gcc/config/aarch64/iterators.md b/gcc/config/aarch64/iterators.md
+index c4544ecf2f32..47a9bdf2d038 100644
+--- a/gcc/config/aarch64/iterators.md
++++ b/gcc/config/aarch64/iterators.md
+@@ -529,6 +529,12 @@
+ ;; elements.
+ (define_mode_iterator SVE_FULL_HSF [VNx8HF VNx4SF])
+ 
++;; Like SVE_FULL_HSF, but selectively enables those modes that are valid
++;; for the variant of the SVE2 FP8 FDOT instruction associated with that
++;; mode.
++(define_mode_iterator SVE_FULL_HSF_FP8_FDOT [(VNx4SF "TARGET_SSVE_FP8DOT4")
++					     (VNx8HF "TARGET_SSVE_FP8DOT2")])
++
+ ;; Fully-packed SVE integer vector modes that have 16-bit or 64-bit elements.
+ (define_mode_iterator SVE_FULL_HDI [VNx8HI VNx2DI])
+ 
+diff --git a/gcc/testsuite/gcc.target/aarch64/pr120986-1.c b/gcc/testsuite/gcc.target/aarch64/pr120986-1.c
+new file mode 100644
+index 000000000000..e3bc56c4afe9
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/aarch64/pr120986-1.c
+@@ -0,0 +1,10 @@
++/* { dg-do compile } */
++/* { dg-options "-O2 -march=armv8.2-a+sve2+fp8dot2" } */
++#include <arm_sve.h>
++
++/* This triggered an ICE with an unrecognizable insn due to incorrect gating of
++   the insn in the backend.  */
++svfloat16_t foo(svfloat16_t a, svmfloat8_t b, svmfloat8_t c, unsigned long fpm)
++{
++  return svdot_lane_fpm (a, b, c, 0, fpm);
++}
+-- 
+2.43.7
+
+

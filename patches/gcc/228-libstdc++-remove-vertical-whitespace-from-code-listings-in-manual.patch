@@ -1,0 +1,1641 @@
+From 41b54f4844e857ac2c929a88af95cb2bcc8f2b60 Mon Sep 17 00:00:00 2001
+From: Jonathan Wakely <jwakely@redhat.com>
+Date: Wed, 19 Nov 2025 09:43:10 +0000
+Subject: [PATCH] libstdc++: Remove vertical whitespace from code listings in
+ manual
+
+This removes unnecessary whitespace following <pre> blocks in the HTML
+output.
+
+libstdc++-v3/ChangeLog:
+
+	* doc/xml/faq.xml: Remove unwanted whitespace inside
+	programlisting elements.
+	* doc/xml/manual/allocator.xml: Likewise.
+	* doc/xml/manual/auto_ptr.xml: Likewise.
+	* doc/xml/manual/backwards_compatibility.xml: Likewise.
+	* doc/xml/manual/build_hacking.xml: Likewise.
+	* doc/xml/manual/containers.xml: Likewise.
+	* doc/xml/manual/diagnostics.xml: Likewise.
+	* doc/xml/manual/extensions.xml: Likewise.
+	* doc/xml/manual/intro.xml: Likewise.
+	* doc/xml/manual/io.xml: Likewise.
+	* doc/xml/manual/iterators.xml: Likewise.
+	* doc/xml/manual/numerics.xml: Likewise.
+	* doc/xml/manual/policy_data_structures.xml: Likewise.
+	* doc/xml/manual/strings.xml: Likewise.
+	* doc/xml/manual/support.xml: Likewise.
+	* doc/xml/manual/test.xml: Likewise.
+	* doc/xml/manual/using.xml: Likewise.
+	* doc/xml/manual/utilities.xml: Likewise.
+	* doc/html/*: Regenerate.
+
+(cherry picked from commit d0e0f6beb18a0109a481789803a453b438f79e24)
+---
+ libstdc++-v3/doc/html/faq.html                |  2 +-
+ .../doc/html/manual/appendix_porting.html     |  4 +-
+ libstdc++-v3/doc/html/manual/associative.html |  8 ++--
+ libstdc++-v3/doc/html/manual/backwards.html   |  2 +-
+ .../doc/html/manual/containers_and_c.html     |  4 +-
+ libstdc++-v3/doc/html/manual/diagnostics.html |  2 +-
+ .../doc/html/manual/dynamic_memory.html       |  4 +-
+ .../doc/html/manual/ext_containers.html       |  2 +-
+ .../doc/html/manual/ext_demangling.html       |  2 +-
+ libstdc++-v3/doc/html/manual/ext_sgi.html     |  2 +-
+ .../generalized_numeric_operations.html       |  2 +-
+ libstdc++-v3/doc/html/manual/io.html          |  6 +--
+ libstdc++-v3/doc/html/manual/io_and_c.html    |  4 +-
+ libstdc++-v3/doc/html/manual/iterators.html   |  2 +-
+ libstdc++-v3/doc/html/manual/memory.html      | 14 +++----
+ libstdc++-v3/doc/html/manual/pairs.html       |  8 ++--
+ .../manual/policy_data_structures_design.html |  2 +-
+ libstdc++-v3/doc/html/manual/setup.html       |  2 +-
+ libstdc++-v3/doc/html/manual/streambufs.html  |  2 +-
+ libstdc++-v3/doc/html/manual/strings.html     |  8 ++--
+ libstdc++-v3/doc/html/manual/support.html     |  2 +-
+ libstdc++-v3/doc/html/manual/termination.html |  2 +-
+ libstdc++-v3/doc/html/manual/test.html        | 12 +++---
+ .../html/manual/unordered_associative.html    |  2 +-
+ .../doc/html/manual/using_concurrency.html    |  2 +-
+ libstdc++-v3/doc/xml/faq.xml                  |  4 +-
+ libstdc++-v3/doc/xml/manual/allocator.xml     | 10 ++---
+ libstdc++-v3/doc/xml/manual/auto_ptr.xml      | 20 +++++-----
+ .../xml/manual/backwards_compatibility.xml    |  4 +-
+ libstdc++-v3/doc/xml/manual/build_hacking.xml |  8 ++--
+ libstdc++-v3/doc/xml/manual/containers.xml    | 28 ++++++-------
+ libstdc++-v3/doc/xml/manual/diagnostics.xml   |  4 +-
+ libstdc++-v3/doc/xml/manual/extensions.xml    | 24 +++++------
+ libstdc++-v3/doc/xml/manual/intro.xml         |  4 +-
+ libstdc++-v3/doc/xml/manual/io.xml            | 40 +++++++++----------
+ libstdc++-v3/doc/xml/manual/iterators.xml     |  4 +-
+ libstdc++-v3/doc/xml/manual/numerics.xml      |  4 +-
+ .../doc/xml/manual/policy_data_structures.xml |  4 +-
+ libstdc++-v3/doc/xml/manual/strings.xml       | 32 +++++++--------
+ libstdc++-v3/doc/xml/manual/support.xml       | 16 ++++----
+ libstdc++-v3/doc/xml/manual/test.xml          | 12 +++---
+ libstdc++-v3/doc/xml/manual/using.xml         |  8 ++--
+ libstdc++-v3/doc/xml/manual/utilities.xml     | 16 ++++----
+ 43 files changed, 172 insertions(+), 172 deletions(-)
+
+diff --git a/libstdc++-v3/doc/html/faq.html b/libstdc++-v3/doc/html/faq.html
+index 9bd477f1395d..ba887ae2061a 100644
+--- a/libstdc++-v3/doc/html/faq.html
++++ b/libstdc++-v3/doc/html/faq.html
+@@ -597,7 +597,7 @@
+     // .
+     fs.close();
+     fs.open("a_new_file");
+-    </pre><p>
++</pre><p>
+     All operations on the re-opened <code class="varname">fs</code> would fail, or at
+     least act very strangely, especially if <code class="varname">fs</code> reached the
+     EOF state on the previous file.
+diff --git a/libstdc++-v3/doc/html/manual/appendix_porting.html b/libstdc++-v3/doc/html/manual/appendix_porting.html
+index c76ef295e782..fff1c73c5c56 100644
+--- a/libstdc++-v3/doc/html/manual/appendix_porting.html
++++ b/libstdc++-v3/doc/html/manual/appendix_porting.html
+@@ -113,13 +113,13 @@ in the build directory starts the build process. The <code class="literal">all</
+     GLIBCXX_CHECK_HOST
+     GLIBCXX_TOPREL_CONFIGURE
+     GLIBCXX_CONFIGURE
+-  </pre><p>
++</pre><p>
+     All the major variable "discovery" is done here.
+     <code class="varname">CXX</code>, multilibs,
+     etc.
+   </p><pre class="programlisting">
+     fragments included from elsewhere
+-  </pre><p>
++</pre><p>
+     Right now, "fragments" == "the math/linkage bits".
+   </p><pre class="programlisting">
+     GLIBCXX_CHECK_COMPILER_FEATURES
+diff --git a/libstdc++-v3/doc/html/manual/associative.html b/libstdc++-v3/doc/html/manual/associative.html
+index 23916fb1631c..dda188682ba9 100644
+--- a/libstdc++-v3/doc/html/manual/associative.html
++++ b/libstdc++-v3/doc/html/manual/associative.html
+@@ -7,7 +7,7 @@
+      function for all of the associative containers (map, set, etc):
+    </p><pre class="programlisting">
+       a.insert(p,t);
+-   </pre><p>
++</pre><p>
+      where 'p' is an iterator into the container 'a', and 't' is the
+      item to insert.  The standard says that <span class="quote">â<span class="quote"><code class="code">t</code> is
+      inserted as close as possible to the position just prior to
+@@ -93,7 +93,7 @@
+ 	  std::bitset&lt;n&gt;   bits;
+ 	  ....
+       }
+-   </pre><p>
++</pre><p>
+      because <code class="code">n</code> must be known at compile time.  Your
+      compiler is correct; it is not a bug.  That's the way templates
+      work.  (Yes, it <span class="emphasis"><em>is</em></span> a feature.)
+@@ -181,11 +181,11 @@
+      constructor expression:
+    </p><pre class="programlisting">
+       std::bitset&lt;5&gt; b ( std::string("10110") );
+-   </pre><p>
++</pre><p>
+      instead of
+    </p><pre class="programlisting">
+       std::bitset&lt;5&gt; b ( "10110" );    // invalid
+-    </pre></div></div></div><div class="navfooter"><hr /><table width="100%" summary="Navigation footer"><tr><td width="40%" align="left"><a accesskey="p" href="containers.html">Prev</a>Â </td><td width="20%" align="center"><a accesskey="u" href="containers.html">Up</a></td><td width="40%" align="right">Â <a accesskey="n" href="unordered_associative.html">Next</a></td></tr><tr><td width="40%" align="left" valign="top">ChapterÂ 9.Â 
++</pre></div></div></div><div class="navfooter"><hr /><table width="100%" summary="Navigation footer"><tr><td width="40%" align="left"><a accesskey="p" href="containers.html">Prev</a>Â </td><td width="20%" align="center"><a accesskey="u" href="containers.html">Up</a></td><td width="40%" align="right">Â <a accesskey="n" href="unordered_associative.html">Next</a></td></tr><tr><td width="40%" align="left" valign="top">ChapterÂ 9.Â 
+   Containers
+   
+ Â </td><td width="20%" align="center"><a accesskey="h" href="../index.html">Home</a></td><td width="40%" align="right" valign="top">Â Unordered Associative</td></tr></table></div></body></html>
+\ No newline at end of file
+diff --git a/libstdc++-v3/doc/html/manual/backwards.html b/libstdc++-v3/doc/html/manual/backwards.html
+index f52e09d7dc2c..a39dce883cb0 100644
+--- a/libstdc++-v3/doc/html/manual/backwards.html
++++ b/libstdc++-v3/doc/html/manual/backwards.html
+@@ -85,7 +85,7 @@ and  <code class="filename">&lt;unordered_set&gt;</code> instead.
+       #endif
+ 
+       extension::hash_map&lt;int,int&gt; my_map;
+-      </pre><p>This is a bit cleaner than defining typedefs for all the
++</pre><p>This is a bit cleaner than defining typedefs for all the
+ 	 instantiations you might need.
+       </p><p>The following autoconf tests check for working HP/SGI hash containers.
+ </p><pre class="programlisting">
+diff --git a/libstdc++-v3/doc/html/manual/containers_and_c.html b/libstdc++-v3/doc/html/manual/containers_and_c.html
+index 7afdab501d4c..0dbf533c28f8 100644
+--- a/libstdc++-v3/doc/html/manual/containers_and_c.html
++++ b/libstdc++-v3/doc/html/manual/containers_and_c.html
+@@ -35,7 +35,7 @@
+      The result is that if all your algorithm calls look like
+    </p><pre class="programlisting">
+    std::transform(beginof(foo), endof(foo), beginof(foo), SomeFunction);
+-   </pre><p>
++</pre><p>
+      then the type of foo can change from an array of ints to a vector
+      of ints to a deque of ints and back again, without ever changing
+      any client code.
+@@ -81,7 +81,7 @@ template&lt;typename T, unsigned int sz&gt;
+      Second, the line
+    </p><pre class="programlisting">
+     inline unsigned int lengthof (T (&amp;)[sz]) { return sz; }
+-   </pre><p>
++</pre><p>
+      looks just weird!  Hint:  unused parameters can be left nameless.
+    </p></div></div><div class="navfooter"><hr /><table width="100%" summary="Navigation footer"><tr><td width="40%" align="left"><a accesskey="p" href="unordered_associative.html">Prev</a>Â </td><td width="20%" align="center"><a accesskey="u" href="containers.html">Up</a></td><td width="40%" align="right">Â <a accesskey="n" href="iterators.html">Next</a></td></tr><tr><td width="40%" align="left" valign="top">Unordered AssociativeÂ </td><td width="20%" align="center"><a accesskey="h" href="../index.html">Home</a></td><td width="40%" align="right" valign="top">Â ChapterÂ 10.Â 
+   Iterators
+diff --git a/libstdc++-v3/doc/html/manual/diagnostics.html b/libstdc++-v3/doc/html/manual/diagnostics.html
+index 23eb1a8189af..c0c8e24651ff 100644
+--- a/libstdc++-v3/doc/html/manual/diagnostics.html
++++ b/libstdc++-v3/doc/html/manual/diagnostics.html
+@@ -51,4 +51,4 @@
+        int    e;
+        DBID   id;     // some user-defined type
+    };
+-   </pre></div></div></div><div class="navfooter"><hr /><table width="100%" summary="Navigation footer"><tr><td width="40%" align="left"><a accesskey="p" href="termination.html">Prev</a>Â </td><td width="20%" align="center"><a accesskey="u" href="std_contents.html">Up</a></td><td width="40%" align="right">Â <a accesskey="n" href="errno.html">Next</a></td></tr><tr><td width="40%" align="left" valign="top">TerminationÂ </td><td width="20%" align="center"><a accesskey="h" href="../index.html">Home</a></td><td width="40%" align="right" valign="top">Â Use of errno by the library</td></tr></table></div></body></html>
+\ No newline at end of file
++</pre></div></div></div><div class="navfooter"><hr /><table width="100%" summary="Navigation footer"><tr><td width="40%" align="left"><a accesskey="p" href="termination.html">Prev</a>Â </td><td width="20%" align="center"><a accesskey="u" href="std_contents.html">Up</a></td><td width="40%" align="right">Â <a accesskey="n" href="errno.html">Next</a></td></tr><tr><td width="40%" align="left" valign="top">TerminationÂ </td><td width="20%" align="center"><a accesskey="h" href="../index.html">Home</a></td><td width="40%" align="right" valign="top">Â Use of errno by the library</td></tr></table></div></body></html>
+\ No newline at end of file
+diff --git a/libstdc++-v3/doc/html/manual/dynamic_memory.html b/libstdc++-v3/doc/html/manual/dynamic_memory.html
+index 9b7a1fc06442..36a5a415ef79 100644
+--- a/libstdc++-v3/doc/html/manual/dynamic_memory.html
++++ b/libstdc++-v3/doc/html/manual/dynamic_memory.html
+@@ -111,7 +111,7 @@
+       else
+         throw bad_alloc{};
+     }
+-   </pre><p>
++</pre><p>
+      This means you can influence what happens on allocation failure by
+      writing your own new-handler and then registering it with
+      <code class="function">std::set_new_handler</code>:
+@@ -138,7 +138,7 @@
+        old_handler = set_new_handler (&amp;my_new_handler);
+        ...
+    }
+-   </pre><div class="section"><div class="titlepage"><div><div><h3 class="title"><a id="std.support.memory.notes"></a>Additional Notes</h3></div></div></div><p>
++</pre><div class="section"><div class="titlepage"><div><div><h3 class="title"><a id="std.support.memory.notes"></a>Additional Notes</h3></div></div></div><p>
+      Remember that it is perfectly okay to <code class="function">delete</code> a
+      null pointer!  Nothing happens, by definition.  That is not the
+      same thing as deleting a pointer twice.
+diff --git a/libstdc++-v3/doc/html/manual/ext_containers.html b/libstdc++-v3/doc/html/manual/ext_containers.html
+index cba81484f5ba..660910f1042b 100644
+--- a/libstdc++-v3/doc/html/manual/ext_containers.html
++++ b/libstdc++-v3/doc/html/manual/ext_containers.html
+@@ -25,7 +25,7 @@
+    bitset&lt;N&gt;&amp;   _Unchecked_reset (size_t pos);
+    bitset&lt;N&gt;&amp;   _Unchecked_flip  (size_t pos);
+    bool         _Unchecked_test  (size_t pos);
+-   </pre><p>Note that these may in fact be removed in the future, although we have
++</pre><p>Note that these may in fact be removed in the future, although we have
+    no present plans to do so (and there doesn't seem to be any immediate
+    reason to).
+ </p><p>The member function <code class="code">operator[]</code> on a const bitset returns
+diff --git a/libstdc++-v3/doc/html/manual/ext_demangling.html b/libstdc++-v3/doc/html/manual/ext_demangling.html
+index 1eae99a1859b..0275830f3ba4 100644
+--- a/libstdc++-v3/doc/html/manual/ext_demangling.html
++++ b/libstdc++-v3/doc/html/manual/ext_demangling.html
+@@ -45,7 +45,7 @@ int main()
+   std::cout &lt;&lt; ti.name() &lt;&lt; "\t=&gt; " &lt;&lt; realname &lt;&lt; "\t: " &lt;&lt; status &lt;&lt; '\n';
+   std::free(realname);
+ }
+-   </pre><p>
++</pre><p>
+      This prints
+    </p><pre class="screen">
+    <code class="computeroutput">
+diff --git a/libstdc++-v3/doc/html/manual/ext_sgi.html b/libstdc++-v3/doc/html/manual/ext_sgi.html
+index 2310857804b3..5a796e79424f 100644
+--- a/libstdc++-v3/doc/html/manual/ext_sgi.html
++++ b/libstdc++-v3/doc/html/manual/ext_sgi.html
+@@ -11,7 +11,7 @@
+      &lt;rope&gt;
+      &lt;slist&gt;
+      &lt;rb_tree&gt;
+-   </pre><p>are all here;
++</pre><p>are all here;
+       <code class="filename">&lt;backwards/hash_map&gt;</code> and
+       <code class="filename">&lt;backwards/hash_set&gt;</code>
+       are deprecated but available as backwards-compatible extensions,
+diff --git a/libstdc++-v3/doc/html/manual/generalized_numeric_operations.html b/libstdc++-v3/doc/html/manual/generalized_numeric_operations.html
+index 8aa676040b5d..05539da45fd0 100644
+--- a/libstdc++-v3/doc/html/manual/generalized_numeric_operations.html
++++ b/libstdc++-v3/doc/html/manual/generalized_numeric_operations.html
+@@ -18,7 +18,7 @@
+    int  sum       = std::accumulate(ar,ar+50,0);
+    int  sum_stuff = std::accumulate(ar,ar+50,someval);
+    int  product   = std::accumulate(ar,ar+50,1,std::multiplies&lt;int&gt;());
+-   </pre><p>The first call adds all the members of the array, using zero as an
++</pre><p>The first call adds all the members of the array, using zero as an
+       initial value for <code class="code">sum</code>.  The second does the same, but uses
+       <code class="code">someval</code> as the starting value (thus, <code class="code">sum_stuff == sum +
+       someval</code>).  The final call uses the second of the two signatures,
+diff --git a/libstdc++-v3/doc/html/manual/io.html b/libstdc++-v3/doc/html/manual/io.html
+index 75a63f739c86..81c5597c6d4d 100644
+--- a/libstdc++-v3/doc/html/manual/io.html
++++ b/libstdc++-v3/doc/html/manual/io.html
+@@ -33,7 +33,7 @@
+     };
+ 
+     extern std::ostream&amp; operator&lt;&lt; (std::ostream&amp;, MyClass&amp;);
+-   </pre><p><span class="emphasis"><em><code class="filename">&lt;ios&gt;</code></em></span>
++</pre><p><span class="emphasis"><em><code class="filename">&lt;ios&gt;</code></em></span>
+       declares the base classes for the entire I/O stream hierarchy,
+       <code class="classname">std::ios_base</code> and <code class="classname">std::basic_ios&lt;charT&gt;</code>,
+       the counting types <span class="type">std::streamoff</span> and <span class="type">std::streamsize</span>,
+@@ -74,7 +74,7 @@
+     {
+        return os &lt;&lt; c.data1() &lt;&lt; c.data2();
+     }
+-   </pre><p>The <span class="type">std::istream</span> and <span class="type">std::ostream</span> classes
++</pre><p>The <span class="type">std::istream</span> and <span class="type">std::ostream</span> classes
+       are the abstract parents of
+       the various concrete implementations.  If you are only using the
+       interfaces, then you only need to use the appropriate interface header.
+@@ -111,7 +111,7 @@
+ 	// this is explained below
+ 	<span class="emphasis"><em>static ios_base::Init __foo;</em></span>    // not its real name
+     }
+-   </pre><p>Now, the runtime penalty mentioned previously:  the global objects
++</pre><p>Now, the runtime penalty mentioned previously:  the global objects
+       must be initialized before any of your own code uses them; this is
+       guaranteed by the standard.  Like any other global object, they must
+       be initialized once and only once.  This is typically done with a
+diff --git a/libstdc++-v3/doc/html/manual/io_and_c.html b/libstdc++-v3/doc/html/manual/io_and_c.html
+index dae1b739e569..753ff1068d6d 100644
+--- a/libstdc++-v3/doc/html/manual/io_and_c.html
++++ b/libstdc++-v3/doc/html/manual/io_and_c.html
+@@ -20,7 +20,7 @@
+      std::cout &lt;&lt; "Hel";
+      std::printf ("lo, worl");
+      std::cout &lt;&lt; "d!\n";
+-   </pre><p>This must do what you think it does.
++</pre><p>This must do what you think it does.
+    </p><p>Alert members of the audience will immediately notice that buffering
+       is going to make a hash of the output unless special steps are taken.
+    </p><p>The special steps taken by libstdc++, at least for version 3.0,
+@@ -40,7 +40,7 @@
+      #include <span class="emphasis"><em>any of the I/O headers such as ios, iostream, etc</em></span>
+ 
+      std::ios::sync_with_stdio(false);
+-   </pre><p>You must do this before performing any I/O via the C++ stream objects.
++</pre><p>You must do this before performing any I/O via the C++ stream objects.
+       Once you call this, the C++ streams will operate independently of the
+       (unused) C streams.  For GCC 3.x, this means that <code class="code">cout</code> and
+       company will become fully buffered on their own.
+diff --git a/libstdc++-v3/doc/html/manual/iterators.html b/libstdc++-v3/doc/html/manual/iterators.html
+index 874de4ad9ac5..dce887fa775e 100644
+--- a/libstdc++-v3/doc/html/manual/iterators.html
++++ b/libstdc++-v3/doc/html/manual/iterators.html
+@@ -90,7 +90,7 @@ classes.
+      |                       |           dereference 'end'.
+    beginning                end
+ 
+-   </pre><p>See?  Everything between the boundary markers is chapter of the array.
++</pre><p>See?  Everything between the boundary markers is chapter of the array.
+       Simple.
+    </p><p>Now think back to your junior-high school algebra course, when you
+       were learning how to draw graphs.  Remember that a graph terminating
+diff --git a/libstdc++-v3/doc/html/manual/memory.html b/libstdc++-v3/doc/html/manual/memory.html
+index e24af81e83b3..9dce18db1ea2 100644
+--- a/libstdc++-v3/doc/html/manual/memory.html
++++ b/libstdc++-v3/doc/html/manual/memory.html
+@@ -37,7 +37,7 @@
+        </p><pre class="programlisting">
+ 	 T*    allocate   (size_type n, const void* hint = 0);
+ 	 void  deallocate (T* p, size_type n);
+-       </pre><p>
++</pre><p>
+ 	 The <code class="varname">n</code> arguments in both those
+ 	 functions is a <span class="emphasis"><em>count</em></span> of the number of
+ 	 <span class="type">T</span>'s to allocate space for, <span class="emphasis"><em>not their
+@@ -192,7 +192,7 @@
+       Likewise, a debugging form of whichever allocator is currently in use:
+     </p><pre class="programlisting">
+     std::deque &lt;int, __gnu_cxx::debug_allocator&lt;std::allocator&lt;int&gt; &gt; &gt;  debug_deque;
+-      </pre></div><div class="section"><div class="titlepage"><div><div><h4 class="title"><a id="allocator.custom"></a>Custom Allocators</h4></div></div></div><p>
++</pre></div><div class="section"><div class="titlepage"><div><div><h4 class="title"><a id="allocator.custom"></a>Custom Allocators</h4></div></div></div><p>
+     Writing a portable C++ allocator would dictate that the interface
+     would look much like the one specified for
+     <code class="classname">allocator</code>. Additional member functions, but
+@@ -336,19 +336,19 @@
+ 
+ 	function_taking_MyClass_pointer (ap.get());
+     }
+-   </pre><p>When an exception gets thrown, the instance of MyClass that's
++</pre><p>When an exception gets thrown, the instance of MyClass that's
+       been created on the heap will be <code class="function">delete</code>'d as the stack is
+       unwound past <code class="function">func()</code>.
+    </p><p>Changing that code as follows is not <acronym class="acronym">AP</acronym>-friendly:
+    </p><pre class="programlisting">
+ 	APMC  ap (new MyClass[22]);
+-   </pre><p>You will get the same problems as you would without the use
++</pre><p>You will get the same problems as you would without the use
+       of <acronym class="acronym">AP</acronym>:
+    </p><pre class="programlisting">
+ 	char*  array = new char[10];       // array new...
+ 	...
+ 	delete array;                      // ...but single-object delete
+-   </pre><p>
++</pre><p>
+      AP cannot tell whether the pointer you've passed at creation points
+       to one or many things.  If it points to many things, you are about
+       to die.  AP is trivial to write, however, so you could write your
+@@ -363,7 +363,7 @@
+     {
+ 	My_Type (My_Type const&amp;);
+     };
+-   </pre><p>
++</pre><p>
+      Note the const keyword; the object being copied shouldn't change.
+      The template class <code class="code">auto_ptr</code> (called AP here) does not
+      meet this requirement.  Creating a new AP by copying an existing
+@@ -388,7 +388,7 @@
+     {
+ 	std::vector&lt; std::auto_ptr&lt;int&gt; &gt;   vec_ap_int;
+     }
+-   </pre><p>
++</pre><p>
+ Should you try this with the checks enabled, you will see an error.
+    </p></div></div><div class="section"><div class="titlepage"><div><div><h3 class="title"><a id="std.util.memory.shared_ptr"></a>shared_ptr</h3></div></div></div><p>
+ The shared_ptr class template stores a pointer, usually obtained via new,
+diff --git a/libstdc++-v3/doc/html/manual/pairs.html b/libstdc++-v3/doc/html/manual/pairs.html
+index 06f2ab678c55..e6f987a89161 100644
+--- a/libstdc++-v3/doc/html/manual/pairs.html
++++ b/libstdc++-v3/doc/html/manual/pairs.html
+@@ -11,12 +11,12 @@
+       with its respective default ctor.  The other simple ctor,
+    </p><pre class="programlisting">
+     pair (const T1&amp; x, const T2&amp; y);
+-   </pre><p>does what you think it does, <code class="code">first</code> getting <code class="code">x</code>
++</pre><p>does what you think it does, <code class="code">first</code> getting <code class="code">x</code>
+       and <code class="code">second</code> getting <code class="code">y</code>.
+    </p><p>There is a constructor template for copying pairs of other types:
+    </p><pre class="programlisting">
+     template &lt;class U, class V&gt; pair (const pair&lt;U,V&gt;&amp; p);
+-   </pre><p>The compiler will convert as necessary from U to T1 and from
++</pre><p>The compiler will convert as necessary from U to T1 and from
+       V to T2 in order to perform the respective initializations.
+    </p><p>The comparison operators are done for you.  Equality
+       of two <code class="code">pair&lt;T1,T2&gt;</code>s is defined as both <code class="code">first</code>
+@@ -30,14 +30,14 @@
+    </p><pre class="programlisting">
+     x.first  &lt;  y.first  ||
+ 	( !(y.first  &lt;  x.first)  &amp;&amp;  x.second  &lt;  y.second )
+-   </pre><p>The other operators are not defined using the <code class="code">rel_ops</code>
++</pre><p>The other operators are not defined using the <code class="code">rel_ops</code>
+       functions above, but their semantics are the same.
+    </p><p>Finally, there is a template function called <code class="function">make_pair</code>
+       that takes two references-to-const objects and returns an
+       instance of a pair instantiated on their respective types:
+    </p><pre class="programlisting">
+     pair&lt;int,MyClass&gt; p = make_pair(4,myobject);
+-   </pre></div><div class="navfooter"><hr /><table width="100%" summary="Navigation footer"><tr><td width="40%" align="left"><a accesskey="p" href="utilities.html">Prev</a>Â </td><td width="20%" align="center"><a accesskey="u" href="utilities.html">Up</a></td><td width="40%" align="right">Â <a accesskey="n" href="memory.html">Next</a></td></tr><tr><td width="40%" align="left" valign="top">ChapterÂ 6.Â 
++</pre></div><div class="navfooter"><hr /><table width="100%" summary="Navigation footer"><tr><td width="40%" align="left"><a accesskey="p" href="utilities.html">Prev</a>Â </td><td width="20%" align="center"><a accesskey="u" href="utilities.html">Up</a></td><td width="40%" align="right">Â <a accesskey="n" href="memory.html">Next</a></td></tr><tr><td width="40%" align="left" valign="top">ChapterÂ 6.Â 
+   Utilities
+   
+ Â </td><td width="20%" align="center"><a accesskey="h" href="../index.html">Home</a></td><td width="40%" align="right" valign="top">Â Memory</td></tr></table></div></body></html>
+\ No newline at end of file
+diff --git a/libstdc++-v3/doc/html/manual/policy_data_structures_design.html b/libstdc++-v3/doc/html/manual/policy_data_structures_design.html
+index 2b756663aa11..4e986f3f7010 100644
+--- a/libstdc++-v3/doc/html/manual/policy_data_structures_design.html
++++ b/libstdc++-v3/doc/html/manual/policy_data_structures_design.html
+@@ -387,7 +387,7 @@
+ 	{
+ 	...
+ 	}
+-      </pre><p>
++</pre><p>
+ 	then one needs to address the following questions in the body
+ 	of <code class="function">some_op_sequence</code>:
+       </p><div class="itemizedlist"><ul class="itemizedlist" style="list-style-type: disc; "><li class="listitem"><p>
+diff --git a/libstdc++-v3/doc/html/manual/setup.html b/libstdc++-v3/doc/html/manual/setup.html
+index 67bb6c108a1b..6d6613ba5f4c 100644
+--- a/libstdc++-v3/doc/html/manual/setup.html
++++ b/libstdc++-v3/doc/html/manual/setup.html
+@@ -16,7 +16,7 @@
+    make
+    make check
+    make install
+-   </pre><p>
++</pre><p>
+      Each step is described in more detail in the following sections.
+    </p><div class="section"><div class="titlepage"><div><div><h2 class="title" style="clear: both"><a id="manual.intro.setup.prereq"></a>Prerequisites</h2></div></div></div><p>
+   Because libstdc++ is part of GCC, the primary source for
+diff --git a/libstdc++-v3/doc/html/manual/streambufs.html b/libstdc++-v3/doc/html/manual/streambufs.html
+index e299d70cb0f1..c175054ceff1 100644
+--- a/libstdc++-v3/doc/html/manual/streambufs.html
++++ b/libstdc++-v3/doc/html/manual/streambufs.html
+@@ -52,7 +52,7 @@
+ 	    &lt;&lt; std::hex &lt;&lt; 31 &lt;&lt; std::endl;
+ 	return 0;
+     }
+-   </pre><p>Try it yourself!  More examples can be found in 3.1.x code, in
++</pre><p>Try it yourself!  More examples can be found in 3.1.x code, in
+       <code class="filename">include/ext/*_filebuf.h</code>, and in the article
+       <a class="link" href="http://gabisoft.free.fr/articles/fltrsbf1.html" target="_top">Filtering
+       Streambufs</a>
+diff --git a/libstdc++-v3/doc/html/manual/strings.html b/libstdc++-v3/doc/html/manual/strings.html
+index 5344d0e89238..605fce308d4c 100644
+--- a/libstdc++-v3/doc/html/manual/strings.html
++++ b/libstdc++-v3/doc/html/manual/strings.html
+@@ -47,7 +47,7 @@
+      capital_s.resize(s.size());
+      std::transform (s.begin(), s.end(), capital_s.begin(), ToUpper());
+    }
+-   </pre><p>
++</pre><p>
+      <span class="emphasis"><em>Note</em></span> that these calls all
+       involve the global C locale through the use of the C functions
+       <code class="code">toupper</code>/<code class="code">tolower</code>.
+@@ -82,7 +82,7 @@
+    </p><pre class="programlisting">
+      std::transform (s.begin(), s.end(), capital_s.begin(),
+                      [](unsigned char c) { return std::tolower(c); });
+-   </pre><p>Another common operation is trimming off excess whitespace.  Much
++</pre><p>Another common operation is trimming off excess whitespace.  Much
+       like transformations, this task is trivial with the use of string's
+       <code class="code">find</code> family.  These examples are broken into multiple
+       statements for readability:
+@@ -273,7 +273,7 @@ stringtok(Container &amp;container, string const &amp;in,
+       to GCC 3.4 the following alternative can be used instead
+    </p><pre class="programlisting">
+       std::string(str.data(), str.size()).swap(str);
+-   </pre><p>This is similar to the idiom for reducing
++</pre><p>This is similar to the idiom for reducing
+       a <code class="code">vector</code>'s memory usage
+       (see <a class="link" href="../faq.html#faq.size_equals_capacity" title="7.8.">this FAQ
+       entry</a>) but the regular copy constructor cannot be used
+@@ -347,7 +347,7 @@ stringtok(Container &amp;container, string const &amp;in,
+ 
+    If you replace CString with string in the above function, the
+    performance is O(n).
+-   </pre><p>Joe Buck also pointed out some other things to keep in mind when
++</pre><p>Joe Buck also pointed out some other things to keep in mind when
+       comparing CString and the Standard string class:
+    </p><div class="itemizedlist"><ul class="itemizedlist" style="list-style-type: disc; "><li class="listitem"><p>CString permits access to its internal representation; coders
+ 	     who exploited that may have problems moving to <code class="code">string</code>.
+diff --git a/libstdc++-v3/doc/html/manual/support.html b/libstdc++-v3/doc/html/manual/support.html
+index c7c1cfedcc94..cac1e8fd8df6 100644
+--- a/libstdc++-v3/doc/html/manual/support.html
++++ b/libstdc++-v3/doc/html/manual/support.html
+@@ -98,7 +98,7 @@
+        static const bool tinyness_before;
+        static const float_round_style round_style;
+      };
+-   </pre></div><div class="section"><div class="titlepage"><div><div><h3 class="title"><a id="std.support.types.null"></a>NULL</h3></div></div></div><p>
++</pre></div><div class="section"><div class="titlepage"><div><div><h3 class="title"><a id="std.support.types.null"></a>NULL</h3></div></div></div><p>
+      The only change that might affect people is the type of
+      <code class="constant">NULL</code>: while it is required to be a macro,
+      the definition of that macro is <span class="emphasis"><em>not</em></span> allowed
+diff --git a/libstdc++-v3/doc/html/manual/termination.html b/libstdc++-v3/doc/html/manual/termination.html
+index d30f0e0eaea2..42a5a594c55c 100644
+--- a/libstdc++-v3/doc/html/manual/termination.html
++++ b/libstdc++-v3/doc/html/manual/termination.html
+@@ -121,7 +121,7 @@ int main(int argc)
+      <code class="filename">&lt;cstdlib&gt;</code>, and call
+    </p><pre class="programlisting">
+      std::set_terminate(std::abort);
+-   </pre><p>
++</pre><p>
+      After this, all calls to <code class="function">terminate</code> will use
+      <code class="function">abort</code> as the terminate handler.
+    </p><p>
+diff --git a/libstdc++-v3/doc/html/manual/test.html b/libstdc++-v3/doc/html/manual/test.html
+index 947cd948d830..de8051346be0 100644
+--- a/libstdc++-v3/doc/html/manual/test.html
++++ b/libstdc++-v3/doc/html/manual/test.html
+@@ -17,7 +17,7 @@ regressions, ABI, and performance.
+   of the C++ standard (ISO 14882) are files within the following
+   directories:
+ 
+-   </p><pre class="programlisting">
++</p><pre class="programlisting">
+     17_intro
+     18_support
+     19_diagnostics
+@@ -32,7 +32,7 @@ regressions, ABI, and performance.
+     28_regex
+     29_atomics
+     30_threads
+-   </pre><p>
++</pre><p>
+ </p><p>
+       In addition, the following directories include test files:
+ 
+@@ -83,7 +83,7 @@ regressions, ABI, and performance.
+       This test case expects some kind of interactive input in order
+       to finish or pass. At the moment, the interactive tests are not
+       run by default. Instead, they are run by hand, like:
+-      <pre class="programlisting">
++<pre class="programlisting">
+ g++ 27_io/objects/char/3_xin.cc
+ cat 27_io/objects/char/3_xin.in | a.out</pre></dd><dt><span class="term"><code class="filename">.in</code></span></dt><dd>
+       This file contains the expected input for the corresponding <span class="emphasis"><em>
+@@ -198,7 +198,7 @@ cat 27_io/objects/char/3_xin.in | a.out</pre></dd><dt><span class="term"><code c
+       Also, here is an example of how to run the libstdc++ testsuite
+       for a multilibed build directory with different ABI settings:
+ 
+- </p><pre class="programlisting">
++</p><pre class="programlisting">
+     make check-target-libstdc++-v3 RUNTESTFLAGS='--target_board \"unix{-mabi=32,,-mabi=64}\"'
+ </pre><p>
+     </p><p>
+@@ -210,9 +210,9 @@ cat 27_io/objects/char/3_xin.in | a.out</pre></dd><dt><span class="term"><code c
+       run programs on, e.g. <code class="code">x86_64-pc-linux-gnu</code>, as a few tests
+       still execute the code they build.  Here's an example of how to run the
+       testsuite with libstdc++ in freestanding mode:
+-      </p><pre class="programlisting">
++</p><pre class="programlisting">
+     make check-target-libstdc++-v3 RUNTESTFLAGS='--target_board=unix/-ffreestanding'
+-      </pre><p>
++</pre><p>
+     </p><p>
+       You can run the tests with a compiler and library that have
+       already been installed.  Make sure that the compiler (e.g.,
+diff --git a/libstdc++-v3/doc/html/manual/unordered_associative.html b/libstdc++-v3/doc/html/manual/unordered_associative.html
+index 8811178f8146..d9aa1356d823 100644
+--- a/libstdc++-v3/doc/html/manual/unordered_associative.html
++++ b/libstdc++-v3/doc/html/manual/unordered_associative.html
+@@ -90,4 +90,4 @@
+           struct __is_fast_hash&lt;hasher&gt; : std::false_type
+           { };
+       }
+-    </pre></div></div></div><div class="navfooter"><hr /><table width="100%" summary="Navigation footer"><tr><td width="40%" align="left"><a accesskey="p" href="associative.html">Prev</a>Â </td><td width="20%" align="center"><a accesskey="u" href="containers.html">Up</a></td><td width="40%" align="right">Â <a accesskey="n" href="containers_and_c.html">Next</a></td></tr><tr><td width="40%" align="left" valign="top">AssociativeÂ </td><td width="20%" align="center"><a accesskey="h" href="../index.html">Home</a></td><td width="40%" align="right" valign="top">Â Interacting with C</td></tr></table></div></body></html>
+\ No newline at end of file
++</pre></div></div></div><div class="navfooter"><hr /><table width="100%" summary="Navigation footer"><tr><td width="40%" align="left"><a accesskey="p" href="associative.html">Prev</a>Â </td><td width="20%" align="center"><a accesskey="u" href="containers.html">Up</a></td><td width="40%" align="right">Â <a accesskey="n" href="containers_and_c.html">Next</a></td></tr><tr><td width="40%" align="left" valign="top">AssociativeÂ </td><td width="20%" align="center"><a accesskey="h" href="../index.html">Home</a></td><td width="40%" align="right" valign="top">Â Interacting with C</td></tr></table></div></body></html>
+\ No newline at end of file
+diff --git a/libstdc++-v3/doc/html/manual/using_concurrency.html b/libstdc++-v3/doc/html/manual/using_concurrency.html
+index 98875f3a04c9..b0a2d7156670 100644
+--- a/libstdc++-v3/doc/html/manual/using_concurrency.html
++++ b/libstdc++-v3/doc/html/manual/using_concurrency.html
+@@ -166,7 +166,7 @@ gcc version 4.1.2 20070925 (Red Hat 4.1.2-33)
+       t1.join();
+       t2.join();
+     }
+-      </pre><p>For further details of the C++11 memory model see Hans-J. Boehm's
++</pre><p>For further details of the C++11 memory model see Hans-J. Boehm's
+       <a class="link" href="https://www.hboehm.info/c++mm/" target="_top">Threads
+       and memory model for C++</a> pages, particularly the <a class="link" href="https://www.hboehm.info/c++mm/threadsintro.html" target="_top">introduction</a>
+       and <a class="link" href="https://www.hboehm.info/c++mm/user-faq.html" target="_top">FAQ</a>.
+diff --git a/libstdc++-v3/doc/xml/faq.xml b/libstdc++-v3/doc/xml/faq.xml
+index a1d6a2125dc6..92b81f2068c4 100644
+--- a/libstdc++-v3/doc/xml/faq.xml
++++ b/libstdc++-v3/doc/xml/faq.xml
+@@ -813,7 +813,7 @@
+     Executing a sequence like this would fail:
+     </para>
+ 
+-    <programlisting>
++<programlisting>
+     #include &lt;fstream&gt;
+     ...
+     std::fstream  fs("a_file");
+@@ -822,7 +822,7 @@
+     // .
+     fs.close();
+     fs.open("a_new_file");
+-    </programlisting>
++</programlisting>
+ 
+     <para>
+     All operations on the re-opened <varname>fs</varname> would fail, or at
+diff --git a/libstdc++-v3/doc/xml/manual/allocator.xml b/libstdc++-v3/doc/xml/manual/allocator.xml
+index f9fab499abcf..f5a2c7622f49 100644
+--- a/libstdc++-v3/doc/xml/manual/allocator.xml
++++ b/libstdc++-v3/doc/xml/manual/allocator.xml
+@@ -52,10 +52,10 @@
+ 	 typedefs, member functions, etc), but the two which concern us most
+ 	 are:
+        </para>
+-       <programlisting>
++<programlisting>
+ 	 T*    allocate   (size_type n, const void* hint = 0);
+ 	 void  deallocate (T* p, size_type n);
+-       </programlisting>
++</programlisting>
+ 
+        <para>
+ 	 The <varname>n</varname> arguments in both those
+@@ -291,14 +291,14 @@
+       (but non-portable) method of specifying that only <function>malloc</function> or <function>free</function>
+       should be used instead of the default node allocator is:
+    </para>
+-   <programlisting>
++<programlisting>
+     std::list &lt;int, __gnu_cxx::malloc_allocator&lt;int&gt; &gt;  malloc_list;</programlisting>
+     <para>
+       Likewise, a debugging form of whichever allocator is currently in use:
+     </para>
+-      <programlisting>
++<programlisting>
+     std::deque &lt;int, __gnu_cxx::debug_allocator&lt;std::allocator&lt;int&gt; &gt; &gt;  debug_deque;
+-      </programlisting>
++</programlisting>
+ </section>
+ 
+ <section xml:id="allocator.custom"><info><title>Custom Allocators</title></info>
+diff --git a/libstdc++-v3/doc/xml/manual/auto_ptr.xml b/libstdc++-v3/doc/xml/manual/auto_ptr.xml
+index f01e2d491b16..c382141f77f9 100644
+--- a/libstdc++-v3/doc/xml/manual/auto_ptr.xml
++++ b/libstdc++-v3/doc/xml/manual/auto_ptr.xml
+@@ -36,7 +36,7 @@
+      presence of exceptions.  That's <emphasis>all</emphasis>.  This
+      code is AP-friendly:
+    </para>
+-   <programlisting>
++<programlisting>
+     // Not a recommend naming scheme, but good for web-based FAQs.
+     typedef std::auto_ptr&lt;MyClass&gt;  APMC;
+ 
+@@ -51,24 +51,24 @@
+ 
+ 	function_taking_MyClass_pointer (ap.get());
+     }
+-   </programlisting>
++</programlisting>
+    <para>When an exception gets thrown, the instance of MyClass that's
+       been created on the heap will be <function>delete</function>'d as the stack is
+       unwound past <function>func()</function>.
+    </para>
+    <para>Changing that code as follows is not <acronym>AP</acronym>-friendly:
+    </para>
+-   <programlisting>
++<programlisting>
+ 	APMC  ap (new MyClass[22]);
+-   </programlisting>
++</programlisting>
+    <para>You will get the same problems as you would without the use
+       of <acronym>AP</acronym>:
+    </para>
+-   <programlisting>
++<programlisting>
+ 	char*  array = new char[10];       // array new...
+ 	...
+ 	delete array;                      // ...but single-object delete
+-   </programlisting>
++</programlisting>
+    <para>
+      AP cannot tell whether the pointer you've passed at creation points
+       to one or many things.  If it points to many things, you are about
+@@ -87,12 +87,12 @@
+       described in the standard library require their contained types
+       to have, among other things, a copy constructor like this:
+   </para>
+-   <programlisting>
++<programlisting>
+     struct My_Type
+     {
+ 	My_Type (My_Type const&amp;);
+     };
+-   </programlisting>
++</programlisting>
+    <para>
+      Note the const keyword; the object being copied shouldn't change.
+      The template class <code>auto_ptr</code> (called AP here) does not
+@@ -113,7 +113,7 @@
+       in to this implementation will issue an error if you try to
+       compile code like this:
+    </para>
+-   <programlisting>
++<programlisting>
+     #include &lt;vector&gt;
+     #include &lt;memory&gt;
+ 
+@@ -121,7 +121,7 @@
+     {
+ 	std::vector&lt; std::auto_ptr&lt;int&gt; &gt;   vec_ap_int;
+     }
+-   </programlisting>
++</programlisting>
+    <para>
+ Should you try this with the checks enabled, you will see an error.
+    </para>
+diff --git a/libstdc++-v3/doc/xml/manual/backwards_compatibility.xml b/libstdc++-v3/doc/xml/manual/backwards_compatibility.xml
+index 6a4a5ccedfbf..24993aa07d26 100644
+--- a/libstdc++-v3/doc/xml/manual/backwards_compatibility.xml
++++ b/libstdc++-v3/doc/xml/manual/backwards_compatibility.xml
+@@ -127,7 +127,7 @@ and  <filename class="headerfile">&lt;unordered_set&gt;</filename> instead.
+ 	 namespace. For maximum portability, consider defining a namespace
+ 	 alias to use to talk about extensions, e.g.:
+       </para>
+-      <programlisting>
++<programlisting>
+       #ifdef __GNUC__
+       #if __GNUC__ &lt; 3
+ 	#include &lt;hash_map.h&gt;
+@@ -145,7 +145,7 @@ and  <filename class="headerfile">&lt;unordered_set&gt;</filename> instead.
+       #endif
+ 
+       extension::hash_map&lt;int,int&gt; my_map;
+-      </programlisting>
++</programlisting>
+       <para>This is a bit cleaner than defining typedefs for all the
+ 	 instantiations you might need.
+       </para>
+diff --git a/libstdc++-v3/doc/xml/manual/build_hacking.xml b/libstdc++-v3/doc/xml/manual/build_hacking.xml
+index 077c0632a791..127131618a3e 100644
+--- a/libstdc++-v3/doc/xml/manual/build_hacking.xml
++++ b/libstdc++-v3/doc/xml/manual/build_hacking.xml
+@@ -173,19 +173,19 @@ in the build directory starts the build process. The <literal>all</literal> targ
+     we can arrange the contents however we like.  As of this writing,
+     <filename>acinclude.m4</filename> is arranged as follows:
+   </para>
+-  <programlisting>
++<programlisting>
+     GLIBCXX_CHECK_HOST
+     GLIBCXX_TOPREL_CONFIGURE
+     GLIBCXX_CONFIGURE
+-  </programlisting>
++</programlisting>
+   <para>
+     All the major variable "discovery" is done here.
+     <varname>CXX</varname>, multilibs,
+     etc.
+   </para>
+-  <programlisting>
++<programlisting>
+     fragments included from elsewhere
+-  </programlisting>
++</programlisting>
+   <para>
+     Right now, "fragments" == "the math/linkage bits".
+   </para>
+diff --git a/libstdc++-v3/doc/xml/manual/containers.xml b/libstdc++-v3/doc/xml/manual/containers.xml
+index 1758762b8822..f9cfb0583a15 100644
+--- a/libstdc++-v3/doc/xml/manual/containers.xml
++++ b/libstdc++-v3/doc/xml/manual/containers.xml
+@@ -86,9 +86,9 @@
+      Section [23.1.2], Table 69, of the C++ standard lists this
+      function for all of the associative containers (map, set, etc):
+    </para>
+-   <programlisting>
++<programlisting>
+       a.insert(p,t);
+-   </programlisting>
++</programlisting>
+    <para>
+      where 'p' is an iterator into the container 'a', and 't' is the
+      item to insert.  The standard says that <quote><code>t</code> is
+@@ -196,7 +196,7 @@
+ 	No, you cannot write code of the form
+       </para>
+       <!-- Careful, the leading spaces in PRE show up directly. -->
+-   <programlisting>
++<programlisting>
+       #include &lt;bitset&gt;
+ 
+       void foo (size_t n)
+@@ -204,7 +204,7 @@
+ 	  std::bitset&lt;n&gt;   bits;
+ 	  ....
+       }
+-   </programlisting>
++</programlisting>
+    <para>
+      because <code>n</code> must be known at compile time.  Your
+      compiler is correct; it is not a bug.  That's the way templates
+@@ -314,17 +314,17 @@
+      For now you can simply make a temporary string object using the
+      constructor expression:
+    </para>
+-   <programlisting>
++<programlisting>
+       std::bitset&lt;5&gt; b ( std::string("10110") );
+-   </programlisting>
++</programlisting>
+ 
+    <para>
+      instead of
+    </para>
+ 
+-    <programlisting>
++<programlisting>
+       std::bitset&lt;5&gt; b ( "10110" );    // invalid
+-    </programlisting>
++</programlisting>
+     </section>
+   </section>
+ 
+@@ -425,7 +425,7 @@
+       cached.
+       The trait can be specialized for user-defined hash functions like so:
+     </para>
+-    <programlisting>
++<programlisting>
+       #include &lt;unordered_set&gt;
+ 
+       struct hasher
+@@ -443,7 +443,7 @@
+           struct __is_fast_hash&lt;hasher&gt; : std::false_type
+           { };
+       }
+-    </programlisting>
++</programlisting>
+   </section>
+ </section>
+ 
+@@ -492,9 +492,9 @@
+    <para>
+      The result is that if all your algorithm calls look like
+    </para>
+-   <programlisting>
++<programlisting>
+    std::transform(beginof(foo), endof(foo), beginof(foo), SomeFunction);
+-   </programlisting>
++</programlisting>
+    <para>
+      then the type of foo can change from an array of ints to a vector
+      of ints to a deque of ints and back again, without ever changing
+@@ -545,9 +545,9 @@ template&lt;typename T, unsigned int sz&gt;
+    <para>
+      Second, the line
+    </para>
+-   <programlisting>
++<programlisting>
+     inline unsigned int lengthof (T (&amp;)[sz]) { return sz; }
+-   </programlisting>
++</programlisting>
+    <para>
+      looks just weird!  Hint:  unused parameters can be left nameless.
+    </para>
+diff --git a/libstdc++-v3/doc/xml/manual/diagnostics.xml b/libstdc++-v3/doc/xml/manual/diagnostics.xml
+index 86737cc4d4d9..21fe0294ab0b 100644
+--- a/libstdc++-v3/doc/xml/manual/diagnostics.xml
++++ b/libstdc++-v3/doc/xml/manual/diagnostics.xml
+@@ -64,7 +64,7 @@
+     place).  It's good to remember that you can add your own data to
+     these exceptions when extending the hierarchy:
+    </para>
+-   <programlisting>
++<programlisting>
+    struct My_Exception : public std::runtime_error
+    {
+      public:
+@@ -76,7 +76,7 @@
+        int    e;
+        DBID   id;     // some user-defined type
+    };
+-   </programlisting>
++</programlisting>
+ 
+   </section>
+ </section>
+diff --git a/libstdc++-v3/doc/xml/manual/extensions.xml b/libstdc++-v3/doc/xml/manual/extensions.xml
+index a8b7088ff25d..81f84002d1c3 100644
+--- a/libstdc++-v3/doc/xml/manual/extensions.xml
++++ b/libstdc++-v3/doc/xml/manual/extensions.xml
+@@ -161,13 +161,13 @@ extensions, be aware of two things:
+    do no range-checking.  If we call them member functions of an instantiation
+    of <code>bitset&lt;N&gt;</code>, then their names and signatures are:
+ </para>
+-   <programlisting>
++<programlisting>
+    bitset&lt;N&gt;&amp;   _Unchecked_set   (size_t pos);
+    bitset&lt;N&gt;&amp;   _Unchecked_set   (size_t pos, int val);
+    bitset&lt;N&gt;&amp;   _Unchecked_reset (size_t pos);
+    bitset&lt;N&gt;&amp;   _Unchecked_flip  (size_t pos);
+    bool         _Unchecked_test  (size_t pos);
+-   </programlisting>
++</programlisting>
+    <para>Note that these may in fact be removed in the future, although we have
+    no present plans to do so (and there doesn't seem to be any immediate
+    reason to).
+@@ -181,7 +181,7 @@ extensions, be aware of two things:
+    the index of the first "on" bit, and the index of the first
+    "on" bit that is after <code>prev</code>, respectively:
+ </para>
+-   <programlisting>
++<programlisting>
+    size_t _Find_first() const;
+    size_t _Find_next (size_t prev) const;</programlisting>
+ <para>The same caveat given for the _Unchecked_* functions applies here also.
+@@ -202,13 +202,13 @@ extensions, be aware of two things:
+    </para>
+ 
+    <para>The SGI headers</para>
+-   <programlisting>
++<programlisting>
+      &lt;hash_map&gt;
+      &lt;hash_set&gt;
+      &lt;rope&gt;
+      &lt;slist&gt;
+      &lt;rb_tree&gt;
+-   </programlisting>
++</programlisting>
+    <para>are all here;
+       <filename class="headerfile">&lt;backwards/hash_map&gt;</filename> and
+       <filename class="headerfile">&lt;backwards/hash_set&gt;</filename>
+@@ -346,14 +346,14 @@ get_temporary_buffer(5, (int*)0);
+    additional signatures return void, but take a final parameter by
+    reference to which they assign their results, e.g.,
+ </para>
+-   <programlisting>
++<programlisting>
+    void count (first, last, value, n);</programlisting>
+ <para>25.2 (mutating algorithms) is extended with two families of signatures,
+    random_sample and random_sample_n.
+ </para>
+ <para>25.2.1 (copy) is extended with
+ </para>
+-   <programlisting>
++<programlisting>
+    copy_n (_InputIter first, _Size count, _OutputIter result);</programlisting>
+ <para>which copies the first 'count' elements at 'first' into 'result'.
+ </para>
+@@ -367,7 +367,7 @@ get_temporary_buffer(5, (int*)0);
+    </itemizedlist>
+ <para>25.3.8 (lexicographical_compare) is extended with
+ </para>
+-   <programlisting>
++<programlisting>
+    lexicographical_compare_3way(_InputIter1 first1, _InputIter1 last1,
+ 				 _InputIter2 first2, _InputIter2 last2)</programlisting>
+ <para>which does... what?
+@@ -382,7 +382,7 @@ get_temporary_buffer(5, (int*)0);
+ <para>26.4, the generalized numeric operations such as <code>accumulate</code>,
+    are extended with the following functions:
+ </para>
+-   <programlisting>
++<programlisting>
+    power (x, n);
+    power (x, n, monoid_operation);</programlisting>
+ <para>Returns, in FORTRAN syntax, "<code>x ** n</code>" where
+@@ -399,7 +399,7 @@ get_temporary_buffer(5, (int*)0);
+    That is, it assigns <code>value</code> to <code>*first</code>,
+    <code>value + 1</code> to<code> *(first + 1)</code> and so on."
+ </para>
+-   <programlisting>
++<programlisting>
+    void iota(_ForwardIter first, _ForwardIter last, _Tp value);</programlisting>
+ <para>The <code>iota</code> function is included in the ISO C++ 2011 standard.
+ </para>
+@@ -523,7 +523,7 @@ get_temporary_buffer(5, (int*)0);
+     Probably the only time you'll be interested in demangling at runtime
+     is when you're seeing <code>typeid</code> strings in RTTI.  For example:
+   </para>
+-   <programlisting>
++<programlisting>
+ #include &lt;iostream&gt;
+ #include &lt;cstdlib&gt;
+ #include &lt;cxxabi.h&gt;
+@@ -546,7 +546,7 @@ int main()
+   std::cout &lt;&lt; ti.name() &lt;&lt; "\t=&gt; " &lt;&lt; realname &lt;&lt; "\t: " &lt;&lt; status &lt;&lt; '\n';
+   std::free(realname);
+ }
+-   </programlisting>
++</programlisting>
+    <para>
+      This prints
+    </para>
+diff --git a/libstdc++-v3/doc/xml/manual/intro.xml b/libstdc++-v3/doc/xml/manual/intro.xml
+index ed0b90d202bd..78e034b532c7 100644
+--- a/libstdc++-v3/doc/xml/manual/intro.xml
++++ b/libstdc++-v3/doc/xml/manual/intro.xml
+@@ -1336,7 +1336,7 @@ requirements of the license of GCC.
+    <para>The general outline of commands to build GCC is something like:
+    </para>
+ 
+-   <programlisting>
++<programlisting>
+    <replaceable>get gcc sources</replaceable>
+    <replaceable>extract into gccsrcdir</replaceable>
+    mkdir <replaceable>gccbuilddir</replaceable>
+@@ -1345,7 +1345,7 @@ requirements of the license of GCC.
+    make
+    make check
+    make install
+-   </programlisting>
++</programlisting>
+ 
+    <para>
+      Each step is described in more detail in the following sections.
+diff --git a/libstdc++-v3/doc/xml/manual/io.xml b/libstdc++-v3/doc/xml/manual/io.xml
+index d6fe2ce841d5..adc37cd84880 100644
+--- a/libstdc++-v3/doc/xml/manual/io.xml
++++ b/libstdc++-v3/doc/xml/manual/io.xml
+@@ -37,7 +37,7 @@
+       Look in the <filename class="headerfile">&lt;iosfwd&gt;</filename> header
+       if you'd like to know why.)  For example,
+    </para>
+-   <programlisting>
++<programlisting>
+     #include &lt;iosfwd&gt;
+ 
+     class MyClass
+@@ -47,7 +47,7 @@
+     };
+ 
+     extern std::ostream&amp; operator&lt;&lt; (std::ostream&amp;, MyClass&amp;);
+-   </programlisting>
++</programlisting>
+    <para><emphasis><filename class="headerfile">&lt;ios&gt;</filename></emphasis>
+       declares the base classes for the entire I/O stream hierarchy,
+       <classname>std::ios_base</classname> and <classname>std::basic_ios&lt;charT&gt;</classname>,
+@@ -87,14 +87,14 @@
+       or any of the other abstract stream formatting functions.
+       For example,
+    </para>
+-   <programlisting>
++<programlisting>
+     #include &lt;istream&gt;
+ 
+     std::ostream&amp; operator&lt;&lt; (std::ostream&amp; os, MyClass&amp; c)
+     {
+        return os &lt;&lt; c.data1() &lt;&lt; c.data2();
+     }
+-   </programlisting>
++</programlisting>
+    <para>The <type>std::istream</type> and <type>std::ostream</type> classes
+       are the abstract parents of
+       the various concrete implementations.  If you are only using the
+@@ -123,7 +123,7 @@
+       <filename class="headerfile">&lt;ostream&gt;</filename>
+       headers, but nothing else.  The contents of this header look like:
+    </para>
+-   <programlisting>
++<programlisting>
+     #include &lt;ostream&gt;
+     #include &lt;istream&gt;
+ 
+@@ -136,7 +136,7 @@
+ 	// this is explained below
+ 	<emphasis>static ios_base::Init __foo;</emphasis>    // not its real name
+     }
+-   </programlisting>
++</programlisting>
+    <para>Now, the runtime penalty mentioned previously:  the global objects
+       must be initialized before any of your own code uses them; this is
+       guaranteed by the standard.  Like any other global object, they must
+@@ -201,7 +201,7 @@
+       assumes many things about the nature of the character type being
+       used (for more information, read the books or the newsgroups):
+    </para>
+-   <programlisting>
++<programlisting>
+     #include &lt;iostream&gt;
+     #include &lt;streambuf&gt;
+     #include &lt;locale&gt;
+@@ -238,7 +238,7 @@
+ 	    &lt;&lt; std::hex &lt;&lt; 31 &lt;&lt; std::endl;
+ 	return 0;
+     }
+-   </programlisting>
++</programlisting>
+    <para>Try it yourself!  More examples can be found in 3.1.x code, in
+       <filename>include/ext/*_filebuf.h</filename>, and in the article
+       <link xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="http://gabisoft.free.fr/articles/fltrsbf1.html">Filtering
+@@ -270,7 +270,7 @@
+       out as soon as possible, etc -- but the buffering is largely
+       wasted when doing this to a file:
+    </para>
+-   <programlisting>
++<programlisting>
+    output &lt;&lt; "a line of text" &lt;&lt; endl;
+    output &lt;&lt; some_data_variable &lt;&lt; endl;
+    output &lt;&lt; "another line of text" &lt;&lt; endl; </programlisting>
+@@ -278,7 +278,7 @@
+       and let the libraries and the system worry about the buffering.
+       If you need a newline, just write a newline:
+    </para>
+-   <programlisting>
++<programlisting>
+    output &lt;&lt; "a line of text\n"
+ 	  &lt;&lt; some_data_variable &lt;&lt; '\n'
+ 	  &lt;&lt; "another line of text\n"; </programlisting>
+@@ -290,7 +290,7 @@
+       <code>endl</code> if you also need a newline, or just flush the buffer
+       yourself:
+    </para>
+-   <programlisting>
++<programlisting>
+    output &lt;&lt; ...... &lt;&lt; flush;    // can use std::flush manipulator
+    output.flush();               // or call a member fn </programlisting>
+    <para>On the other hand, there are times when writing to a file should
+@@ -300,7 +300,7 @@
+       just to turn off the buffering <emphasis>before any I/O operations at
+       all</emphasis> have been done (note that opening counts as an I/O operation):
+    </para>
+-   <programlisting>
++<programlisting>
+    std::ofstream    os;
+    std::ifstream    is;
+    int   i;
+@@ -403,21 +403,21 @@
+       completely portably.  And since this is C++, you have an open
+       ifstream (call it IN) and an open ofstream (call it OUT):
+    </para>
+-   <programlisting>
++<programlisting>
+    #include &lt;fstream&gt;
+ 
+    std::ifstream  IN ("input_file");
+    std::ofstream  OUT ("output_file"); </programlisting>
+    <para>Here's the easiest way to get it completely wrong:
+    </para>
+-   <programlisting>
++<programlisting>
+    OUT &lt;&lt; IN;</programlisting>
+    <para>For those of you who don't already know why this doesn't work
+       (probably from having done it before), I invite you to quickly
+       create a simple text file called "input_file" containing
+       the sentence
+    </para>
+-      <programlisting>
++<programlisting>
+       The quick brown fox jumped over the lazy dog.</programlisting>
+    <para>surrounded by blank lines.  Code it up and try it.  The contents
+       of "output_file" may surprise you.
+@@ -440,7 +440,7 @@
+       using the <code>rdbuf()</code> member function.  Therefore, the easiest
+       way to copy the file is:
+    </para>
+-   <programlisting>
++<programlisting>
+    OUT &lt;&lt; IN.rdbuf();</programlisting>
+    <para>So what <emphasis>was</emphasis> happening with OUT&lt;&lt;IN?  Undefined
+       behavior, since that particular &lt;&lt; isn't defined by the Standard.
+@@ -619,14 +619,14 @@
+    <para>Because the C++ library includes the C library, both C-style and
+       C++-style I/O have to work at the same time.  For example:
+    </para>
+-   <programlisting>
++<programlisting>
+      #include &lt;iostream&gt;
+      #include &lt;cstdio&gt;
+ 
+      std::cout &lt;&lt; "Hel";
+      std::printf ("lo, worl");
+      std::cout &lt;&lt; "d!\n";
+-   </programlisting>
++</programlisting>
+    <para>This must do what you think it does.
+    </para>
+    <para>Alert members of the audience will immediately notice that buffering
+@@ -647,11 +647,11 @@
+       C++ I/O, then there's no need to sync with the C streams.  The right
+       thing to do in this case is to call
+    </para>
+-   <programlisting>
++<programlisting>
+      #include <emphasis>any of the I/O headers such as ios, iostream, etc</emphasis>
+ 
+      std::ios::sync_with_stdio(false);
+-   </programlisting>
++</programlisting>
+    <para>You must do this before performing any I/O via the C++ stream objects.
+       Once you call this, the C++ streams will operate independently of the
+       (unused) C streams.  For GCC 3.x, this means that <code>cout</code> and
+diff --git a/libstdc++-v3/doc/xml/manual/iterators.xml b/libstdc++-v3/doc/xml/manual/iterators.xml
+index d0b75084e05e..d4077a4c766a 100644
+--- a/libstdc++-v3/doc/xml/manual/iterators.xml
++++ b/libstdc++-v3/doc/xml/manual/iterators.xml
+@@ -111,7 +111,7 @@ classes.
+       of them as indexing 0 through n-1.  Think of them as <emphasis>boundary
+       markers</emphasis>:
+    </para>
+-   <programlisting>
++<programlisting>
+ 
+    beginning            end
+      |                   |
+@@ -131,7 +131,7 @@ classes.
+      |                       |           dereference 'end'.
+    beginning                end
+ 
+-   </programlisting>
++</programlisting>
+    <para>See?  Everything between the boundary markers is chapter of the array.
+       Simple.
+    </para>
+diff --git a/libstdc++-v3/doc/xml/manual/numerics.xml b/libstdc++-v3/doc/xml/manual/numerics.xml
+index bb1d45d6b3b4..d2ced6fd83d1 100644
+--- a/libstdc++-v3/doc/xml/manual/numerics.xml
++++ b/libstdc++-v3/doc/xml/manual/numerics.xml
+@@ -70,7 +70,7 @@
+    </itemizedlist>
+    <para>Here is a simple example of the two forms of <code>accumulate</code>.
+    </para>
+-   <programlisting>
++<programlisting>
+    int   ar[50];
+    int   someval = somefunction();
+ 
+@@ -79,7 +79,7 @@
+    int  sum       = std::accumulate(ar,ar+50,0);
+    int  sum_stuff = std::accumulate(ar,ar+50,someval);
+    int  product   = std::accumulate(ar,ar+50,1,std::multiplies&lt;int&gt;());
+-   </programlisting>
++</programlisting>
+    <para>The first call adds all the members of the array, using zero as an
+       initial value for <code>sum</code>.  The second does the same, but uses
+       <code>someval</code> as the starting value (thus, <code>sum_stuff == sum +
+diff --git a/libstdc++-v3/doc/xml/manual/policy_data_structures.xml b/libstdc++-v3/doc/xml/manual/policy_data_structures.xml
+index 305257c7404e..e6e89613769a 100644
+--- a/libstdc++-v3/doc/xml/manual/policy_data_structures.xml
++++ b/libstdc++-v3/doc/xml/manual/policy_data_structures.xml
+@@ -2735,14 +2735,14 @@
+ 	a generic container object, what is the behavior of the object?
+ 	Suppose one writes
+       </para>
+-      <programlisting>
++<programlisting>
+ 	template&lt;typename Cntnr&gt;
+ 	void
+ 	some_op_sequence(Cntnr &amp;r_container)
+ 	{
+ 	...
+ 	}
+-      </programlisting>
++</programlisting>
+ 
+       <para>
+ 	then one needs to address the following questions in the body
+diff --git a/libstdc++-v3/doc/xml/manual/strings.xml b/libstdc++-v3/doc/xml/manual/strings.xml
+index 58a78d01d239..c5417759ad91 100644
+--- a/libstdc++-v3/doc/xml/manual/strings.xml
++++ b/libstdc++-v3/doc/xml/manual/strings.xml
+@@ -31,7 +31,7 @@
+      This code will go through some iterations.  Here's a simple
+      version:
+    </para>
+-   <programlisting>
++<programlisting>
+    #include &lt;string&gt;
+    #include &lt;algorithm&gt;
+    #include &lt;cctype&gt;      // old &lt;ctype.h&gt;
+@@ -62,7 +62,7 @@
+      capital_s.resize(s.size());
+      std::transform (s.begin(), s.end(), capital_s.begin(), ToUpper());
+    }
+-   </programlisting>
++</programlisting>
+    <para>
+      <emphasis>Note</emphasis> that these calls all
+       involve the global C locale through the use of the C functions
+@@ -87,7 +87,7 @@
+       <!-- section 14.8.2.4 clause 16 in ISO 14882:1998  -->
+       At minimum, you can write short wrappers like
+    </para>
+-   <programlisting>
++<programlisting>
+    char toLower (char c)
+    {
+       // std::tolower(c) is undefined if c &lt; 0 so cast to unsigned char.
+@@ -100,16 +100,16 @@
+      which can perform the conversion to <code>unsigned char</code> and
+      also ensure the single-argument form of <code>std::lower</code> is used:
+    </para>
+-   <programlisting>
++<programlisting>
+      std::transform (s.begin(), s.end(), capital_s.begin(),
+                      [](unsigned char c) { return std::tolower(c); });
+-   </programlisting>
++</programlisting>
+    <para>Another common operation is trimming off excess whitespace.  Much
+       like transformations, this task is trivial with the use of string's
+       <code>find</code> family.  These examples are broken into multiple
+       statements for readability:
+    </para>
+-   <programlisting>
++<programlisting>
+    std::string  str (" \t blah blah blah    \n ");
+ 
+    // trim leading whitespace
+@@ -138,7 +138,7 @@
+       case-insensitive in the same way as the (common but nonstandard)
+       C function stricmp()</quote>.
+    </para>
+-   <programlisting>
++<programlisting>
+    ci_string s( "AbCdE" );
+ 
+    // case insensitive
+@@ -192,7 +192,7 @@
+       type parameters, which take default arguments based on the character
+       type (called <code>CharT</code> here):
+    </para>
+-   <programlisting>
++<programlisting>
+       template &lt;typename CharT,
+ 		typename Traits = char_traits&lt;CharT&gt;,
+ 		typename Alloc = allocator&lt;CharT&gt; &gt;
+@@ -205,7 +205,7 @@
+       template is <emphasis>declared</emphasis> but not <emphasis>defined</emphasis>.
+       That means there is only
+    </para>
+-   <programlisting>
++<programlisting>
+       template &lt;typename CharT&gt;
+ 	struct char_traits
+ 	{
+@@ -314,7 +314,7 @@ stringtok(Container &amp;container, string const &amp;in,
+    </para>
+ 
+ 
+-   <programlisting>
++<programlisting>
+    std::list&lt;string&gt;  ls;
+    stringtok (ls, " this  \t is\t\n  a test  ");
+    for (std::list&lt;string&gt;const_iterator i = ls.begin();
+@@ -324,7 +324,7 @@ stringtok(Container &amp;container, string const &amp;in,
+    } </programlisting>
+    <para>You would see this as output:
+    </para>
+-   <programlisting>
++<programlisting>
+    :this:
+    :is:
+    :a:
+@@ -358,9 +358,9 @@ stringtok(Container &amp;container, string const &amp;in,
+    <para>This behaviour is suggested, but not required by the standard. Prior
+       to GCC 3.4 the following alternative can be used instead
+    </para>
+-   <programlisting>
++<programlisting>
+       std::string(str.data(), str.size()).swap(str);
+-   </programlisting>
++</programlisting>
+    <para>This is similar to the idiom for reducing
+       a <code>vector</code>'s memory usage
+       (see <link linkend="faq.size_equals_capacity">this FAQ
+@@ -411,7 +411,7 @@ stringtok(Container &amp;container, string const &amp;in,
+       streams seamlessly because they inherit from the iostream
+       hierarchy.  An quick example:
+    </para>
+-   <programlisting>
++<programlisting>
+    #include &lt;iostream&gt;
+    #include &lt;string&gt;
+    #include &lt;sstream&gt;
+@@ -434,7 +434,7 @@ stringtok(Container &amp;container, string const &amp;in,
+    <para>A serious problem with CString is a design bug in its memory
+       allocation.  Specifically, quoting from that same message:
+    </para>
+-   <programlisting>
++<programlisting>
+    CString suffers from a common programming error that results in
+    poor performance.  Consider the following code:
+ 
+@@ -455,7 +455,7 @@ stringtok(Container &amp;container, string const &amp;in,
+ 
+    If you replace CString with string in the above function, the
+    performance is O(n).
+-   </programlisting>
++</programlisting>
+    <para>Joe Buck also pointed out some other things to keep in mind when
+       comparing CString and the Standard string class:
+    </para>
+diff --git a/libstdc++-v3/doc/xml/manual/support.xml b/libstdc++-v3/doc/xml/manual/support.xml
+index f4b41664f601..b7fb983fa4b2 100644
+--- a/libstdc++-v3/doc/xml/manual/support.xml
++++ b/libstdc++-v3/doc/xml/manual/support.xml
+@@ -100,7 +100,7 @@
+     and defined as follows:
+     </para>
+ 
+-   <programlisting>
++<programlisting>
+    template&lt;typename T&gt;
+      struct class
+      {
+@@ -139,7 +139,7 @@
+        static const bool tinyness_before;
+        static const float_round_style round_style;
+      };
+-   </programlisting>
++</programlisting>
+   </section>
+ 
+   <section xml:id="std.support.types.null" xreflabel="NULL"><info><title>NULL</title></info>
+@@ -327,7 +327,7 @@
+      by registering a <quote>new-handler</quote>, because what
+      <function>operator new</function> actually does is something like:
+    </para>
+-   <programlisting>
++<programlisting>
+     while (true)
+     {
+       if (void* p = /* try to allocate memory */)
+@@ -337,13 +337,13 @@
+       else
+         throw bad_alloc{};
+     }
+-   </programlisting>
++</programlisting>
+    <para>
+      This means you can influence what happens on allocation failure by
+      writing your own new-handler and then registering it with
+      <function>std::set_new_handler</function>:
+    </para>
+-   <programlisting>
++<programlisting>
+    typedef void (*PFV)();
+ 
+    static char*  safety;
+@@ -366,7 +366,7 @@
+        old_handler = set_new_handler (&amp;my_new_handler);
+        ...
+    }
+-   </programlisting>
++</programlisting>
+ 
+    <section xml:id="std.support.memory.notes" xreflabel="Dynamic Memory Notes"><info><title>Additional Notes</title></info>
+ 
+@@ -549,9 +549,9 @@ int main(int argc)
+      <filename class="headerfile">&lt;cstdlib&gt;</filename>, and call
+    </para>
+ 
+-   <programlisting>
++<programlisting>
+      std::set_terminate(std::abort);
+-   </programlisting>
++</programlisting>
+ 
+    <para>
+      After this, all calls to <function>terminate</function> will use
+diff --git a/libstdc++-v3/doc/xml/manual/test.xml b/libstdc++-v3/doc/xml/manual/test.xml
+index c4f501102dc7..db7422fa6655 100644
+--- a/libstdc++-v3/doc/xml/manual/test.xml
++++ b/libstdc++-v3/doc/xml/manual/test.xml
+@@ -39,7 +39,7 @@ regressions, ABI, and performance.
+   of the C++ standard (ISO 14882) are files within the following
+   directories:
+ 
+-   <programlisting>
++<programlisting>
+     17_intro
+     18_support
+     19_diagnostics
+@@ -54,7 +54,7 @@ regressions, ABI, and performance.
+     28_regex
+     29_atomics
+     30_threads
+-   </programlisting>
++</programlisting>
+ </para>
+ 
+    <para>
+@@ -167,7 +167,7 @@ regressions, ABI, and performance.
+       This test case expects some kind of interactive input in order
+       to finish or pass. At the moment, the interactive tests are not
+       run by default. Instead, they are run by hand, like:
+-      <programlisting>
++<programlisting>
+ g++ 27_io/objects/char/3_xin.cc
+ cat 27_io/objects/char/3_xin.in | a.out</programlisting>
+   </listitem>
+@@ -343,7 +343,7 @@ cat 27_io/objects/char/3_xin.in | a.out</programlisting>
+       Also, here is an example of how to run the libstdc++ testsuite
+       for a multilibed build directory with different ABI settings:
+ 
+- <programlisting>
++<programlisting>
+     make check-target-libstdc++-v3 RUNTESTFLAGS='--target_board \"unix{-mabi=32,,-mabi=64}\"'
+ </programlisting>
+     </para>
+@@ -357,9 +357,9 @@ cat 27_io/objects/char/3_xin.in | a.out</programlisting>
+       run programs on, e.g. <code>x86_64-pc-linux-gnu</code>, as a few tests
+       still execute the code they build.  Here's an example of how to run the
+       testsuite with libstdc++ in freestanding mode:
+-      <programlisting>
++<programlisting>
+     make check-target-libstdc++-v3 RUNTESTFLAGS='--target_board=unix/-ffreestanding'
+-      </programlisting>
++</programlisting>
+     </para>
+ 
+     <para>
+diff --git a/libstdc++-v3/doc/xml/manual/using.xml b/libstdc++-v3/doc/xml/manual/using.xml
+index 4b8f53d926ce..bec5419d587a 100644
+--- a/libstdc++-v3/doc/xml/manual/using.xml
++++ b/libstdc++-v3/doc/xml/manual/using.xml
+@@ -2018,7 +2018,7 @@ gcc version 4.1.2 20070925 (Red Hat 4.1.2-33)
+ 	 into great detail, here is an example which requires user-level
+ 	 locks:
+       </para>
+-      <programlisting>
++<programlisting>
+      library_class_a shared_object_a;
+ 
+      void thread_main () {
+@@ -2032,7 +2032,7 @@ gcc version 4.1.2 20070925 (Red Hat 4.1.2-33)
+ 	 another thread, here is an example that does not require any
+ 	 user-level locks:
+       </para>
+-      <programlisting>
++<programlisting>
+      void thread_main () {
+        library_class_a object_a;
+        library_class_b *object_b = new library_class_b;
+@@ -2089,7 +2089,7 @@ gcc version 4.1.2 20070925 (Red Hat 4.1.2-33)
+          globally-visible object, the library ensures that the reference
+          count updates are atomic and do not introduce data races:
+       </para>
+-      <programlisting>
++<programlisting>
+     std::shared_ptr&lt;int&gt; global_sp;
+ 
+     void thread_main() {
+@@ -2112,7 +2112,7 @@ gcc version 4.1.2 20070925 (Red Hat 4.1.2-33)
+       t1.join();
+       t2.join();
+     }
+-      </programlisting>
++</programlisting>
+ 
+       <para>For further details of the C++11 memory model see Hans-J. Boehm's
+       <link xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="https://www.hboehm.info/c++mm/">Threads
+diff --git a/libstdc++-v3/doc/xml/manual/utilities.xml b/libstdc++-v3/doc/xml/manual/utilities.xml
+index c2e013e34165..2bcbe28ea7ec 100644
+--- a/libstdc++-v3/doc/xml/manual/utilities.xml
++++ b/libstdc++-v3/doc/xml/manual/utilities.xml
+@@ -40,17 +40,17 @@
+    <para>Construction is simple.  The default ctor initializes each member
+       with its respective default ctor.  The other simple ctor,
+    </para>
+-   <programlisting>
++<programlisting>
+     pair (const T1&amp; x, const T2&amp; y);
+-   </programlisting>
++</programlisting>
+    <para>does what you think it does, <code>first</code> getting <code>x</code>
+       and <code>second</code> getting <code>y</code>.
+    </para>
+    <para>There is a constructor template for copying pairs of other types:
+    </para>
+-   <programlisting>
++<programlisting>
+     template &lt;class U, class V&gt; pair (const pair&lt;U,V&gt;&amp; p);
+-   </programlisting>
++</programlisting>
+    <para>The compiler will convert as necessary from U to T1 and from
+       V to T2 in order to perform the respective initializations.
+    </para>
+@@ -65,10 +65,10 @@
+       The less-than operator is a bit odd the first time you see it.  It
+       is defined as evaluating to:
+    </para>
+-   <programlisting>
++<programlisting>
+     x.first  &lt;  y.first  ||
+ 	( !(y.first  &lt;  x.first)  &amp;&amp;  x.second  &lt;  y.second )
+-   </programlisting>
++</programlisting>
+    <para>The other operators are not defined using the <code>rel_ops</code>
+       functions above, but their semantics are the same.
+    </para>
+@@ -76,9 +76,9 @@
+       that takes two references-to-const objects and returns an
+       instance of a pair instantiated on their respective types:
+    </para>
+-   <programlisting>
++<programlisting>
+     pair&lt;int,MyClass&gt; p = make_pair(4,myobject);
+-   </programlisting>
++</programlisting>
+ 
+ </section>
+ 
+-- 
+2.43.7
+
+

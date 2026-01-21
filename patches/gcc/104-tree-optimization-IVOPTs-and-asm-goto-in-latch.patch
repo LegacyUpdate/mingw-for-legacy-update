@@ -1,0 +1,83 @@
+From 6c02edca8d41e380d3da60e35faade7663400cc9 Mon Sep 17 00:00:00 2001
+From: Richard Biener <rguenther@suse.de>
+Date: Mon, 8 Sep 2025 14:32:38 +0200
+Subject: [PATCH] tree-optimization/121844 - IVOPTs and asm goto in latch
+
+When there's an asm goto in the latch of a loop we may not use
+IP_END IVs since instantiating those would (need to) split the
+latch edge which in turn invalidates IP_NORMAL position handling.
+This is a revision of the PR107997 fix.
+
+	PR tree-optimization/107997
+	PR tree-optimization/121844
+	* tree-ssa-loop-ivopts.cc (allow_ip_end_pos_p): Do not allow
+	IP_END for latches ending with a control stmt.
+	(create_new_iv): Do not split the latch edge, instead assert
+	that's not necessary.
+
+	* gcc.dg/torture/pr121844.c: New testcase.
+
+(cherry picked from commit 00cd34b1046076a3272f8e8e85c97dc8f4d2ea44)
+---
+ gcc/testsuite/gcc.dg/torture/pr121844.c | 16 ++++++++++++++++
+ gcc/tree-ssa-loop-ivopts.cc             | 13 +++++++------
+ 2 files changed, 23 insertions(+), 6 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.dg/torture/pr121844.c
+
+diff --git a/gcc/testsuite/gcc.dg/torture/pr121844.c b/gcc/testsuite/gcc.dg/torture/pr121844.c
+new file mode 100644
+index 000000000000..149d5eaab642
+--- /dev/null
++++ b/gcc/testsuite/gcc.dg/torture/pr121844.c
+@@ -0,0 +1,16 @@
++/* { dg-do compile } */
++
++typedef unsigned long a;
++int b[] = {};
++int **c;
++short d(a *e, int f)
++{
++  *c = &f;
++  for (;;)
++    asm goto("" : : : : g);
++  for (; f; f--) {
++    asm goto("" : : : : g);
++  g:
++    *e ^= b[f + 1];
++  }
++}
+diff --git a/gcc/tree-ssa-loop-ivopts.cc b/gcc/tree-ssa-loop-ivopts.cc
+index e37b24062f73..4469591e9e4c 100644
+--- a/gcc/tree-ssa-loop-ivopts.cc
++++ b/gcc/tree-ssa-loop-ivopts.cc
+@@ -3195,6 +3195,12 @@ add_candidate_1 (struct ivopts_data *data, tree base, tree step, bool important,
+ static bool
+ allow_ip_end_pos_p (class loop *loop)
+ {
++  /* Do not allow IP_END when creating the IV would need to split the
++     latch edge as that makes all IP_NORMAL invalid.  */
++  auto pos = gsi_last_bb (ip_end_pos (loop));
++  if (!gsi_end_p (pos) && stmt_ends_bb_p (*pos))
++    return false;
++
+   if (!ip_normal_pos (loop))
+     return true;
+ 
+@@ -7211,12 +7217,7 @@ create_new_iv (struct ivopts_data *data, struct iv_cand *cand)
+     case IP_END:
+       incr_pos = gsi_last_bb (ip_end_pos (data->current_loop));
+       after = true;
+-      if (!gsi_end_p (incr_pos) && stmt_ends_bb_p (gsi_stmt (incr_pos)))
+-	{
+-	  edge e = find_edge (gsi_bb (incr_pos), data->current_loop->header);
+-	  incr_pos = gsi_after_labels (split_edge (e));
+-	  after = false;
+-	}
++      gcc_assert (gsi_end_p (incr_pos) || !stmt_ends_bb_p (*incr_pos));
+       break;
+ 
+     case IP_AFTER_USE:
+-- 
+2.43.7
+
+

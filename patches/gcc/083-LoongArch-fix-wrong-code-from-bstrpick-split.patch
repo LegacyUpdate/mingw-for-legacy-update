@@ -1,0 +1,120 @@
+From 4dd2885905afde80da0498f381b0818b05bc9844 Mon Sep 17 00:00:00 2001
+From: Xi Ruoyao <xry111@xry111.site>
+Date: Fri, 12 Sep 2025 15:57:08 +0800
+Subject: [PATCH] LoongArch: Fix wrong code from bstrpick split
+
+After late-combine is added, split1 can see an input like
+
+    (insn 56 55 169 5
+      (set (reg/v:DI 87 [ n ])
+        (ior:DI (and:DI (reg/v:DI 87 [ n ])
+                        (const_int 281474976710655 [0xffffffffffff]))
+                (and:DI (reg:DI 131 [ _45 ])
+                        (const_int -281474976710656 [0xffff000000000000]))))
+      "pr121906.c":22:8 108 {*bstrins_di_for_ior_mask}
+      (nil))
+
+And the splitter ends up emitting
+
+    (insn 184 55 185 5
+      (set (reg/v:DI 87 [ n ])
+           (reg:DI 131 [ _45 ]))
+      "pr121906.c":22:8 -1
+      (nil))
+    (insn 185 184 169 5
+      (set (zero_extract:DI (reg/v:DI 87 [ n ])
+                            (const_int 48 [0x30])
+                            (const_int 0 [0]))
+           (reg/v:DI 87 [ n ]))
+      "pr121906.c":22:8 -1
+      (nil))
+
+which obviously lost everything in r87, instead of retaining its lower
+bits as we expect.  It's because the splitter didn't anticipate the
+output register may be one of the input registers.
+
+	PR target/121906
+
+gcc/
+
+	* config/loongarch/loongarch.md (*bstrins_<mode>_for_ior_mask):
+	Always create a new pseudo for the input register of the bstrins
+	instruction.
+
+gcc/testsuite/
+
+	* gcc.target/loongarch/pr121906.c: New test.
+
+(cherry picked from commit 290851e63a5b99c99eb196f2823ea3051c0f0214)
+---
+ gcc/config/loongarch/loongarch.md             | 14 ++++-----
+ gcc/testsuite/gcc.target/loongarch/pr121906.c | 31 +++++++++++++++++++
+ 2 files changed, 38 insertions(+), 7 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.target/loongarch/pr121906.c
+
+diff --git a/gcc/config/loongarch/loongarch.md b/gcc/config/loongarch/loongarch.md
+index 32ef9809b108..f42dc102d109 100644
+--- a/gcc/config/loongarch/loongarch.md
++++ b/gcc/config/loongarch/loongarch.md
+@@ -1619,13 +1619,13 @@
+     operands[2] = GEN_INT (len);
+     operands[4] = GEN_INT (lo);
+ 
+-    if (lo)
+-      {
+-	rtx tmp = gen_reg_rtx (<MODE>mode);
+-	emit_move_insn (tmp, gen_rtx_ASHIFTRT(<MODE>mode, operands[3],
+-					      GEN_INT (lo)));
+-	operands[3] = tmp;
+-      }
++    /* Use a new pseudo register even if lo == 0 or we'll wreck havoc
++       when operands[0] is same as operands[3].  See PR 121906.  */
++    rtx tmp = gen_reg_rtx (<MODE>mode);
++    rtx val = lo ? gen_rtx_ASHIFTRT (<MODE>mode, operands[3], GEN_INT (lo))
++		 : operands[3];
++    emit_move_insn (tmp, val);
++    operands[3] = tmp;
+   })
+ 
+ ;; We always avoid the shift operation in bstrins_<mode>_for_ior_mask
+diff --git a/gcc/testsuite/gcc.target/loongarch/pr121906.c b/gcc/testsuite/gcc.target/loongarch/pr121906.c
+new file mode 100644
+index 000000000000..b4fde5f0c854
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/loongarch/pr121906.c
+@@ -0,0 +1,31 @@
++/* PR target/121906 */
++/* { dg-do run } */
++/* { dg-options "-O2 -mno-lsx" } */
++
++typedef unsigned short u16;
++typedef unsigned long u64;
++typedef u16 v4hi __attribute__ ((vector_size (8)));
++typedef u16 v8hi __attribute__ ((vector_size (16)));
++
++u64 d;
++int e, i;
++u16 x;
++
++int
++main ()
++{
++  v4hi n = { 1 };
++  u64 *o = &d;
++p:
++  asm goto ("" : : : : q);
++  n[3] = (-(v8hi){ 0, 0, 0, 0, x })[7];
++  for (; e >= 0; e--)
++    {
++      *o = n[0];
++      if (i)
++        goto p;
++    q:
++    }
++  if (d != 1)
++    __builtin_trap ();
++}
+-- 
+2.43.7
+
+

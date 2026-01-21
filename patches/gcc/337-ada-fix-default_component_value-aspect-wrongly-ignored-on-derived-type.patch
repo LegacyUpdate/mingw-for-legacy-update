@@ -1,0 +1,80 @@
+From 8304ea8ecf9c4b10b4a901488e8c82dc5b158cf6 Mon Sep 17 00:00:00 2001
+From: Eric Botcazou <ebotcazou@adacore.com>
+Date: Mon, 20 Oct 2025 21:01:06 +0200
+Subject: [PATCH] Ada: Fix Default_Component_Value aspect wrongly ignored on
+ derived type
+
+This is again an old issue, which was mostly fixed a few releases ago except
+for the specific case of an array type derived from String.
+
+gcc/ada/
+	PR ada/68179
+	* exp_ch3.adb (Expand_Freeze_Array_Type): Build an initialization
+	procedure for a type derived from String declared with the aspect
+	Default_Aspect_Component_Value.
+
+gcc/testsuite/
+	* gnat.dg/component_value1.adb: New test.
+---
+ gcc/ada/exp_ch3.adb                        |  4 ++-
+ gcc/testsuite/gnat.dg/component_value1.adb | 32 ++++++++++++++++++++++
+ 2 files changed, 35 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/gnat.dg/component_value1.adb
+
+diff --git a/gcc/ada/exp_ch3.adb b/gcc/ada/exp_ch3.adb
+index 9e6abc0632ad..b202b440f154 100644
+--- a/gcc/ada/exp_ch3.adb
++++ b/gcc/ada/exp_ch3.adb
+@@ -5438,7 +5438,9 @@ package body Exp_Ch3 is
+             --  initialize scalars mode, and these types are treated specially
+             --  and do not need initialization procedures.
+ 
+-            elsif Is_Standard_String_Type (Base) then
++            elsif Is_Standard_String_Type (Base)
++              and then No (Default_Aspect_Component_Value (Base))
++            then
+                null;
+ 
+             --  Otherwise we have to build an init proc for the subtype
+diff --git a/gcc/testsuite/gnat.dg/component_value1.adb b/gcc/testsuite/gnat.dg/component_value1.adb
+new file mode 100644
+index 000000000000..830f7ec4761e
+--- /dev/null
++++ b/gcc/testsuite/gnat.dg/component_value1.adb
+@@ -0,0 +1,32 @@
++--  { dg-do run }
++
++with Ada.Characters.Latin_1;
++
++procedure Component_Value1 is
++
++  type Y_Array is array (Natural range <>) of Character
++    with Default_Component_Value => Ada.Characters.Latin_1.Space;
++
++  type Y2_Array is new Y_Array
++    with Default_Component_Value => Ada.Characters.Latin_1.HT;
++
++  type X_String is new String
++    with Default_Component_Value => Ada.Characters.Latin_1.Space;
++
++  Y  : Y_Array  (1..20);
++  Y2 : Y2_Array (1..20);
++  X  : X_String (1..20);
++
++begin
++  if not (for all I in Y'Range => Y(I) = Ada.Characters.Latin_1.Space) then
++    raise Program_Error;
++  end if;
++
++  if not (for all I in Y2'Range => Y2(I) = Ada.Characters.Latin_1.HT) then
++    raise Program_Error;
++  end if;
++
++  if not (for all I in X'Range => X(I) = Ada.Characters.Latin_1.Space) then
++    raise Program_Error;
++  end if;
++end;
+-- 
+2.43.7
+
+

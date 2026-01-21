@@ -1,0 +1,54 @@
+From ae981f433d7186a9204a42050e3ae2a9472338a2 Mon Sep 17 00:00:00 2001
+From: Jeff Law <jlaw@ventanamicro.com>
+Date: Fri, 12 Sep 2025 16:08:38 -0600
+Subject: [PATCH] Fix latent LRA bug
+
+Shreya's work to add the addptr pattern on the RISC-V port exposed a latent bug
+in LRA.
+
+We lazily allocate/reallocate the ira_reg_equiv structure and when we do
+(re)allocation we'll over-allocate and zero-fill so that we don't have to
+actually allocate and relocate the data so often.
+
+In the case exposed by Shreya's work we had N requested entries at the last
+rellocation step.  We actually allocate N+M entries.  During LRA we allocate
+enough new pseudos and thus have N+M+1 pseudos.
+
+In get_equiv we read ira_reg_equiv[regno] without bounds checking so we read
+past the allocated part of the array and get back junk which we use and
+depending on the precise contents we fault in various fun and interesting ways.
+
+We could either arrange to re-allocate ira_reg_equiv again on some path through
+LRA (possibly in get_equiv itself).  We could also just insert the bounds check
+in get_equiv like is done elsewhere in LRA.  Vlad indicated no strong
+preference in an email last week.
+
+So this just adds the bounds check in a manner similar to what's done elsewhere
+in LRA.  Bootstrapped and regression tested on x86_64 as well as RISC-V with
+Shreya's work enabled and regtested across the various embedded targets.
+
+gcc/
+	* lra-constraints.cc (get_equiv): Bounds check before accessing
+	data in ira_reg_equiv.
+
+(cherry picked from commit 0c6ad3f5dfbd45150eeef2474899ba7ef0d8e592)
+---
+ gcc/lra-constraints.cc | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/gcc/lra-constraints.cc b/gcc/lra-constraints.cc
+index 630993819459..0cc9b3dbcb27 100644
+--- a/gcc/lra-constraints.cc
++++ b/gcc/lra-constraints.cc
+@@ -541,6 +541,7 @@ get_equiv (rtx x)
+   rtx res;
+ 
+   if (! REG_P (x) || (regno = REGNO (x)) < FIRST_PSEUDO_REGISTER
++      || regno >= ira_reg_equiv_len
+       || ! ira_reg_equiv[regno].defined_p
+       || ! ira_reg_equiv[regno].profitable_p
+       || lra_get_regno_hard_regno (regno) >= 0)
+-- 
+2.43.7
+
+

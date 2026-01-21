@@ -1,0 +1,49 @@
+From e08a60ba500b97cfbcf14711e4c2d734710b88f9 Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Fri, 9 Jan 2026 20:45:09 +0100
+Subject: [PATCH] doc: List more valid -x option arguments
+
+We miss quite a few -x option arguments that can be specified.
+
+2026-01-09  Jakub Jelinek  <jakub@redhat.com>
+
+	* doc/invoke.texi (-x): Add objc-cpp-output,
+	objc++-cpp-output, adascil, adawhy, modula-2, modula-2-cpp-output,
+	rust and lto as further possible option arguments.
+
+(cherry picked from commit 4f1bde997f5bbf57b4b22c1d73271bca0b11aeb8)
+---
+ gcc/doc/invoke.texi | 12 ++++++++----
+ 1 file changed, 8 insertions(+), 4 deletions(-)
+
+diff --git a/gcc/doc/invoke.texi b/gcc/doc/invoke.texi
+index 1a0b95dcaded..cf4f2b2118ef 100644
+--- a/gcc/doc/invoke.texi
++++ b/gcc/doc/invoke.texi
+@@ -1705,14 +1705,18 @@ the next @option{-x} option.  Possible values for @var{language} are:
+ @smallexample
+ c  c-header  cpp-output
+ c++  c++-header  c++-system-header c++-user-header c++-cpp-output
+-objective-c  objective-c-header  objective-c-cpp-output
+-objective-c++ objective-c++-header objective-c++-cpp-output
++objective-c  objective-c-header  objective-c-cpp-output  objc-cpp-output
++objective-c++  objective-c++-header  objective-c++-cpp-output
++objc++-cpp-output
+ assembler  assembler-with-cpp
+-ada
++ada  adascil  adawhy
+ cobol
+ d
+-f77  f77-cpp-input f95  f95-cpp-input
++f77  f77-cpp-input  f95  f95-cpp-input
+ go
++modula-2  modula-2-cpp-output
++rust
++lto
+ @end smallexample
+ 
+ Note that @option{-x} does not imply a particular language standard.
+-- 
+2.43.7
+
+

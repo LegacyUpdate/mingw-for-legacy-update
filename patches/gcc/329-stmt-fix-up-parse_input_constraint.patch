@@ -1,0 +1,102 @@
+From 12c0f786e175c8a7c5d41ed167cd436e51b8bd53 Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Thu, 8 Jan 2026 23:05:58 +0100
+Subject: [PATCH] stmt: Fix up parse_input_constraint [PR111817]
+
+The following invalid testcase ICEs, because we:
+1) for some strange reason ignore invalid punctuations in
+   parse_output_constraint, which has just
+        default:
+          if (!ISALPHA (*p))
+            break;
+   compared to parse_input_constraint
+      default:
+        if (! ISALPHA (constraint[j]))
+          {
+            error ("invalid punctuation %qc in constraint", constraint[j]);
+            return false;
+          }
+   Haven't touched this because I fear it could break real-world code
+2) the checking whether = or + is first in the output constraint is
+   a warning only:
+      if (p != constraint)
+        warning (0, "output constraint %qc for operand %d "
+                 "is not at the beginning",
+                 *p, operand_num);
+3) parse_input_constraint parses also the corresponding output constraint
+   if the input constraint has a number as the only variant, but
+   even the comment removed in the following patch explains that it
+   doesn't work correctly and skips the first character; now, usually
+   that is not a big deal because if the first character of the output
+   constraint is = or + as it should, then the checking doesn't do anything;
+   but as 2) is just a warning, we accept it and then we fail to check it
+4) far later on we parse the whole output constraint when input constraint
+   refers to it and assert it succeeds, which it doesn't due to 1), 2) and 3)
+
+The following patch fixes the 3) spot, when switching to the output
+constraint, instead of setting j = 0; and break; (== continue;) so that it
+first does j += CONSTRAINT_LEN (constraint[0], constraint+0) and thus
+usually starts at second, sometimes third character of the output constraint
+it uses goto before the loop which sets j = 0; and doesn't do the j += ...
+
+2026-01-08  Jakub Jelinek  <jakub@redhat.com>
+
+	PR middle-end/111817
+	* stmt.cc (parse_input_constraint): For matching construct, goto
+	before the loop without changing j instead of break.  Remove comment
+	about that problem.
+
+	* c-c++-common/pr111817.c: New test.
+
+(cherry picked from commit 35476a0da65fb13651238e38ae98398c78f12b2e)
+---
+ gcc/stmt.cc                           | 8 ++------
+ gcc/testsuite/c-c++-common/pr111817.c | 9 +++++++++
+ 2 files changed, 11 insertions(+), 6 deletions(-)
+ create mode 100644 gcc/testsuite/c-c++-common/pr111817.c
+
+diff --git a/gcc/stmt.cc b/gcc/stmt.cc
+index 01daffd4ca22..7ce377761d59 100644
+--- a/gcc/stmt.cc
++++ b/gcc/stmt.cc
+@@ -337,6 +337,7 @@ parse_input_constraint (const char **constraint_p, int input_num,
+ 
+   /* Make sure constraint has neither `=', `+', nor '&'.  */
+ 
++repeat:
+   for (j = 0; j < c_len; j += CONSTRAINT_LEN (constraint[j], constraint+j))
+     switch (constraint[j])
+       {
+@@ -409,12 +410,7 @@ parse_input_constraint (const char **constraint_p, int input_num,
+ 	      constraint = constraints[match];
+ 	      *constraint_p = constraint;
+ 	      c_len = strlen (constraint);
+-	      j = 0;
+-	      /* ??? At the end of the loop, we will skip the first part of
+-		 the matched constraint.  This assumes not only that the
+-		 other constraint is an output constraint, but also that
+-		 the '=' or '+' come first.  */
+-	      break;
++	      goto repeat;
+ 	    }
+ 	  else
+ 	    j = end - constraint;
+diff --git a/gcc/testsuite/c-c++-common/pr111817.c b/gcc/testsuite/c-c++-common/pr111817.c
+new file mode 100644
+index 000000000000..637dbdadb8f0
+--- /dev/null
++++ b/gcc/testsuite/c-c++-common/pr111817.c
+@@ -0,0 +1,9 @@
++/* PR middle-end/111817 */
++/* { dg-do compile } */
++
++int
++foo (int x, int y)
++{
++  asm ("" : "\n=g" (x) : "0" (y));	/* { dg-warning "output constraint '=' for operand 0 is not at the beginning" } */
++  return x;				/* { dg-error "invalid punctuation '\\\\x\[0-9a-zA-Z]*' in constraint" "" { target *-*-* } .-1 } */
++}
+-- 
+2.43.7
+
+

@@ -1,0 +1,76 @@
+From 1694cbaedd8f9ca6ad9244e4168d2c18b413e6ee Mon Sep 17 00:00:00 2001
+From: Andrew Pinski <quic_apinski@quicinc.com>
+Date: Sun, 22 Jun 2025 12:35:19 -0600
+Subject: [PATCH] [RISC-V][PR target/119830] Fix RISC-V codegen on 32bit hosts
+
+So this is Andrew's patch from the PR.  We weren't clean for a 32bit host in
+some of the arithmetic for constant synthesis.
+
+I confirmed the bug on a 32bit linux host, then confirmed that Andrew's patch
+from the PR fixes the problem, then ran Andrew's patch through my tester
+successfully.
+
+Naturally I'll wait for pre-commit testing, but I'm not expecting problems.
+
+	PR target/119830
+gcc/
+	* config/riscv/riscv.cc (riscv_build_integer_1): Make arithmetic in bclr case
+	clean for 32 bit hosts.
+
+gcc/testsuite/
+	* gcc.target/riscv/pr119830.c: New test.
+
+(cherry picked from commit 07c02ff39e121a496c46d3a997a25e2f46ce227e)
+---
+ gcc/config/riscv/riscv.cc                 |  6 +++---
+ gcc/testsuite/gcc.target/riscv/pr119830.c | 13 +++++++++++++
+ 2 files changed, 16 insertions(+), 3 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.target/riscv/pr119830.c
+
+diff --git a/gcc/config/riscv/riscv.cc b/gcc/config/riscv/riscv.cc
+index bd0046ad2e8f..031584a437a9 100644
+--- a/gcc/config/riscv/riscv.cc
++++ b/gcc/config/riscv/riscv.cc
+@@ -1007,16 +1007,16 @@ riscv_build_integer_1 (struct riscv_integer_op codes[RISCV_MAX_INTEGER_OPS],
+ 	  /* Now iterate over the bits we want to clear until the cost is
+ 	     too high or we're done.  */
+ 	  nval = value ^ HOST_WIDE_INT_C (-1);
+-	  nval &= HOST_WIDE_INT_C (~0x7fffffff);
++	  nval &= ~HOST_WIDE_INT_C (0x7fffffff);
+ 	  while (nval && alt_cost < cost)
+ 	    {
+ 	      HOST_WIDE_INT bit = ctz_hwi (nval);
+ 	      alt_codes[alt_cost].code = AND;
+-	      alt_codes[alt_cost].value = ~(1UL << bit);
++	      alt_codes[alt_cost].value = ~(HOST_WIDE_INT_UC (1) << bit);
+ 	      alt_codes[alt_cost].use_uw = false;
+ 	      alt_codes[alt_cost].save_temporary = false;
+ 	      alt_cost++;
+-	      nval &= ~(1UL << bit);
++	      nval &= ~(HOST_WIDE_INT_UC (1) << bit);
+ 	    }
+ 
+ 	  if (nval == 0 && alt_cost <= cost)
+diff --git a/gcc/testsuite/gcc.target/riscv/pr119830.c b/gcc/testsuite/gcc.target/riscv/pr119830.c
+new file mode 100644
+index 000000000000..8c7cf3bd79d0
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/riscv/pr119830.c
+@@ -0,0 +1,13 @@
++/* { dg-do compile } */
++/* { dg-options "-march=rv64gc_zbb_zbs -mabi=lp64d" { target { rv64 } } } */
++/* { dg-options "-march=rv32gc_zbb_zbs -mabi=ilp32" { target { rv32 } } } */
++
++#include <stdint.h>
++void test(int32_t N, int16_t* A, int16_t val) {
++    int32_t i, j;
++    for (i = 0; i < N; i++) {
++        for (j = 0; j < N; j++) {
++            A[i * N + j] += val;
++        }
++    }
++}
+-- 
+2.43.7
+
+

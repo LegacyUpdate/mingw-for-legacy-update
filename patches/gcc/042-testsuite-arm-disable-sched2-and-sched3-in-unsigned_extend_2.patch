@@ -1,0 +1,62 @@
+From d3230b2a222fc4f1591e64414e9c5d9ac39c4008 Mon Sep 17 00:00:00 2001
+From: =?utf8?q?Torbj=C3=B6rn=20SVENSSON?= <torbjorn.svensson@foss.st.com>
+Date: Tue, 8 Jul 2025 15:33:16 +0200
+Subject: [PATCH] testsuite: arm: Disable sched2 and sched3 in
+ unsigned-extend-2.c
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf8
+Content-Transfer-Encoding: 8bit
+
+Disable sched2 and sched3 to only have one order of instructions to
+consider.
+
+gcc/testsuite/ChangeLog:
+
+	* gcc.target/arm/unsigned-extend-2.c: Disable sched2 and sched3
+	and update function body to match.
+
+Signed-off-by: TorbjÃ¶rn SVENSSON <torbjorn.svensson@foss.st.com>
+(cherry picked from commit 4b4ee2fa4a555c63869475bb340bb58d5d29ae74)
+---
+ gcc/testsuite/gcc.target/arm/unsigned-extend-2.c | 13 ++++---------
+ 1 file changed, 4 insertions(+), 9 deletions(-)
+
+diff --git a/gcc/testsuite/gcc.target/arm/unsigned-extend-2.c b/gcc/testsuite/gcc.target/arm/unsigned-extend-2.c
+index d9f95a14277b..8a1a293bc95a 100644
+--- a/gcc/testsuite/gcc.target/arm/unsigned-extend-2.c
++++ b/gcc/testsuite/gcc.target/arm/unsigned-extend-2.c
+@@ -1,26 +1,21 @@
+ /* { dg-do compile } */
+ /* { dg-require-effective-target arm_thumb2_ok } */
+-/* { dg-options "-O2 -mthumb" } */
++/* { dg-options "-O2 -mthumb  -fno-schedule-insns -fno-schedule-insns2" } */
+ /* { dg-final { check-function-bodies "**" "" } } */
+ 
+ /*
+ ** foo:
+-** 	movs	(r[0-9]+), #8
+ ** (
+-** 	subs	\1, \1, #1
+-** 	ands	\1, \1, #255
++** 	movs	(r[0-9]+), #8
+ ** 	and	r0, r1, r0, lsr #1
+-** 	bne	.L[0-9]+
+-** 	bx	lr
+-** |
+ ** 	subs	\1, \1, #1
+-** 	and	r0, r1, r0, lsr #1
+ ** 	ands	\1, \1, #255
+ ** 	bne	.L[0-9]+
+ ** 	bx	lr
+ ** |
+ ** 	push	{lr}
+-** 	dls	lr, \1
++** 	movs	(r[0-9]+), #8
++** 	dls	lr, \2
+ ** 	and	r0, r1, r0, lsr #1
+ ** 	le	lr, .L[0-9]+
+ ** 	pop	{pc}
+-- 
+2.43.7
+
+

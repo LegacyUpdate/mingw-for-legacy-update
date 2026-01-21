@@ -1,0 +1,61 @@
+From 402d57846c9acca15ff80e192e3ede1f179eb8f2 Mon Sep 17 00:00:00 2001
+From: Patrick Palka <ppalka@redhat.com>
+Date: Tue, 14 Oct 2025 12:56:23 -0400
+Subject: [PATCH] c++: mem-initializer-id qualified name lookup is type-only
+ [PR122192]
+
+Since a mem-initializer needs to be able to initialize any base class,
+lookup for which is type-only, we in turn need to make mem-initializer-id
+qualified name lookup type-only too.
+
+	PR c++/122192
+
+gcc/cp/ChangeLog:
+
+	* parser.cc (cp_parser_mem_initializer_id): Pass class_type
+	instead of typename_type to cp_parser_class_name in the
+	nested-name-specifier case.
+
+gcc/testsuite/ChangeLog:
+
+	* g++.dg/template/dependent-base6.C: Verify mem-initializer-id
+	qualified name lookup is type-only too.
+
+Reported-by: Vincent X
+Reviewed-by: Jason Merrill <jason@redhat.com>
+(cherry picked from commit 97da8fece19caf0277c2be523520d09252821973)
+---
+ gcc/cp/parser.cc                                | 2 +-
+ gcc/testsuite/g++.dg/template/dependent-base6.C | 4 +++-
+ 2 files changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/gcc/cp/parser.cc b/gcc/cp/parser.cc
+index d5ba1bf3c1c5..c208e3862e71 100644
+--- a/gcc/cp/parser.cc
++++ b/gcc/cp/parser.cc
+@@ -18374,7 +18374,7 @@ cp_parser_mem_initializer_id (cp_parser* parser)
+     return cp_parser_class_name (parser,
+ 				 /*typename_keyword_p=*/true,
+ 				 /*template_keyword_p=*/template_p,
+-				 typename_type,
++				 class_type,
+ 				 /*check_dependency_p=*/true,
+ 				 /*class_head_p=*/false,
+ 				 /*is_declaration=*/true);
+diff --git a/gcc/testsuite/g++.dg/template/dependent-base6.C b/gcc/testsuite/g++.dg/template/dependent-base6.C
+index b4bc5c279a58..9f2a7a23923f 100644
+--- a/gcc/testsuite/g++.dg/template/dependent-base6.C
++++ b/gcc/testsuite/g++.dg/template/dependent-base6.C
+@@ -8,5 +8,7 @@ struct A {
+ 
+ struct S1 : A::B { }; // OK
+ 
+-template<class T> struct S2 : T::B { }; // OK, used to fail
++template<class T> struct S2 : T::B { // OK, used to fail
++  S2() : T::B() { } // Also OK
++};
+ template struct S2<A>;
+-- 
+2.43.7
+
+

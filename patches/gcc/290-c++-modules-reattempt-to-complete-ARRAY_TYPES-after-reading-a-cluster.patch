@@ -1,0 +1,209 @@
+From d7f993b1d3b3398911555d4842c7f27792463499 Mon Sep 17 00:00:00 2001
+From: Nathaniel Shead <nathanieloshead@gmail.com>
+Date: Sat, 6 Dec 2025 16:47:18 +1100
+Subject: [PATCH] c++/modules: Reattempt to complete ARRAY_TYPEs after reading
+ a cluster [PR122922]
+
+The PR raises an issue where we complain about value-initializing an
+incomplete array type, where the element type is a complete type.
+
+Here, the friend declaration brings TTensor<0> and TTensor<1> into the
+same cluster, and we have no intra-cluster ordering that ensures
+TTensor<0>'s definition is streamed before TTensor<1>'s definition is.
+In general we don't currently do any ordering of definitions, we only
+reorder in cases that a declaration depends on another.
+
+In this particular case we happen to stream TTensor<1>'s definition
+first, which builds an array type of TTensor<0>.  At this point
+TTensor<0>'s definition hasn't been streamed, so the array is considered
+to be an array of incomplete type.  Later we do stream TTensor<0>'s
+definition, but we don't update the TYPE_SIZE etc. of the array type we
+built earlier so build_value_init thinks we still have incomplete type
+and errors.
+
+Some possible approaches:
+
+1. Have some post-processing for arrays of incomplete type during module
+   streaming; once we've finished reading the cluster we can loop
+   through those array types and attempt to complete them.
+
+2. Add a dependency ordering between structs that have a field that's a
+   non-dependent array type of a different struct in the same cluster,
+   so that the latter is always streamed first.  We shouldn't see cycles
+   because we cannot have two structs with arrays of each other.  This
+   would require processing definitions though and I'm not convinced
+   this necessarily would fix the issue in all cases.
+
+3. Add more calls to 'complete_type' when processing structure fields,
+   rather than assuming that if we have a complete record type all its
+   fields must also have been completed already.  This seems error-prone
+   though, as we may miss cases.  Unless perhaps we replace uses of
+   COMPLETE_TYPE_P entirely in the C++ frontend with a function that
+   attempts to complete the type and returns false if it failed?
+
+This patch takes approach #1 as a minimal fix, but maybe it would be
+worth exploring other approaches later.
+
+	PR c++/122922
+
+gcc/cp/ChangeLog:
+
+	* module.cc (trees_in::post_types): New member.
+	(trees_in::trees_in): Initialize it.
+	(trees_in::~trees_in): Clean it up.
+	(trees_in::post_process_type): New functions.
+	(trees_in::tree_node): Save incomplete ARRAY_TYPEs for later
+	post-processing.
+	(module_state::read_cluster): Attempt to complete any
+	ARRAY_TYPEs we saved earlier.
+
+gcc/testsuite/ChangeLog:
+
+	* g++.dg/modules/pr122922_a.C: New test.
+	* g++.dg/modules/pr122922_b.C: New test.
+
+Signed-off-by: Nathaniel Shead <nathanieloshead@gmail.com>
+Reviewed-by: Jason Merrill <jason@redhat.com>
+(cherry picked from commit 4bcb35f372ad750478199b02deabbdcfedaf199f)
+---
+ gcc/cp/module.cc                          | 37 +++++++++++++++++++++--
+ gcc/testsuite/g++.dg/modules/pr122922_a.C | 18 +++++++++++
+ gcc/testsuite/g++.dg/modules/pr122922_b.C |  8 +++++
+ 3 files changed, 61 insertions(+), 2 deletions(-)
+ create mode 100644 gcc/testsuite/g++.dg/modules/pr122922_a.C
+ create mode 100644 gcc/testsuite/g++.dg/modules/pr122922_b.C
+
+diff --git a/gcc/cp/module.cc b/gcc/cp/module.cc
+index 9b1283692d1a..2b275260d1ed 100644
+--- a/gcc/cp/module.cc
++++ b/gcc/cp/module.cc
+@@ -2954,6 +2954,7 @@ private:
+   vec<tree> back_refs;		/* Back references.  */
+   duplicate_hash_map *duplicates;	/* Map from existings to duplicate.  */
+   vec<post_process_data> post_decls;	/* Decls to post process.  */
++  vec<tree> post_types;		/* Types to post process.  */
+   unsigned unused;		/* Inhibit any interior TREE_USED
+ 				   marking.  */
+ 
+@@ -3058,12 +3059,23 @@ public:
+   {
+     return post_decls;
+   }
++  /* Return the types to postprocess.  */
++  const vec<tree>& post_process_type ()
++  {
++    return post_types;
++  }
+ private:
+   /* Register DATA for postprocessing.  */
+   void post_process (post_process_data data)
+   {
+     post_decls.safe_push (data);
+   }
++  /* Register TYPE for postprocessing.  */
++  void post_process_type (tree type)
++  {
++    gcc_checking_assert (TYPE_P (type));
++    post_types.safe_push (type);
++  }
+ 
+ private:
+   void assert_definition (tree, bool installing);
+@@ -3076,6 +3088,7 @@ trees_in::trees_in (module_state *state)
+   duplicates = NULL;
+   back_refs.create (500);
+   post_decls.create (0);
++  post_types.create (0);
+ }
+ 
+ trees_in::~trees_in ()
+@@ -3083,6 +3096,7 @@ trees_in::~trees_in ()
+   delete (duplicates);
+   back_refs.release ();
+   post_decls.release ();
++  post_types.release ();
+ }
+ 
+ /* Tree stream writer.  */
+@@ -10203,10 +10217,23 @@ trees_in::tree_node (bool is_use)
+ 
+ 	  case ARRAY_TYPE:
+ 	    {
++	      tree elt_type = res;
+ 	      tree domain = tree_node ();
+ 	      int dep = u ();
+ 	      if (!get_overrun ())
+-		res = build_cplus_array_type (res, domain, dep);
++		{
++		  res = build_cplus_array_type (elt_type, domain, dep);
++		  /* If we're an array of an incomplete imported type,
++		     save it for post-processing so that we can attempt
++		     to complete the type later if it will get a
++		     definition later in the cluster.  */
++		  if (!dep
++		      && !COMPLETE_TYPE_P (elt_type)
++		      && CLASS_TYPE_P (elt_type)
++		      && DECL_LANG_SPECIFIC (TYPE_NAME (elt_type))
++		      && DECL_MODULE_IMPORT_P (TYPE_NAME (elt_type)))
++		    post_process_type (res);
++		}
+ 	    }
+ 	    break;
+ 
+@@ -16839,7 +16866,13 @@ module_state::read_cluster (unsigned snum)
+ 	      && DECL_NOT_REALLY_EXTERN (decl))
+ 	    DECL_EXTERNAL (decl) = false;
+ 	}
+-
++    }
++  for (const tree& type : sec.post_process_type ())
++    {
++      /* Attempt to complete an array type now in case its element type
++	 had a definition streamed later in the cluster.  */
++      gcc_checking_assert (TREE_CODE (type) == ARRAY_TYPE);
++      complete_type (type);
+     }
+   /* Look, function.cc's interface to cfun does too much for us, we
+      just need to restore the old value.  I do not want to go
+diff --git a/gcc/testsuite/g++.dg/modules/pr122922_a.C b/gcc/testsuite/g++.dg/modules/pr122922_a.C
+new file mode 100644
+index 000000000000..2f3d07a38db3
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/modules/pr122922_a.C
+@@ -0,0 +1,18 @@
++// PR c++/122922
++// { dg-additional-options "-fmodules" }
++// { dg-module-cmi VF }
++
++export module VF;
++
++template <int N> struct TTensor {
++  friend void foo(TTensor) {}
++  TTensor<N - 1> TensorArr[1];
++};
++
++template <> struct TTensor<0> {
++  friend void foo(TTensor) {}
++};
++
++template <typename T = void> void TCampo() {
++  foo(TTensor<1>());
++}
+diff --git a/gcc/testsuite/g++.dg/modules/pr122922_b.C b/gcc/testsuite/g++.dg/modules/pr122922_b.C
+new file mode 100644
+index 000000000000..4bcb3902d4b2
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/modules/pr122922_b.C
+@@ -0,0 +1,8 @@
++// PR c++/122922
++// { dg-additional-options "-fmodules" }
++
++module VF;
++
++void go() {
++  TCampo();
++}
+-- 
+2.43.7
+
+

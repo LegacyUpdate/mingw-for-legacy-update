@@ -1,0 +1,77 @@
+From 2eec075a174c114632ff085241c0094bfe96fe87 Mon Sep 17 00:00:00 2001
+From: Eric Botcazou <ebotcazou@adacore.com>
+Date: Mon, 20 Oct 2025 11:21:21 +0200
+Subject: [PATCH] Ada: Fix spurious warning for renaming of component of VFA
+ record
+
+This is a regression present on the mainline and all active branches: the
+compiler gives a spurious "is not referenced" warning for the renaming of
+a component of a Volatile_Full_Access record.
+
+gcc/ada/
+	PR ada/107536
+	* exp_ch2.adb (Expand_Renaming): Mark the entity as referenced.
+
+gcc/testsuite/
+	* gnat.dg/renaming18.adb: New test.
+---
+ gcc/ada/exp_ch2.adb                  |  8 +++++++-
+ gcc/testsuite/gnat.dg/renaming18.adb | 24 ++++++++++++++++++++++++
+ 2 files changed, 31 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/gnat.dg/renaming18.adb
+
+diff --git a/gcc/ada/exp_ch2.adb b/gcc/ada/exp_ch2.adb
+index 612a4611c4ca..d2f3df80e002 100644
+--- a/gcc/ada/exp_ch2.adb
++++ b/gcc/ada/exp_ch2.adb
+@@ -706,9 +706,15 @@ package body Exp_Ch2 is
+       T : constant Entity_Id := Etype (N);
+ 
+    begin
++      --  Mark the entity as referenced since this reference is going away
++
++      Set_Referenced (E);
++
++      --  Now rewrite the reference as a copy of the renamed object
++
+       Rewrite (N, New_Copy_Tree (Renamed_Object (E)));
+ 
+-      --  We mark the copy as unanalyzed, so that it is sure to be reanalyzed
++      --  Mark the copy as unanalyzed to make sure that it is reanalyzed
+       --  at the top level. This is needed in the packed case since we
+       --  specifically avoided expanding packed array references when the
+       --  renaming declaration was analyzed.
+diff --git a/gcc/testsuite/gnat.dg/renaming18.adb b/gcc/testsuite/gnat.dg/renaming18.adb
+new file mode 100644
+index 000000000000..a4da04d3d623
+--- /dev/null
++++ b/gcc/testsuite/gnat.dg/renaming18.adb
+@@ -0,0 +1,24 @@
++-- { dg-do compile }
++-- { dg-options "-gnatwu" }
++
++procedure Renaming18 is
++
++  type T is record
++    Item : Integer;
++  end record;
++
++  A_T : T;
++  Item : Integer renames A_T.Item;
++
++  type VFA_T is record
++    Item : Integer;
++  end record
++  with Volatile_Full_Access;
++
++  A_VFA_T : VFA_T;
++  VFA_Item : Integer renames A_VFA_T.Item; -- { dg-bogus "is not referenced" }
++
++begin
++  Item := 42;
++  VFA_Item := 42;
++end;
+-- 
+2.43.7
+
+

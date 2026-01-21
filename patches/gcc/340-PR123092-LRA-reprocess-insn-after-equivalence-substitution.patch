@@ -1,0 +1,62 @@
+From 14da7fd501f7993c18f096e7c97216b1779e1e63 Mon Sep 17 00:00:00 2001
+From: "Vladimir N. Makarov" <vmakarov@redhat.com>
+Date: Fri, 16 Jan 2026 10:09:52 -0500
+Subject: [PATCH] [PR123092, LRA]: Reprocess insn after equivalence
+ substitution
+
+LRA in the test case substituted equivalence in an insn but did not
+process the insn on satisfying constraints after that.  It resulted in
+error "insn does not satisfy its constraints"
+
+gcc/ChangeLog:
+
+	PR target/123092
+	* lra-constraints.cc (lra_constraints): Push insn on processing
+	stack after equivalence substitution.
+
+gcc/testsuite/ChangeLog:
+
+	PR target/123092
+	* gcc.target/riscv/pr123092.c: New.
+
+(cherry picked from commit 538177d9b4c48321e07e1fd5647ed960049288f8)
+---
+ gcc/lra-constraints.cc                    |  1 +
+ gcc/testsuite/gcc.target/riscv/pr123092.c | 12 ++++++++++++
+ 2 files changed, 13 insertions(+)
+ create mode 100644 gcc/testsuite/gcc.target/riscv/pr123092.c
+
+diff --git a/gcc/lra-constraints.cc b/gcc/lra-constraints.cc
+index 4ab0a18d2635..2c477d1688eb 100644
+--- a/gcc/lra-constraints.cc
++++ b/gcc/lra-constraints.cc
+@@ -5595,6 +5595,7 @@ lra_constraints (bool first_p)
+ 		   && loc_equivalence_change_p (&PATTERN (curr_insn)))
+ 	    {
+ 	      lra_update_insn_regno_info (curr_insn);
++	      lra_push_insn_by_uid (INSN_UID (curr_insn));
+ 	      changed_p = true;
+ 	    }
+ 	}
+diff --git a/gcc/testsuite/gcc.target/riscv/pr123092.c b/gcc/testsuite/gcc.target/riscv/pr123092.c
+new file mode 100644
+index 000000000000..ebcf177a1218
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/riscv/pr123092.c
+@@ -0,0 +1,12 @@
++/* { dg-do compile } */
++/* { dg-options "-O2 -march=rv64gc_zicbop -mabi=lp64d" } */
++struct a {
++  char *b;
++} d;
++int e;
++int c(struct a *);
++void f() {
++  __builtin_prefetch(d.b + 64);
++  if (e)
++    c(&d);
++}
+-- 
+2.43.7
+
+

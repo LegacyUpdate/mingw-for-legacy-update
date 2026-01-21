@@ -1,0 +1,33 @@
+From f737b65af9bb992407e7f4e580286e3f981f14e8 Mon Sep 17 00:00:00 2001
+From: "H.J. Lu" <hjl.tools@gmail.com>
+Date: Mon, 27 Oct 2025 18:11:25 +0800
+Subject: [PATCH] x86: Compile builtin-copysign-8b.c with -mtune=generic
+
+Compile builtin-copysign-8b.c with -mtune=generic so that it passes with
+
+$ make check-gcc RUNTESTFLAGS="i386.exp=builtin-copysign-8b.c --target_board='unix{-m64\ -march=cascadelake}'"
+
+	PR target/122323
+	* gcc.target/i386/builtin-copysign-8b.c: Add -mtune=generic.
+
+Signed-off-by: H.J. Lu <hjl.tools@gmail.com>
+(cherry picked from commit 3ce0b19b87e9146c47343aab5088d144e739ce57)
+---
+ gcc/testsuite/gcc.target/i386/builtin-copysign-8b.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/gcc/testsuite/gcc.target/i386/builtin-copysign-8b.c b/gcc/testsuite/gcc.target/i386/builtin-copysign-8b.c
+index 8f0cb27a2464..dc9e46121de0 100644
+--- a/gcc/testsuite/gcc.target/i386/builtin-copysign-8b.c
++++ b/gcc/testsuite/gcc.target/i386/builtin-copysign-8b.c
+@@ -1,5 +1,5 @@
+ /* { dg-do compile } */
+-/* { dg-options "-O2 -mno-avx512f -mavx" } */
++/* { dg-options "-O2 -mno-avx512f -mavx -mtune=generic" } */
+ /* Keep labels and directives ('.cfi_startproc', '.cfi_endproc').  */
+ /* { dg-final { check-function-bodies "**" "" "" { target { ! ia32 } } {^\t?\.} } } */
+ 
+-- 
+2.43.7
+
+

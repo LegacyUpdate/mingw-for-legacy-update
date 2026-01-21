@@ -1,0 +1,82 @@
+From 21a87ad785fe1e7c6504c3cf7984e74fe5a5067a Mon Sep 17 00:00:00 2001
+From: Xi Ruoyao <xry111@xry111.site>
+Date: Tue, 8 Jul 2025 14:39:11 +0800
+Subject: [PATCH] lra: Reallow reloading user hard registers if the insn is not
+ asm [PR 120983]
+
+The PR 87600 fix has disallowed reloading user hard registers to resolve
+earlyclobber-induced conflict.
+
+However before reload, recog completely ignores the constraints of
+insns, so the RTL passes may produce insns where some user hard
+registers violate an earlyclobber.  Then we'll get an ICE without
+reloading them, like what we are recently encountering in LoongArch test
+suite.
+
+IIUC "recog does not look at constraints until reload" has been a
+well-established rule in GCC for years and I don't have enough skill to
+challange it.  So reallow reloading user hard registers (but still
+disallow doing so for asm) to fix the ICE.
+
+gcc/ChangeLog:
+
+	PR rtl-optimization/120983
+	* lra-constraints.cc (process_alt_operands): Allow reloading
+	user hard registers unless the insn is an asm.
+
+(cherry picked from commit e6d3c88e7bb07f94308074f9751e4384a191e022)
+---
+ gcc/lra-constraints.cc | 19 ++++++++-----------
+ 1 file changed, 8 insertions(+), 11 deletions(-)
+
+diff --git a/gcc/lra-constraints.cc b/gcc/lra-constraints.cc
+index 7dbc7fe1e00c..535991dad06b 100644
+--- a/gcc/lra-constraints.cc
++++ b/gcc/lra-constraints.cc
+@@ -2423,14 +2423,15 @@ process_alt_operands (int only_alternative)
+ 			if (curr_static_id->operand[nop].type == OP_INOUT
+ 			    || curr_static_id->operand[m].type == OP_INOUT)
+ 			  break;
+-			/* Operands don't match.  If the operands are
+-			   different user defined explicit hard
++			/* Operands don't match.  For asm if the operands
++			   are different user defined explicit hard
+ 			   registers, then we cannot make them match
+ 			   when one is early clobber operand.  */
+ 			if ((REG_P (*curr_id->operand_loc[nop])
+ 			     || SUBREG_P (*curr_id->operand_loc[nop]))
+ 			    && (REG_P (*curr_id->operand_loc[m])
+-				|| SUBREG_P (*curr_id->operand_loc[m])))
++				|| SUBREG_P (*curr_id->operand_loc[m]))
++			    && INSN_CODE (curr_insn) < 0)
+ 			  {
+ 			    rtx nop_reg = *curr_id->operand_loc[nop];
+ 			    if (SUBREG_P (nop_reg))
+@@ -3335,19 +3336,15 @@ process_alt_operands (int only_alternative)
+ 		  first_conflict_j = j;
+ 		last_conflict_j = j;
+ 		/* Both the earlyclobber operand and conflicting operand
+-		   cannot both be user defined hard registers.  */
++		   cannot both be user defined hard registers for asm.
++		   Let curr_insn_transform diagnose it.  */
+ 		if (HARD_REGISTER_P (operand_reg[i])
+ 		    && REG_USERVAR_P (operand_reg[i])
+ 		    && operand_reg[j] != NULL_RTX
+ 		    && HARD_REGISTER_P (operand_reg[j])
+-		    && REG_USERVAR_P (operand_reg[j]))
+-		  {
+-		    /* For asm, let curr_insn_transform diagnose it.  */
+-		    if (INSN_CODE (curr_insn) < 0)
++		    && REG_USERVAR_P (operand_reg[j])
++		    && INSN_CODE (curr_insn) < 0)
+ 		      return false;
+-		    fatal_insn ("unable to generate reloads for "
+-				"impossible constraints:", curr_insn);
+-		  }
+ 	      }
+ 	  if (last_conflict_j < 0)
+ 	    continue;
+-- 
+2.43.7
+
+

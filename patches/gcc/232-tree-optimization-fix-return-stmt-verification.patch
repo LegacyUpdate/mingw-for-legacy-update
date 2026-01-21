@@ -1,0 +1,48 @@
+From 36dd19f4bea248e28a13de19ca484fbff4c48f56 Mon Sep 17 00:00:00 2001
+From: Richard Biener <rguenther@suse.de>
+Date: Fri, 10 Oct 2025 08:20:22 +0200
+Subject: [PATCH] tree-optimization/122225 - fix return stmt verification
+
+The following fixes return stmt type verification by properly looking
+at DECL_RESULT to decide whether that's by reference, not trying to
+figure that from the actual argument.
+
+	PR tree-optimization/122225
+	* tree-cfg.cc (verify_gimple_return): Look at DECL_RESULT
+	for DECL_BY_REFERENCE.
+
+(cherry picked from commit aaa7ac48bd888ee7bbe95006b29bb2f7eaefd0b4)
+---
+ gcc/tree-cfg.cc | 8 ++------
+ 1 file changed, 2 insertions(+), 6 deletions(-)
+
+diff --git a/gcc/tree-cfg.cc b/gcc/tree-cfg.cc
+index ecf19d280797..6610069f22b2 100644
+--- a/gcc/tree-cfg.cc
++++ b/gcc/tree-cfg.cc
+@@ -4878,6 +4878,7 @@ verify_gimple_return (greturn *stmt)
+ {
+   tree op = gimple_return_retval (stmt);
+   tree restype = TREE_TYPE (TREE_TYPE (cfun->decl));
++  tree resdecl = DECL_RESULT (cfun->decl);
+ 
+   /* We cannot test for present return values as we do not fix up missing
+      return values from the original source.  */
+@@ -4892,12 +4893,7 @@ verify_gimple_return (greturn *stmt)
+       return true;
+     }
+ 
+-  if ((TREE_CODE (op) == RESULT_DECL
+-       && DECL_BY_REFERENCE (op))
+-      || (TREE_CODE (op) == SSA_NAME
+-	  && SSA_NAME_VAR (op)
+-	  && TREE_CODE (SSA_NAME_VAR (op)) == RESULT_DECL
+-	  && DECL_BY_REFERENCE (SSA_NAME_VAR (op))))
++  if (resdecl && DECL_BY_REFERENCE (resdecl))
+     op = TREE_TYPE (op);
+ 
+   if (!useless_type_conversion_p (restype, TREE_TYPE (op)))
+-- 
+2.43.7
+
+

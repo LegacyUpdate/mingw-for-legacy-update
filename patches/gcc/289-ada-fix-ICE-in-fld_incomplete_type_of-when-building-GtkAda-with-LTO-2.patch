@@ -1,0 +1,55 @@
+From 7945fa507a458969bb1375b235e442ec88542b78 Mon Sep 17 00:00:00 2001
+From: Eric Botcazou <ebotcazou@adacore.com>
+Date: Mon, 22 Dec 2025 23:46:53 +0100
+Subject: [PATCH] Ada: Fix ICE in fld_incomplete_type_of when building GtkAda
+ with LTO (3)
+
+This streamlines the code by using a ternary expression.
+
+gcc/ada/
+	PR ada/123060
+	* gcc-interface/utils.cc (update_pointer_to): Streamline.
+---
+ gcc/ada/gcc-interface/utils.cc | 18 ++++++++----------
+ 1 file changed, 8 insertions(+), 10 deletions(-)
+
+diff --git a/gcc/ada/gcc-interface/utils.cc b/gcc/ada/gcc-interface/utils.cc
+index 39585c95b855..18462ad7d06e 100644
+--- a/gcc/ada/gcc-interface/utils.cc
++++ b/gcc/ada/gcc-interface/utils.cc
+@@ -4610,11 +4610,10 @@ update_pointer_to (tree old_type, tree new_type)
+ 		       && !lookup_attribute ("may_alias",
+ 					     TYPE_ATTRIBUTES (new_type))))
+ 	    {
+-	      alias_set_type set;
+-	      if (TYPE_STRUCTURAL_EQUALITY_P (ptr))
+-		set = TYPE_ALIAS_SET (ptr);
+-	      else
+-		set = TYPE_ALIAS_SET (TYPE_CANONICAL (ptr));
++	      const alias_set_type set
++		= TYPE_STRUCTURAL_EQUALITY_P (ptr)
++		  ? TYPE_ALIAS_SET (ptr)
++		  : TYPE_ALIAS_SET (TYPE_CANONICAL (ptr));
+ 	      TYPE_CANONICAL (ptr)
+ 		= build_pointer_type (TYPE_CANONICAL (new_type));
+ 	      TYPE_ALIAS_SET (TYPE_CANONICAL (ptr)) = set;
+@@ -4655,11 +4654,10 @@ update_pointer_to (tree old_type, tree new_type)
+ 		       && !lookup_attribute ("may_alias",
+ 					     TYPE_ATTRIBUTES (new_type))))
+ 	    {
+-	      alias_set_type set;
+-	      if (TYPE_STRUCTURAL_EQUALITY_P (ref))
+-		set = TYPE_ALIAS_SET (ref);
+-	      else
+-		set = TYPE_ALIAS_SET (TYPE_CANONICAL (ref));
++	      const alias_set_type set
++		= TYPE_STRUCTURAL_EQUALITY_P (ref)
++		  ? TYPE_ALIAS_SET (ref)
++		  : TYPE_ALIAS_SET (TYPE_CANONICAL (ref));
+ 	      TYPE_CANONICAL (ref)
+ 		= build_reference_type (TYPE_CANONICAL (new_type));
+ 	      TYPE_ALIAS_SET (TYPE_CANONICAL (ref)) = set;
+-- 
+2.43.7
+
+

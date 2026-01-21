@@ -1,0 +1,120 @@
+From 8193500f4fc97808ded2082428380e4f91d1a44a Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Sun, 3 Aug 2025 18:27:42 +0200
+Subject: [PATCH] libcpp: Fix up cpp_maybe_module_directive [PR120845]
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf8
+Content-Transfer-Encoding: 8bit
+
+My changes for "Module Declarations Shouldnât be Macros" paper broke
+the following testcase.  The backup handling intentionally tries to
+drop CPP_PRAGMA_EOL token if things go wrong, which is desirable for the
+case where we haven't committed to the module preprocessing directive
+(i.e. changed the first token to the magic one).  In that case there is
+no preprocessing directive start and so CPP_PRAGMA_EOL would be wrong.
+If there is a premature new-line after we've changed the first token though,
+we shouldn't drop CPP_PRAGMA_EOL, because otherwise we ICE in the FE.
+
+While clang++ and MSVC accept the testcase, in my reading it is incorrect
+at least in the C++23 and newer wordings and I think the changes have been
+a DR, https://eel.is/c++draft/cpp.module has no exception for new-lines
+and https://eel.is/c++draft/cpp.pre#1.sentence-2 says that new-line (unless
+deleted during phase 2 when after backslash)  ends the preprocessing
+directive.
+
+The patch arranges for eol being set only in the not_module case.
+
+2025-08-03  Jakub Jelinek  <jakub@redhat.com>
+
+	PR c++/120845
+libcpp/
+	* lex.cc (cpp_maybe_module_directive): Move eol variable declaration
+	to the start of the function, initialize to false and only set it to
+	peek->type == CPP_PRAGMA_EOL in the not_module case.  Formatting fix.
+gcc/testsuite/
+	* g++.dg/modules/cpp-21.C: New test.
+
+(cherry picked from commit a68f416a706bc61bb323773295189c4ea413ffd6)
+---
+ gcc/testsuite/g++.dg/modules/cpp-21.C |  8 +++++++
+ libcpp/lex.cc                         | 30 +++++++++++++--------------
+ 2 files changed, 22 insertions(+), 16 deletions(-)
+ create mode 100644 gcc/testsuite/g++.dg/modules/cpp-21.C
+
+diff --git a/gcc/testsuite/g++.dg/modules/cpp-21.C b/gcc/testsuite/g++.dg/modules/cpp-21.C
+new file mode 100644
+index 000000000000..fdd049267e9d
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/modules/cpp-21.C
+@@ -0,0 +1,8 @@
++// PR c++/120845
++// { dg-do compile }
++// { dg-additional-options "-fmodules" }
++
++export module pr120485
++    [[foobarbaz]];
++// { dg-error "expected ';' before end of line" "" { target *-*-* } .-2 }
++// { dg-warning "attribute ignored" "" { target *-*-* } .-2 }
+diff --git a/libcpp/lex.cc b/libcpp/lex.cc
+index 2d02ce6e7346..37c301dcd20e 100644
+--- a/libcpp/lex.cc
++++ b/libcpp/lex.cc
+@@ -3504,6 +3504,7 @@ cpp_maybe_module_directive (cpp_reader *pfile, cpp_token *result)
+   cpp_token *keyword = peek;
+   cpp_hashnode *(&n_modules)[spec_nodes::M_HWM][2] = pfile->spec_nodes.n_modules;
+   int header_count = 0;
++  bool eol = false;
+ 
+   /* Make sure the incoming state is as we expect it.  This way we
+      can restore it using constants.  */
+@@ -3563,10 +3564,10 @@ cpp_maybe_module_directive (cpp_reader *pfile, cpp_token *result)
+      tokens.  C++ keywords are not yet relevant.  */
+   if (peek->type == CPP_NAME
+       || peek->type == CPP_COLON
+-      ||  (header_count
+-	   ? (peek->type == CPP_LESS
+-	      || (peek->type == CPP_STRING && peek->val.str.text[0] != 'R')
+-	      || peek->type == CPP_HEADER_NAME)
++      || (header_count
++	  ? (peek->type == CPP_LESS
++	     || (peek->type == CPP_STRING && peek->val.str.text[0] != 'R')
++	     || peek->type == CPP_HEADER_NAME)
+ 	   : peek->type == CPP_SEMICOLON))
+     {
+       pfile->state.pragma_allow_expansion = !CPP_OPTION (pfile, preprocessed);
+@@ -3688,22 +3689,19 @@ cpp_maybe_module_directive (cpp_reader *pfile, cpp_token *result)
+       pfile->state.in_deferred_pragma = false;
+       /* Do not let this remain on.  */
+       pfile->state.angled_headers = false;
++      /* If we saw EOL, we should drop it, because this isn't a module
++	 control-line after all.  */
++      eol = peek->type == CPP_PRAGMA_EOL;
+     }
+ 
+   /* In either case we want to backup the peeked tokens.  */
+-  if (backup)
++  if (backup && (!eol || backup > 1))
+     {
+-      /* If we saw EOL, we should drop it, because this isn't a module
+-	 control-line after all.  */
+-      bool eol = peek->type == CPP_PRAGMA_EOL;
+-      if (!eol || backup > 1)
+-	{
+-	  /* Put put the peeked tokens back  */
+-	  _cpp_backup_tokens_direct (pfile, backup);
+-	  /* But if the last one was an EOL, forget it.  */
+-	  if (eol)
+-	    pfile->lookaheads--;
+-	}
++      /* Put the peeked tokens back.  */
++      _cpp_backup_tokens_direct (pfile, backup);
++      /* But if the last one was an EOL in the not_module case, forget it.  */
++      if (eol)
++	pfile->lookaheads--;
+     }
+ }
+ 
+-- 
+2.43.7
+
+

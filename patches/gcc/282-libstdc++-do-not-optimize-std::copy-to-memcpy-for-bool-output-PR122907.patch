@@ -1,0 +1,116 @@
+From e7664c01527f59b65438fe033b84f89191754300 Mon Sep 17 00:00:00 2001
+From: Jonathan Wakely <jwakely@redhat.com>
+Date: Tue, 2 Dec 2025 15:26:31 +0000
+Subject: [PATCH] libstdc++: Do not optimize std::copy to memcpy for bool
+ output [PR122907]
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf8
+Content-Transfer-Encoding: 8bit
+
+Copying narrow characters to a range of bool using std::copy cannot be
+optimized to use std::memcpy. Assignment of an arbitrary integer to a
+bool needs to convert all non-zero values to true, so is not a simple
+memcpy-like or bit_cast-like operation. We currently get this wrong and
+optimize it to memcpy, producing invalid bool values.
+
+By making __memcpyable_integer<bool> false we disable memcpy
+optimizations for heterogeneous std::copy and std::move calls where
+either the source or destination type is bool. Copies where both types
+are bool can still optimize to memcpy, because we don't check
+__memcpyable_integer in that case.
+
+This disables the memcpy optimization for bool as the source type,
+which isn't actually necessary (the representation of bool in GCC is
+0x00 or 0x01 and so copying bool to char is just a bit_cast). We don't
+currently have a straightforward way to allow memcpy for bool to char
+but disallow the inverse. This seems acceptable as using std::copy with
+bool inputs and narrow character outputs is probably not common enough
+for this to be an important optimization to do in the library code.
+
+libstdc++-v3/ChangeLog:
+
+	PR libstdc++/122907
+	* include/bits/cpp_type_traits.h (__memcpyable_integer<bool>):
+	Define as false.
+	* testsuite/25_algorithms/copy/122907.cc: New test.
+
+Reviewed-by: Tomasz KamiÅski <tkaminsk@redhat.com>
+Reviewed-by: Patrick Palka <ppalka@redhat.com>
+(cherry picked from commit 7a5ad555965d103e73e606417f4289a4238e82d4)
+---
+ libstdc++-v3/include/bits/cpp_type_traits.h   |  7 +++
+ .../testsuite/25_algorithms/copy/122907.cc    | 43 +++++++++++++++++++
+ 2 files changed, 50 insertions(+)
+ create mode 100644 libstdc++-v3/testsuite/25_algorithms/copy/122907.cc
+
+diff --git a/libstdc++-v3/include/bits/cpp_type_traits.h b/libstdc++-v3/include/bits/cpp_type_traits.h
+index b1a6206ce1eb..0e1c4418782d 100644
+--- a/libstdc++-v3/include/bits/cpp_type_traits.h
++++ b/libstdc++-v3/include/bits/cpp_type_traits.h
+@@ -503,6 +503,13 @@ __INT_N(__GLIBCXX_TYPE_INT_N_3)
+     struct __memcpyable_integer<volatile _Tp>
+     { enum { __width = 0 }; };
+ 
++  // Assigning an integer to bool needs to convert all non-zero values to true
++  // so it is not a memcpyable integer.
++  // __memcpyable<bool*, bool*> is still true though.
++  template<>
++    struct __memcpyable_integer<bool>
++    { enum { __width = 0 }; };
++
+   // Specializations for __intNN types with padding bits.
+ #if defined __GLIBCXX_TYPE_INT_N_0 && __GLIBCXX_BITSIZE_INT_N_0 % __CHAR_BIT__
+   __extension__
+diff --git a/libstdc++-v3/testsuite/25_algorithms/copy/122907.cc b/libstdc++-v3/testsuite/25_algorithms/copy/122907.cc
+new file mode 100644
+index 000000000000..02276cea7b9b
+--- /dev/null
++++ b/libstdc++-v3/testsuite/25_algorithms/copy/122907.cc
+@@ -0,0 +1,43 @@
++// { dg-do run }
++
++// Bug libstdc++/122907
++// std::copy incorrectly uses memcpy when copying from signed or unsigned char
++// buffer to bool buffer
++
++#include <algorithm>
++#include <testsuite_hooks.h>
++
++template<typename T>
++__attribute__((noinline,noipa))
++void
++test_pr122907(T (&buf)[4])
++{
++  unsigned char uc[4];
++  bool bool_buf[4];
++  std::copy(buf, buf+1, bool_buf);
++  std::copy(bool_buf, bool_buf+1, uc);
++  VERIFY(uc[0] == bool(buf[0]));
++  std::copy(buf, buf+4, bool_buf);
++  std::copy(bool_buf, bool_buf+4, uc);
++  VERIFY(uc[0] == bool(buf[0]));
++  VERIFY(uc[1] == bool(buf[1]));
++  VERIFY(uc[2] == bool(buf[2]));
++  VERIFY(uc[3] == bool(buf[3]));
++}
++
++template<typename T>
++void
++test_pr122907()
++{
++  T buf[4] = { (T)3,  (T)2, (T)1, (T)0 };
++  test_pr122907(buf);
++}
++
++int main()
++{
++  test_pr122907<char>();
++  test_pr122907<signed char>();
++  test_pr122907<unsigned char>();
++  test_pr122907<bool>();
++  test_pr122907<int>();
++}
+-- 
+2.43.7
+
+

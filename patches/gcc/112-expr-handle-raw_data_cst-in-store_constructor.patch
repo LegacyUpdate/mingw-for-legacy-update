@@ -1,0 +1,294 @@
+From 761efd0e18417cf386ace300af2f9f9b5d39d07c Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Wed, 10 Sep 2025 12:33:14 +0200
+Subject: [PATCH] expr: Handle RAW_DATA_CST in store_constructor [PR121831]
+
+I thought this wouldn't be necessary because RAW_DATA_CST can only appear
+inside of (array) CONSTRUCTORs within DECL_INITIAL of TREE_STATIC vars,
+so there shouldn't be a need to expand it.  Except that we have an
+optimization when reading ARRAY_REF from such a CONSTRUCTOR which will
+try to expand the constructor if it either can be stored by pieces
+(I think that is just fine) or if it is mostly zeros (which is at least
+75% of the initializer zeros).  Now the second case is I think in some
+cases desirable (say 256MB initializer and just 20 elements out of that
+non-zero, so clear everything and store 20 elements must be fastest and
+short), but could be really bad as well (say 40GB initializer with
+10GB non-zero in it, especially if it doesn't result in the original
+variable being optimized away).  Maybe it would help if expand_constructor
+and store_constructor* etc. had some optional argument with addresses into
+the original VAR_DECL so that it could be copying larger amounts of data
+like larger RAW_DATA_CSTs from there instead of pushing those into new
+.rodata again.  And another problem is that we apparently expand the
+initializes twice, expand_constructor in store_constructor can expand
+the stores one and if expand_constructor returns non-NULL, we then
+expand_expr the CONSTRUCTOR again. to the same location.
+
+This patch doesn't address either of those issues, just adds RAW_DATA_CST
+support to store_constructor for now.  For the can_store_by_pieces
+cases it stores those by pieces using a new callback very similar to
+string_cst_read_str, for the rest (unfortunately) forces it into a memory
+and copies from there.
+
+2025-09-10  Jakub Jelinek  <jakub@redhat.com>
+
+	PR middle-end/121831
+	* expr.cc (raw_data_cst_read_str): New function.
+	(store_constructor) <case ARRAY_TYPE>: Handle RAW_DATA_CST.
+
+	* g++.dg/lto/pr121831_0.C: New test.
+	* g++.dg/lto/pr121831_1.C: New test.
+
+(cherry picked from commit 225d13c01d4e231bfabfda1c1c9135e36f55946a)
+---
+ gcc/expr.cc                           | 88 ++++++++++++++++++++++++---
+ gcc/testsuite/g++.dg/lto/pr121831_0.C | 17 ++++++
+ gcc/testsuite/g++.dg/lto/pr121831_1.C | 64 +++++++++++++++++++
+ 3 files changed, 162 insertions(+), 7 deletions(-)
+ create mode 100644 gcc/testsuite/g++.dg/lto/pr121831_0.C
+ create mode 100644 gcc/testsuite/g++.dg/lto/pr121831_1.C
+
+diff --git a/gcc/expr.cc b/gcc/expr.cc
+index 3815c565e2d8..48ad1e8d1d6a 100644
+--- a/gcc/expr.cc
++++ b/gcc/expr.cc
+@@ -6538,6 +6538,31 @@ string_cst_read_str (void *data, void *, HOST_WIDE_INT offset,
+   return c_readstr (TREE_STRING_POINTER (str) + offset, mode, false);
+ }
+ 
++/* Helper function for store_expr storing of RAW_DATA_CST.  */
++
++static rtx
++raw_data_cst_read_str (void *data, void *, HOST_WIDE_INT offset,
++		       fixed_size_mode mode)
++{
++  tree cst = (tree) data;
++
++  gcc_assert (offset >= 0);
++  if (offset >= RAW_DATA_LENGTH (cst))
++    return const0_rtx;
++
++  if ((unsigned HOST_WIDE_INT) offset + GET_MODE_SIZE (mode)
++      > (unsigned HOST_WIDE_INT) RAW_DATA_LENGTH (cst))
++    {
++      char *p = XALLOCAVEC (char, GET_MODE_SIZE (mode));
++      size_t l = RAW_DATA_LENGTH (cst) - offset;
++      memcpy (p, RAW_DATA_POINTER (cst) + offset, l);
++      memset (p + l, '\0', GET_MODE_SIZE (mode) - l);
++      return c_readstr (p, mode, false);
++    }
++
++  return c_readstr (RAW_DATA_POINTER (cst) + offset, mode, false);
++}
++
+ /* Generate code for computing expression EXP,
+    and storing the value into TARGET.
+ 
+@@ -7635,7 +7660,7 @@ store_constructor (tree exp, rtx target, int cleared, poly_int64 size,
+     case ARRAY_TYPE:
+       {
+ 	tree value, index;
+-	unsigned HOST_WIDE_INT i;
++	unsigned HOST_WIDE_INT i, j = 0;
+ 	bool need_to_clear;
+ 	tree domain;
+ 	tree elttype = TREE_TYPE (type);
+@@ -7697,6 +7722,8 @@ store_constructor (tree exp, rtx target, int cleared, poly_int64 size,
+ 		    this_node_count = (tree_to_uhwi (hi_index)
+ 				       - tree_to_uhwi (lo_index) + 1);
+ 		  }
++		else if (TREE_CODE (value) == RAW_DATA_CST)
++		  this_node_count = RAW_DATA_LENGTH (value);
+ 		else
+ 		  this_node_count = 1;
+ 
+@@ -7739,7 +7766,11 @@ store_constructor (tree exp, rtx target, int cleared, poly_int64 size,
+ 	    rtx xtarget = target;
+ 
+ 	    if (cleared && initializer_zerop (value))
+-	      continue;
++	      {
++		if (TREE_CODE (value) == RAW_DATA_CST)
++		  j += RAW_DATA_LENGTH (value) - 1;
++		continue;
++	      }
+ 
+ 	    mode = TYPE_MODE (elttype);
+ 	    if (mode != BLKmode)
+@@ -7755,6 +7786,8 @@ store_constructor (tree exp, rtx target, int cleared, poly_int64 size,
+ 		HOST_WIDE_INT lo, hi, count;
+ 		tree position;
+ 
++		gcc_assert (TREE_CODE (value) != RAW_DATA_CST);
++
+ 		/* If the range is constant and "small", unroll the loop.  */
+ 		if (const_bounds_p
+ 		    && tree_fits_shwi_p (lo_index)
+@@ -7854,6 +7887,7 @@ store_constructor (tree exp, rtx target, int cleared, poly_int64 size,
+ 	      {
+ 		tree position;
+ 
++		gcc_assert (TREE_CODE (value) != RAW_DATA_CST);
+ 		if (index == 0)
+ 		  index = ssize_int (1);
+ 
+@@ -7880,7 +7914,7 @@ store_constructor (tree exp, rtx target, int cleared, poly_int64 size,
+ 		  bitpos = ((tree_to_shwi (index) - minelt)
+ 			    * tree_to_uhwi (TYPE_SIZE (elttype)));
+ 		else
+-		  bitpos = (i * tree_to_uhwi (TYPE_SIZE (elttype)));
++		  bitpos = ((i + j) * tree_to_uhwi (TYPE_SIZE (elttype)));
+ 
+ 		if (MEM_P (target) && !MEM_KEEP_ALIAS_SET_P (target)
+ 		    && TREE_CODE (type) == ARRAY_TYPE
+@@ -7889,10 +7923,50 @@ store_constructor (tree exp, rtx target, int cleared, poly_int64 size,
+ 		    target = copy_rtx (target);
+ 		    MEM_KEEP_ALIAS_SET_P (target) = 1;
+ 		  }
+-		store_constructor_field (target, bitsize, bitpos, 0,
+-					 bitregion_end, mode, value,
+-					 cleared, get_alias_set (elttype),
+-					 reverse);
++		if (TREE_CODE (value) != RAW_DATA_CST)
++		  store_constructor_field (target, bitsize, bitpos, 0,
++					   bitregion_end, mode, value,
++					   cleared, get_alias_set (elttype),
++					   reverse);
++		else
++		  {
++		    j += RAW_DATA_LENGTH (value) - 1;
++		    gcc_assert (known_eq (bitsize, BITS_PER_UNIT));
++		    rtx to_rtx = adjust_address (target, mode,
++						 bitpos / BITS_PER_UNIT);
++
++		    if (to_rtx == target)
++		      to_rtx = copy_rtx (to_rtx);
++
++		    if (!MEM_KEEP_ALIAS_SET_P (to_rtx)
++			&& MEM_ALIAS_SET (to_rtx) != 0)
++		      set_mem_alias_set (to_rtx, get_alias_set (elttype));
++
++		    if (can_store_by_pieces (RAW_DATA_LENGTH (value),
++					     raw_data_cst_read_str,
++					     (void *) value,
++					     MEM_ALIGN (target), false))
++		      {
++			store_by_pieces (target, RAW_DATA_LENGTH (value),
++					 raw_data_cst_read_str, (void *) value,
++					 MEM_ALIGN (target), false,
++					 RETURN_BEGIN);
++			continue;
++		      }
++
++		    elttype
++		      = build_array_type_nelts (TREE_TYPE (value),
++						RAW_DATA_LENGTH (value));
++		    tree ctor = build_constructor_single (elttype, NULL_TREE,
++							  value);
++		    ctor = tree_output_constant_def (ctor);
++		    mode = TYPE_MODE (type);
++		    store_constructor_field (target,
++					     bitsize * RAW_DATA_LENGTH (value),
++					     bitpos, 0, bitregion_end, mode,
++					     ctor, cleared,
++					     get_alias_set (elttype), reverse);
++		  }
+ 	      }
+ 	  }
+ 	break;
+diff --git a/gcc/testsuite/g++.dg/lto/pr121831_0.C b/gcc/testsuite/g++.dg/lto/pr121831_0.C
+new file mode 100644
+index 000000000000..cd95133ae6bf
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/lto/pr121831_0.C
+@@ -0,0 +1,17 @@
++/* PR middle-end/121831 */
++/* { dg-lto-do run } */
++/* { dg-lto-options { { -O2 -flto } } } */
++
++struct S { unsigned char s[256]; };
++S a;
++extern const S b[1];
++struct T { unsigned char t[2048]; };
++T c;
++extern const T d[1];
++
++__attribute__((noipa)) void
++foo ()
++{
++  a = b[0];
++  c = d[0];
++}
+diff --git a/gcc/testsuite/g++.dg/lto/pr121831_1.C b/gcc/testsuite/g++.dg/lto/pr121831_1.C
+new file mode 100644
+index 000000000000..c5e75f646b78
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/lto/pr121831_1.C
+@@ -0,0 +1,64 @@
++struct S { unsigned char s[256]; };
++extern S a;
++struct T { unsigned char t[2048]; };
++extern T c;
++extern const T d[1];
++extern void foo ();
++
++extern const S b[1] {
++  { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,
++    17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,
++    33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48,
++    49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64,
++    65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80,
++    81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96,
++    97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112,
++    113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128,
++    129, 0 }
++};
++extern const T d[1] {
++  { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,
++    17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,
++    33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48,
++    49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64,
++    65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80,
++    81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96,
++    97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112,
++    113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128,
++    1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,
++    17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,
++    33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48,
++    49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64,
++    65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80,
++    81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96,
++    97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112,
++    113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128,
++    1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,
++    17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,
++    33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48,
++    49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64,
++    65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80,
++    81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96,
++    97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112,
++    113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128,
++    1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,
++    17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,
++    33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48,
++    49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64,
++    65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80,
++    81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96,
++    97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112,
++    113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128 }
++};
++
++int
++main ()
++{
++  foo ();
++  for (int i = 0; i < 256; ++i)
++    if (a.s[i] != (i < 129 ? i + 1 : 0))
++      __builtin_abort ();
++  for (int i = 0; i < 2048; ++i)
++    if (c.t[i] != (i < 512 ? (i & 127) + 1 : 0))
++      __builtin_abort ();
++}
+-- 
+2.43.7
+
+

@@ -1,0 +1,68 @@
+From 48f85d31b5bc62c0a0173890ff101def00291d58 Mon Sep 17 00:00:00 2001
+From: Jonathan Wakely <jwakely@redhat.com>
+Date: Thu, 4 Dec 2025 21:07:19 +0000
+Subject: [PATCH] libstdc++: std::atomic should use std::addressof
+
+libstdc++-v3/ChangeLog:
+
+	* include/bits/atomic_wait.h (__detail::__atomic_compare): Use
+	std::addressof instead of &.
+	* include/std/atomic (atomic::wait, atomic::notify_one)
+	(atomic::notify_all): Likewise.
+
+Reviewed-by: Patrick Palka <ppalka@redhat.com>
+
+(cherry picked from commit 7a2d14187611ac5a7e9af24397455b3f0503fdcb)
+---
+ libstdc++-v3/include/bits/atomic_wait.h | 3 ++-
+ libstdc++-v3/include/std/atomic         | 9 ++++-----
+ 2 files changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/libstdc++-v3/include/bits/atomic_wait.h b/libstdc++-v3/include/bits/atomic_wait.h
+index 6d1554f68a56..2cfeed72eeeb 100644
+--- a/libstdc++-v3/include/bits/atomic_wait.h
++++ b/libstdc++-v3/include/bits/atomic_wait.h
+@@ -188,7 +188,8 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
+       bool __atomic_compare(const _Tp& __a, const _Tp& __b)
+       {
+ 	// TODO make this do the correct padding bit ignoring comparison
+-	return __builtin_memcmp(&__a, &__b, sizeof(_Tp)) == 0;
++	return __builtin_memcmp(std::addressof(__a), std::addressof(__b),
++				sizeof(_Tp)) == 0;
+       }
+ 
+     struct __waiter_pool_base
+diff --git a/libstdc++-v3/include/std/atomic b/libstdc++-v3/include/std/atomic
+index 9b1aca0fc09a..eac888231588 100644
+--- a/libstdc++-v3/include/std/atomic
++++ b/libstdc++-v3/include/std/atomic
+@@ -401,21 +401,20 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
+       void
+       wait(_Tp __old, memory_order __m = memory_order_seq_cst) const noexcept
+       {
+-	std::__atomic_wait_address_v(&_M_i, __old,
+-			   [__m, this] { return this->load(__m); });
++	std::__atomic_wait_address_v(std::addressof(_M_i), __old,
++				     [__m, this] { return this->load(__m); });
+       }
+ 
+       // TODO add const volatile overload
+ 
+       void
+       notify_one() noexcept
+-      { std::__atomic_notify_address(&_M_i, false); }
++      { std::__atomic_notify_address(std::addressof(_M_i), false); }
+ 
+       void
+       notify_all() noexcept
+-      { std::__atomic_notify_address(&_M_i, true); }
++      { std::__atomic_notify_address(std::addressof(_M_i), true); }
+ #endif // __cpp_lib_atomic_wait
+-
+     };
+ 
+   /// Partial specialization for pointer types.
+-- 
+2.43.7
+
+

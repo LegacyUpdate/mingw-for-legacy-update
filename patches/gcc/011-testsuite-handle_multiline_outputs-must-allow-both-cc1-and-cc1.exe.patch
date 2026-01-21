@@ -1,0 +1,43 @@
+From 45212364fd812be21b98768a5bb3ed67487f59d8 Mon Sep 17 00:00:00 2001
+From: =?utf8?q?Torbj=C3=B6rn=20SVENSSON?= <torbjorn.svensson@foss.st.com>
+Date: Thu, 17 Jul 2025 14:27:08 +0200
+Subject: [PATCH] testsuite: handle-multiline-outputs must allow both cc1 and
+ cc1.exe
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf8
+Content-Transfer-Encoding: 8bit
+
+Prior to 14-2027-g985d6480fe5, the input text had the file extensions
+pruned. In 14-2027-g985d6480fe5, due to the move of the call, the
+pruning is never done. This change restores the pruning of the file
+extension to allow multiline test to pass on both Windows and other
+platforms like Linux.
+
+gcc/testsuite/ChangeLog:
+
+	* lib/multiline.exp: Added pruning of .exe.
+
+Signed-off-by: TorbjÃ¶rn SVENSSON <torbjorn.svensson@foss.st.com>
+(cherry picked from commit 7494e197e442dcb0fd6aceacdaee732e62b2c5d7)
+---
+ gcc/testsuite/lib/multiline.exp | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/gcc/testsuite/lib/multiline.exp b/gcc/testsuite/lib/multiline.exp
+index 08fd9691a4af..686504773ef8 100644
+--- a/gcc/testsuite/lib/multiline.exp
++++ b/gcc/testsuite/lib/multiline.exp
+@@ -153,6 +153,9 @@ proc handle-multiline-outputs { text } {
+     # If dg-enable-nn-line-numbers was provided, then obscure source-margin
+     # line numbers by converting them to "NN" form.
+     set text [maybe-handle-nn-line-numbers $text]
++
++    # Remove Windows .exe suffix
++    regsub -all "(as|cc1|cc1plus|collect2|f951|ld|lto-wrapper)\.exe?:" $text {\1:} text
+     
+     set index 0
+     foreach entry $multiline_expected_outputs {
+-- 
+2.43.7
+
+

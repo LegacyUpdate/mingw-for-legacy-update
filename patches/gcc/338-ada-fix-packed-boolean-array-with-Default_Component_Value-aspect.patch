@@ -1,0 +1,112 @@
+From 1a248bbc02cd595ac342723aff3c2e5d31b7188e Mon Sep 17 00:00:00 2001
+From: Eric Botcazou <ebotcazou@adacore.com>
+Date: Sat, 17 Jan 2026 22:27:53 +0100
+Subject: [PATCH] Ada: Fix packed boolean array with Default_Component_Value
+ aspect
+
+Putting the Default_Component_Value aspect on a bit-packed array type has
+never worked, so this plugs the loophole.  For the sake of consistency,
+the recent fix for PR ada/68179 is adjusted to use Has_Default_Aspect too.
+
+gcc/ada/
+	PR ada/68179
+	PR ada/123589
+	* exp_ch3.adb (Expand_Freeze_Array_Type): Build an initialization
+	procedure for a bit-packed array type if Has_Default_Aspect is set
+	on the base type, but make sure not to build it twice.  Also test
+	Has_Default_Aspect for a type derived from String.
+
+gcc/testsuite/
+	* gnat.dg/component_value2.adb: New test.
+
+Co-authored-by: Lisa Felidae <lisa@felidae.bam.moe>
+---
+ gcc/ada/exp_ch3.adb                        | 24 +++++++++++++---------
+ gcc/testsuite/gnat.dg/component_value2.adb | 22 ++++++++++++++++++++
+ 2 files changed, 36 insertions(+), 10 deletions(-)
+ create mode 100644 gcc/testsuite/gnat.dg/component_value2.adb
+
+diff --git a/gcc/ada/exp_ch3.adb b/gcc/ada/exp_ch3.adb
+index b202b440f154..e9953b53f270 100644
+--- a/gcc/ada/exp_ch3.adb
++++ b/gcc/ada/exp_ch3.adb
+@@ -5416,6 +5416,8 @@ package body Exp_Ch3 is
+           (Component_Type (Typ));
+ 
+    begin
++      --  First, the nonpacked case
++
+       if not Is_Bit_Packed_Array (Typ) then
+          if No (Init_Proc (Base)) then
+ 
+@@ -5439,7 +5441,7 @@ package body Exp_Ch3 is
+             --  and do not need initialization procedures.
+ 
+             elsif Is_Standard_String_Type (Base)
+-              and then No (Default_Aspect_Component_Value (Base))
++              and then not Has_Default_Aspect (Base)
+             then
+                null;
+ 
+@@ -5460,18 +5462,20 @@ package body Exp_Ch3 is
+             end if;
+          end if;
+ 
+-      --  For packed case, default initialization, except if the component type
+-      --  is itself a packed structure with an initialization procedure, or
+-      --  initialize/normalize scalars active, and we have a base type, or the
+-      --  type is public, because in that case a client might specify
+-      --  Normalize_Scalars and there better be a public Init_Proc for it.
++      --  For the packed case, no initialization, except if the component type
++      --  has an initialization procedure, or Initialize/Normalize_Scalars is
++      --  active, or there is a Default_Component_Value aspect, or the type is
++      --  public, because a client might specify Initialize_Scalars and there
++      --  better be a public Init_Proc for it.
+ 
+-      elsif (Present (Init_Proc (Component_Type (Base)))
+-              and then No (Base_Init_Proc (Base)))
+-        or else (Init_Or_Norm_Scalars and then Base = Typ)
++      elsif Present (Init_Proc (Component_Type (Base)))
++        or else Init_Or_Norm_Scalars
++        or else Has_Default_Aspect (Base)
+         or else Is_Public (Typ)
+       then
+-         Build_Array_Init_Proc (Base, N);
++         if No (Init_Proc (Base)) then
++            Build_Array_Init_Proc (Base, N);
++         end if;
+       end if;
+    end Expand_Freeze_Array_Type;
+ 
+diff --git a/gcc/testsuite/gnat.dg/component_value2.adb b/gcc/testsuite/gnat.dg/component_value2.adb
+new file mode 100644
+index 000000000000..c33b4c05f275
+--- /dev/null
++++ b/gcc/testsuite/gnat.dg/component_value2.adb
+@@ -0,0 +1,22 @@
++--  { dg-do run }
++
++procedure Component_Value2 is
++
++   type Bool_Packed_Array is array (Positive range 1 .. 20) of Boolean
++     with Default_Component_Value => False, Pack;
++
++   type Bool_Nonpacked_Array is array (Positive range 1 .. 20) of Boolean
++     with Default_Component_Value => False;
++
++   P  : Bool_Packed_Array;
++   NP : Bool_Nonpacked_Array;
++
++begin
++   if not (for all I in P'Range => P(I) = False) then
++      raise Program_Error;
++   end if;
++
++   if not (for all I in NP'Range => P(I) = False) then
++      raise Program_Error;
++   end if;
++end;
+-- 
+2.43.7
+
+

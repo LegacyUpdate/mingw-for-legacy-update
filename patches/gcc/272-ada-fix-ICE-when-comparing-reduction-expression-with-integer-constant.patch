@@ -1,0 +1,114 @@
+From 043ed7e185958510067698be29a549dff30fe326 Mon Sep 17 00:00:00 2001
+From: Eric Botcazou <ebotcazou@adacore.com>
+Date: Tue, 16 Dec 2025 00:34:31 +0100
+Subject: [PATCH] Ada: Fix ICE when comparing reduction expression with integer
+ constant
+
+This a regression present on the mainline, 15 and 14 branches: the compiler
+aborts on the comparison of the result of a reduction expression, whose
+prefix is an aggregate, and an integer constant, because of a type mismatch
+created by the resolution of the reduction expression, which unduly forces
+Integer on the reduction expression.
+
+gcc/ada/
+	PR ada/123138
+	* exp_attr.adb (Expand_N_Attribute_Reference) <Attribute_Reduce>:
+	Override a universal numeric type only if the prefix is not an
+	aggregate.
+
+gcc/testsuite/
+	* gnat.dg/reduce4.adb: New test.
+	* gnat.dg/reduce5.adb: Likewise.
+---
+ gcc/ada/exp_attr.adb              | 11 +++++-----
+ gcc/testsuite/gnat.dg/reduce4.adb |  9 ++++++++
+ gcc/testsuite/gnat.dg/reduce5.adb | 36 +++++++++++++++++++++++++++++++
+ 3 files changed, 50 insertions(+), 6 deletions(-)
+ create mode 100644 gcc/testsuite/gnat.dg/reduce4.adb
+ create mode 100644 gcc/testsuite/gnat.dg/reduce5.adb
+
+diff --git a/gcc/ada/exp_attr.adb b/gcc/ada/exp_attr.adb
+index 1eff20d14aca..66ef1919576c 100644
+--- a/gcc/ada/exp_attr.adb
++++ b/gcc/ada/exp_attr.adb
+@@ -6368,14 +6368,13 @@ package body Exp_Attr is
+                   Accum_Typ := Etype (N);
+                end if;
+ 
+-               --  Try to cope with wrong E1 when Etype (N) doesn't help
++               --  If Accum_Typ is a universal numeric type and the prefix
++               --  is not an aggregate, use its component type in order to
++               --  avoid resolution problems later on.
++
+                if Is_Universal_Numeric_Type (Accum_Typ) then
+-                  if Is_Array_Type (Etype (Prefix (N))) then
++                  if Nkind (Prefix (N)) /= N_Aggregate then
+                      Accum_Typ := Component_Type (Etype (Prefix (N)));
+-                  else
+-                     --  Further hackery can be added here when there is a
+-                     --  demonstrated need.
+-                     null;
+                   end if;
+                end if;
+ 
+diff --git a/gcc/testsuite/gnat.dg/reduce4.adb b/gcc/testsuite/gnat.dg/reduce4.adb
+new file mode 100644
+index 000000000000..ac27b7c0cc45
+--- /dev/null
++++ b/gcc/testsuite/gnat.dg/reduce4.adb
+@@ -0,0 +1,9 @@
++-- { dg-do compile }
++-- { dg-options "-gnat2022" }
++
++procedure Reduce4 (S : String) is
++begin
++  if [for E of S => 1]'Reduce ("+", 0) = 3 then
++    null;
++  end if;
++end;
+diff --git a/gcc/testsuite/gnat.dg/reduce5.adb b/gcc/testsuite/gnat.dg/reduce5.adb
+new file mode 100644
+index 000000000000..e377f6e25486
+--- /dev/null
++++ b/gcc/testsuite/gnat.dg/reduce5.adb
+@@ -0,0 +1,36 @@
++-- { dg-do compile }
++-- { dg-options "-gnat2022" }
++
++with Ada.Text_IO; use Ada.Text_IO;
++
++procedure Reduce5 is
++   subtype Chunk_Number is Natural range 1 .. 8;
++   Grid  : array (1 .. 80, 1 .. 100) of Boolean := (others => (others => False));
++   Partial_Sum, Partial_Max : array (Chunk_Number) of Natural := (others => 0);
++   Partial_Min              : array (Chunk_Number) of Natural := (others => Natural'Last);
++
++begin
++   for I in Grid'Range (1) loop
++      Grid (I, 1) := (for all J in Grid'Range (2) => Grid (I, J) = True);
++   end loop;
++
++   for I in Grid'Range (1) loop
++      declare
++         True_Count : constant Natural :=
++           [for J in Grid'Range(2) => (if Grid (I, J) then 1 else 0)]'Reduce("+",0);
++      begin
++         Partial_Sum (I) := @ + True_Count;
++         Partial_Min (I) := Natural'Min (@, True_Count);
++         Partial_Max (I) := Natural'Max (@, True_Count);
++      end;
++   end loop;
++
++  Put_Line ("Total=" & Natural'Image (Partial_Sum'Reduce ("+", 0)) &
++            ", Min=" & Natural'Image (Partial_Min'Reduce(Natural'Min, Natural'Last)) &
++            ", Max=" & Natural'Image (Partial_Max'Reduce(Natural'Max, 0)));
++
++  Put_Line ("Total=" & Partial_Sum'Reduce ("+", 0)'Image &
++            ", Min=" & Partial_Min'Reduce(Natural'Min, Natural'Last)'Image &
++            ", Max=" & Partial_Max'Reduce(Natural'Max, 0)'Image);
++
++end;
+-- 
+2.43.7
+
+

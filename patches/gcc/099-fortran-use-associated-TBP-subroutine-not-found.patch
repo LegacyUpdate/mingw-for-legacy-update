@@ -1,0 +1,94 @@
+From d6ee7c1631aca26508dc0ce699a2f7876fdc24b0 Mon Sep 17 00:00:00 2001
+From: Paul Thomas <pault@gcc.gnu.org>
+Date: Wed, 13 Aug 2025 07:16:31 +0100
+Subject: [PATCH] Fortran: Use associated TBP subroutine not found [PR89092]
+
+2025-08-13  Paul Thomas  <pault@gcc.gnu.org>
+
+gcc/fortran
+	PR fortran/89092
+	* resolve.cc (was_declared): Add subroutine attribute.
+
+gcc/testsuite/
+	PR fortran/89092
+	* gfortran.dg/pr89092.f90: New test.
+
+(cherry picked from commit e6f4543f63366433493b3870845b555fd00be7e6)
+---
+ gcc/fortran/resolve.cc                |  2 +-
+ gcc/testsuite/gfortran.dg/pr89092.f90 | 49 +++++++++++++++++++++++++++
+ 2 files changed, 50 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/gfortran.dg/pr89092.f90
+
+diff --git a/gcc/fortran/resolve.cc b/gcc/fortran/resolve.cc
+index 760526eb4029..432cb0a3e5b9 100644
+--- a/gcc/fortran/resolve.cc
++++ b/gcc/fortran/resolve.cc
+@@ -1630,7 +1630,7 @@ was_declared (gfc_symbol *sym)
+   if (a.allocatable || a.dimension || a.dummy || a.external || a.intrinsic
+       || a.optional || a.pointer || a.save || a.target || a.volatile_
+       || a.value || a.access != ACCESS_UNKNOWN || a.intent != INTENT_UNKNOWN
+-      || a.asynchronous || a.codimension)
++      || a.asynchronous || a.codimension || a.subroutine)
+     return 1;
+ 
+   return 0;
+diff --git a/gcc/testsuite/gfortran.dg/pr89092.f90 b/gcc/testsuite/gfortran.dg/pr89092.f90
+new file mode 100644
+index 000000000000..21649940657c
+--- /dev/null
++++ b/gcc/testsuite/gfortran.dg/pr89092.f90
+@@ -0,0 +1,49 @@
++! { dg-do compile }
++! { dg-options "-fdump-tree-original" }
++module AModule
++   implicit none
++   private
++   public Foo
++
++   interface Foo
++      module procedure FooPrivate
++   end interface
++contains
++   subroutine FooPrivate(x)
++      integer :: x
++
++      write(*,*) 'Foo(integer)'
++   end subroutine
++end module
++module BModule
++   implicit none
++   private
++
++   type, public :: BType
++   contains
++      procedure :: Foo
++   end type
++contains
++   subroutine Foo(self)
++      class(BType) :: self
++
++      write(*,*) 'Foo(BType)'
++   end subroutine
++end module
++program iface_tbp_test
++   use AModule
++   implicit none
++
++   call test()
++
++contains
++   subroutine test()
++      use BModule
++
++      type(BType) :: y
++
++      call y%Foo()
++      call Foo(1)
++   end subroutine
++end program
++! { dg-final { scan-tree-dump-times "foo \\(&class.2\\)" 1 "original" } }
+-- 
+2.43.7
+
+

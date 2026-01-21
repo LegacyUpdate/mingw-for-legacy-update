@@ -1,0 +1,180 @@
+From afd88fad1615032b5bea2a1916757eee6edaeac9 Mon Sep 17 00:00:00 2001
+From: "H.J. Lu" <hjl.tools@gmail.com>
+Date: Thu, 24 Jul 2025 07:38:13 -0700
+Subject: [PATCH] x86: Disallow -mtls-dialect=gnu with
+ no_caller_saved_registers
+
+__tls_get_addr doesn't preserve vector registers.  When a function
+with no_caller_saved_registers attribute calls __tls_get_addr, YMM
+and ZMM registers will be clobbered.  Issue an error and suggest
+-mtls-dialect=gnu2 in this case.
+
+gcc/
+
+	PR target/121208
+	* config/i386/i386.cc (ix86_tls_get_addr): Issue an error for
+	-mtls-dialect=gnu with no_caller_saved_registers attribute and
+	suggest -mtls-dialect=gnu2.
+
+gcc/testsuite/
+
+	PR target/121208
+	* gcc.target/i386/pr121208-1a.c: New test.
+	* gcc.target/i386/pr121208-1b.c: Likewise.
+	* gcc.target/i386/pr121208-2a.c: Likewise.
+	* gcc.target/i386/pr121208-2b.c: Likewise.
+	* gcc.target/i386/pr121208-3a.c: Likewise.
+	* gcc.target/i386/pr121208-3b.c: Likewise.
+
+Signed-off-by: H.J. Lu <hjl.tools@gmail.com>
+(cherry picked from commit 5760ddbce26ff9c5c8851b6b2089ad65981d5078)
+---
+ gcc/config/i386/i386.cc                     | 22 +++++++++++++++++++++
+ gcc/testsuite/gcc.target/i386/pr121208-1a.c | 15 ++++++++++++++
+ gcc/testsuite/gcc.target/i386/pr121208-1b.c |  4 ++++
+ gcc/testsuite/gcc.target/i386/pr121208-2a.c | 17 ++++++++++++++++
+ gcc/testsuite/gcc.target/i386/pr121208-2b.c |  4 ++++
+ gcc/testsuite/gcc.target/i386/pr121208-3a.c | 17 ++++++++++++++++
+ gcc/testsuite/gcc.target/i386/pr121208-3b.c |  4 ++++
+ 7 files changed, 83 insertions(+)
+ create mode 100644 gcc/testsuite/gcc.target/i386/pr121208-1a.c
+ create mode 100644 gcc/testsuite/gcc.target/i386/pr121208-1b.c
+ create mode 100644 gcc/testsuite/gcc.target/i386/pr121208-2a.c
+ create mode 100644 gcc/testsuite/gcc.target/i386/pr121208-2b.c
+ create mode 100644 gcc/testsuite/gcc.target/i386/pr121208-3a.c
+ create mode 100644 gcc/testsuite/gcc.target/i386/pr121208-3b.c
+
+diff --git a/gcc/config/i386/i386.cc b/gcc/config/i386/i386.cc
+index 08d0519ccd13..b481f0161f55 100644
+--- a/gcc/config/i386/i386.cc
++++ b/gcc/config/i386/i386.cc
+@@ -12132,6 +12132,28 @@ static GTY(()) rtx ix86_tls_symbol;
+ static rtx
+ ix86_tls_get_addr (void)
+ {
++  if (cfun->machine->call_saved_registers
++      == TYPE_NO_CALLER_SAVED_REGISTERS)
++    {
++      /* __tls_get_addr doesn't preserve vector registers.  When a
++	 function with no_caller_saved_registers attribute calls
++	 __tls_get_addr, YMM and ZMM registers will be clobbered.
++	 Issue an error and suggest -mtls-dialect=gnu2 in this case.  */
++      if (cfun->machine->func_type == TYPE_NORMAL)
++	error (G_("%<-mtls-dialect=gnu2%> must be used with a function"
++		  " with the %<no_caller_saved_registers%> attribute"));
++      else
++	error (cfun->machine->func_type == TYPE_EXCEPTION
++	       ? G_("%<-mtls-dialect=gnu2%> must be used with an"
++		    " exception service routine")
++	       : G_("%<-mtls-dialect=gnu2%> must be used with an"
++		    " interrupt service routine"));
++      /* Don't issue the same error twice.  */
++      cfun->machine->func_type = TYPE_NORMAL;
++      cfun->machine->call_saved_registers
++	= TYPE_DEFAULT_CALL_SAVED_REGISTERS;
++    }
++
+   if (!ix86_tls_symbol)
+     {
+       const char *sym
+diff --git a/gcc/testsuite/gcc.target/i386/pr121208-1a.c b/gcc/testsuite/gcc.target/i386/pr121208-1a.c
+new file mode 100644
+index 000000000000..ac851cb50d86
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/i386/pr121208-1a.c
+@@ -0,0 +1,15 @@
++/* { dg-do compile { target *-*-linux* } } */
++/* { dg-options "-O2 -fPIC -mtls-dialect=gnu" } */
++
++extern __thread int bar;
++extern void func (void);
++
++__attribute__((no_caller_saved_registers))
++void
++foo (int error)
++{
++  bar = 1; /* { dg-error -mtls-dialect=gnu2 } */
++  if (error == 0)
++    func ();
++  bar = 0;
++}
+diff --git a/gcc/testsuite/gcc.target/i386/pr121208-1b.c b/gcc/testsuite/gcc.target/i386/pr121208-1b.c
+new file mode 100644
+index 000000000000..b97ac715c655
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/i386/pr121208-1b.c
+@@ -0,0 +1,4 @@
++/* { dg-do compile { target *-*-linux* } } */
++/* { dg-options "-O2 -fPIC -mtls-dialect=gnu2" } */
++
++#include "pr121208-1a.c"
+diff --git a/gcc/testsuite/gcc.target/i386/pr121208-2a.c b/gcc/testsuite/gcc.target/i386/pr121208-2a.c
+new file mode 100644
+index 000000000000..c1891ae322c6
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/i386/pr121208-2a.c
+@@ -0,0 +1,17 @@
++/* { dg-do compile { target *-*-linux* } } */
++/* { dg-options "-O2 -fPIC -mtls-dialect=gnu" } */
++
++typedef unsigned int uword_t __attribute__ ((mode (__word__)));
++extern __thread int bar;
++extern void func (void);
++
++__attribute__((target("general-regs-only")))
++__attribute__((interrupt))
++void
++foo (void *frame, uword_t error)
++{
++  bar = 1; /* { dg-error -mtls-dialect=gnu2 } */
++  if (error == 0)
++    func ();
++  bar = 0;
++}
+diff --git a/gcc/testsuite/gcc.target/i386/pr121208-2b.c b/gcc/testsuite/gcc.target/i386/pr121208-2b.c
+new file mode 100644
+index 000000000000..269b120f9906
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/i386/pr121208-2b.c
+@@ -0,0 +1,4 @@
++/* { dg-do compile { target *-*-linux* } } */
++/* { dg-options "-O2 -fPIC -mtls-dialect=gnu2" } */
++
++#include "pr121208-2a.c"
+diff --git a/gcc/testsuite/gcc.target/i386/pr121208-3a.c b/gcc/testsuite/gcc.target/i386/pr121208-3a.c
+new file mode 100644
+index 000000000000..26fe68701559
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/i386/pr121208-3a.c
+@@ -0,0 +1,17 @@
++/* { dg-do compile { target *-*-linux* } } */
++/* { dg-options "-O2 -fPIC -mtls-dialect=gnu" } */
++
++typedef unsigned int uword_t __attribute__ ((mode (__word__)));
++extern __thread int bar;
++extern void func (void);
++
++__attribute__((target("general-regs-only")))
++__attribute__((interrupt))
++void
++foo (void *frame)
++{
++  bar = 1; /* { dg-error -mtls-dialect=gnu2 } */
++  if (frame == 0)
++    func ();
++  bar = 0;
++}
+diff --git a/gcc/testsuite/gcc.target/i386/pr121208-3b.c b/gcc/testsuite/gcc.target/i386/pr121208-3b.c
+new file mode 100644
+index 000000000000..b672d751d7f6
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/i386/pr121208-3b.c
+@@ -0,0 +1,4 @@
++/* { dg-do compile { target *-*-linux* } } */
++/* { dg-options "-O2 -fPIC -mtls-dialect=gnu2" } */
++
++#include "pr121208-3a.c"
+-- 
+2.43.7
+
+

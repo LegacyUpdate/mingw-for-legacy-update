@@ -1,0 +1,134 @@
+From dabaca84b2bce49d2c5e9c98f88cf13ea61a7604 Mon Sep 17 00:00:00 2001
+From: Nathaniel Shead <nathanieloshead@gmail.com>
+Date: Sun, 23 Nov 2025 23:24:39 +1100
+Subject: [PATCH] c++/modules: Stream all REQUIRES_EXPR_PARMS [PR122789]
+
+We don't generally stream the TREE_CHAIN of a DECL, as this would cause
+us to unnecessarily walk into the next member in its scope chain any
+time it was referenced by an expression.
+
+Unfortunately, REQUIRES_EXPR_PARMS is a tree chain of PARM_DECLs, so we
+were only ever streaming the first parameter.  This meant that when a
+parameter's type could not be tsubst'd we would ICE instead of returning
+false.
+
+This patch special-cases REQUIRES_EXPR to always stream the chain of
+decls in its first operand.  As a drive-by improvement we also remove a
+fixme about checking uncontexted PARM_DECLs.
+
+	PR c++/122789
+
+gcc/cp/ChangeLog:
+
+	* module.cc (trees_out::core_vals): Treat REQUIRES_EXPR
+	specially and stream the chained decls of its first operand.
+	(trees_in::core_vals): Likewise.
+	(trees_out::tree_node): Check the PARM_DECLs we see are what we
+	expect.
+
+gcc/testsuite/ChangeLog:
+
+	* g++.dg/modules/concept-12_a.C: New test.
+	* g++.dg/modules/concept-12_b.C: New test.
+
+Signed-off-by: Nathaniel Shead <nathanieloshead@gmail.com>
+Reviewed-by: Jason Merrill <jason@redhat.com>
+(cherry picked from commit 53b4e1d951eaf5bbb2fcedfdd156d80a4160878a)
+---
+ gcc/cp/module.cc                            | 37 ++++++++++++++-------
+ gcc/testsuite/g++.dg/modules/concept-12_a.C |  6 ++++
+ gcc/testsuite/g++.dg/modules/concept-12_b.C |  5 +++
+ 3 files changed, 36 insertions(+), 12 deletions(-)
+ create mode 100644 gcc/testsuite/g++.dg/modules/concept-12_a.C
+ create mode 100644 gcc/testsuite/g++.dg/modules/concept-12_b.C
+
+diff --git a/gcc/cp/module.cc b/gcc/cp/module.cc
+index 8490b64e2330..9b1283692d1a 100644
+--- a/gcc/cp/module.cc
++++ b/gcc/cp/module.cc
+@@ -6407,13 +6407,19 @@ trees_out::core_vals (tree t)
+ 	if (has_warning_spec (t))
+ 	  u (get_warning_spec (t));
+ 
+-      /* Walk in forward order, as (for instance) REQUIRES_EXPR has a
+-         bunch of unscoped parms on its first operand.  It's safer to
+-         create those in order.  */
+       bool vl = TREE_CODE_CLASS (code) == tcc_vl_exp;
+-      for (unsigned limit = (vl ? VL_EXP_OPERAND_LENGTH (t)
+-			     : TREE_OPERAND_LENGTH (t)),
+-	     ix = unsigned (vl); ix != limit; ix++)
++      unsigned limit = (vl ? VL_EXP_OPERAND_LENGTH (t)
++			: TREE_OPERAND_LENGTH (t));
++      unsigned ix = unsigned (vl);
++      if (code == REQUIRES_EXPR)
++	{
++	  /* The first operand of a REQUIRES_EXPR is a tree chain
++	     of PARM_DECLs.  We need to stream this separately as
++	     otherwise we would only stream the first one.  */
++	  chained_decls (REQUIRES_EXPR_PARMS (t));
++	  ++ix;
++	}
++      for (; ix != limit; ix++)
+ 	WT (TREE_OPERAND (t, ix));
+     }
+   else
+@@ -6989,9 +6995,15 @@ trees_in::core_vals (tree t)
+ 	put_warning_spec (t, u ());
+ 
+       bool vl = TREE_CODE_CLASS (code) == tcc_vl_exp;
+-      for (unsigned limit = (vl ? VL_EXP_OPERAND_LENGTH (t)
+-			     : TREE_OPERAND_LENGTH (t)),
+-	     ix = unsigned (vl); ix != limit; ix++)
++      unsigned limit = (vl ? VL_EXP_OPERAND_LENGTH (t)
++			: TREE_OPERAND_LENGTH (t));
++      unsigned ix = unsigned (vl);
++      if (code == REQUIRES_EXPR)
++	{
++	  REQUIRES_EXPR_PARMS (t) = chained_decls ();
++	  ++ix;
++	}
++      for (; ix != limit; ix++)
+ 	RTU (TREE_OPERAND (t, ix));
+     }
+ 
+@@ -10022,9 +10034,10 @@ trees_out::tree_node (tree t)
+ 	      break;
+ 
+ 	    case PARM_DECL:
+-	      /* REQUIRES_EXPRs have a tree list of uncontexted
+-		 PARM_DECLS.  It'd be nice if they had a
+-		 distinguishing flag to double check.  */
++	      /* REQUIRES_EXPRs have a chain of uncontexted PARM_DECLS,
++		 and an implicit this parm in an NSDMI has no context.  */
++	      gcc_checking_assert (CONSTRAINT_VAR_P (t)
++				   || DECL_NAME (t) == this_identifier);
+ 	      break;
+ 	    }
+ 	  goto by_value;
+diff --git a/gcc/testsuite/g++.dg/modules/concept-12_a.C b/gcc/testsuite/g++.dg/modules/concept-12_a.C
+new file mode 100644
+index 000000000000..9d370d35bab6
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/modules/concept-12_a.C
+@@ -0,0 +1,6 @@
++// PR c++/122789
++// { dg-additional-options "-fmodules -fconcepts" }
++// { dg-module-cmi M }
++
++export module M;
++template <typename T> constexpr bool b = requires(int, typename T::U x) { x; };
+diff --git a/gcc/testsuite/g++.dg/modules/concept-12_b.C b/gcc/testsuite/g++.dg/modules/concept-12_b.C
+new file mode 100644
+index 000000000000..83353caeacca
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/modules/concept-12_b.C
+@@ -0,0 +1,5 @@
++// PR c++/122789
++// { dg-additional-options "-fmodules -fconcepts" }
++
++module M;
++static_assert(!b<int>);
+-- 
+2.43.7
+
+

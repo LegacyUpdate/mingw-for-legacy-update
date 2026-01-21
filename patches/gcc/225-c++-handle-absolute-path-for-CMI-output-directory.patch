@@ -1,0 +1,46 @@
+From bad5acbfa77cfd9e46a3f14e3fd79f0fbd8d4bb6 Mon Sep 17 00:00:00 2001
+From: Jonathan Wakely <jwakely@redhat.com>
+Date: Tue, 18 Nov 2025 13:19:53 +0000
+Subject: [PATCH] c++: Handle absolute path for CMI output directory [PR122677]
+
+When trying to create each directory component of an absolute path, the
+first call to mkdir uses a path of "" which gives an ENOENT error. This
+causes the create_dirs function to return without creating anything.
+
+This commit skips past the leading slashes of an absolute path, so that
+the first call to mkdir is for an actual directory name, not an empty
+string.
+
+gcc/cp/ChangeLog:
+
+	PR c++/122677
+	* module.cc (create_dirs): Skip past any leading slashes.
+
+(cherry picked from commit c1cf465bdbe587b1ccd8feb05b9b3878163708fe)
+---
+ gcc/cp/module.cc | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/gcc/cp/module.cc b/gcc/cp/module.cc
+index b7e137124b29..8490b64e2330 100644
+--- a/gcc/cp/module.cc
++++ b/gcc/cp/module.cc
+@@ -4884,8 +4884,13 @@ maybe_add_cmi_prefix (const char *to, size_t *len_p = NULL)
+ static void
+ create_dirs (char *path)
+ {
++  char *base = path;
++  /* Skip past initial slashes of absolute path.  */
++  while (IS_DIR_SEPARATOR (*base))
++    base++;
++
+   /* Try and create the missing directories.  */
+-  for (char *base = path; *base; base++)
++  for (; *base; base++)
+     if (IS_DIR_SEPARATOR (*base))
+       {
+ 	char sep = *base;
+-- 
+2.43.7
+
+

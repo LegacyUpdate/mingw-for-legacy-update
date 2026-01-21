@@ -1,0 +1,203 @@
+From a4ee0e3597f953bdb3880f9fd90166cd83edff9f Mon Sep 17 00:00:00 2001
+From: Tamar Christina <tamar.christina@arm.com>
+Date: Fri, 31 Oct 2025 16:07:24 +0000
+Subject: [PATCH] AArch64: support bf16 to sf extensions [PR121853]
+
+It looks like during the upstreaming of BF16 we didn't implement the extend
+optab for it.
+
+As a result we go through soft-float emulation which results in massive
+performance drop in projects using BF16.
+
+As an example, for
+
+float convert(__bf16 value) {
+    return (float)value;
+}
+
+we generate:
+
+convert(__bf16):
+        stp     x29, x30, [sp, -16]!
+        mov     x29, sp
+        bl      __extendbfsf2
+        ldp     x29, x30, [sp], 16
+        ret
+
+and after this patch
+
+convert:
+        movi    v31.4s, 0
+        ext     v0.16b, v31.16b, v0.16b, #14
+        ret
+
+We generate an ext with movi because this has same latency as a shift however
+it has twice the throughput.  The zero vector is zero latency as such in real
+workloads this codegen is much better than using shifts.
+
+As a reminder, BF16 -> FP32 is just shifting left 16 bits.
+
+The expand pattern has to rely on generating multiple subregs due to a
+restriction that subregs can't chang floating point size and type at the same
+time.
+
+I've tried alternative approaches like using the EXT as SF mode, but the
+paradoxical subreg of BF -> SF isn't allowed and using an extend doesn't work
+because extend is what we're defining.
+
+gcc/ChangeLog:
+
+	PR target/121853
+	* config/aarch64/aarch64-simd.md (extendbfsf2): New.
+
+gcc/testsuite/ChangeLog:
+
+	PR target/121853
+	* gcc.target/aarch64/pr121853_1.c: New test.
+	* gcc.target/aarch64/pr121853_2.c: New test.
+
+(cherry picked from commit 58ee2079230e0340187a5a9990891fb174034301)
+---
+ gcc/config/aarch64/aarch64-simd.md            | 24 +++++++
+ gcc/testsuite/gcc.target/aarch64/pr121853_1.c | 64 +++++++++++++++++++
+ gcc/testsuite/gcc.target/aarch64/pr121853_2.c | 14 ++++
+ 3 files changed, 102 insertions(+)
+ create mode 100644 gcc/testsuite/gcc.target/aarch64/pr121853_1.c
+ create mode 100644 gcc/testsuite/gcc.target/aarch64/pr121853_2.c
+
+diff --git a/gcc/config/aarch64/aarch64-simd.md b/gcc/config/aarch64/aarch64-simd.md
+index 97558c9687ce..ad7e998ad77b 100644
+--- a/gcc/config/aarch64/aarch64-simd.md
++++ b/gcc/config/aarch64/aarch64-simd.md
+@@ -3181,6 +3181,7 @@
+     DONE;
+   }
+ )
++
+ (define_insn "extend<mode><Vwide>2"
+   [(set (match_operand:<VWIDE> 0 "register_operand" "=w")
+ 	(float_extend:<VWIDE>
+@@ -3190,6 +3191,29 @@
+   [(set_attr "type" "neon_fp_cvt_widen_s")]
+ )
+ 
++/* A BF->SF is a shift left of 16, however shifts are expensive and the generic
++   middle-end expansion would force through DI move.  Instead use EXT to do the
++   shift to get better throughput and don't go through GPRs.  */
++
++(define_expand "extendbfsf2"
++  [(set (match_operand:SF 0 "register_operand" "=w")
++	(float_extend:SF
++	  (match_operand:BF 1 "register_operand" "w")))]
++  "TARGET_SIMD"
++{
++  rtx tmp0 = aarch64_gen_shareable_zero (V8BFmode);
++  rtx op0 = force_lowpart_subreg (V8BFmode, operands[1], BFmode);
++  rtx res = gen_reg_rtx (V8BFmode);
++  emit_insn (gen_aarch64_extv8bf (res, tmp0, op0, gen_int_mode (7, SImode)));
++  /* Subregs between floating point modes aren't allowed to change size, so go
++     through V4SFmode.  */
++  res = force_lowpart_subreg (V4SFmode, res, V8BFmode);
++  res = force_lowpart_subreg (SFmode, res, V4SFmode);
++  emit_move_insn (operands[0], res);
++  DONE;
++})
++
++
+ ;; Float narrowing operations.
+ 
+ (define_insn "aarch64_float_trunc_rodd_df"
+diff --git a/gcc/testsuite/gcc.target/aarch64/pr121853_1.c b/gcc/testsuite/gcc.target/aarch64/pr121853_1.c
+new file mode 100644
+index 000000000000..24b2fdc8cea1
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/aarch64/pr121853_1.c
+@@ -0,0 +1,64 @@
++/* { dg-do run } */
++/* { dg-additional-options "-O2 -std=c99" } */
++
++#include <stdint.h>
++#include <stdio.h>
++#include <string.h>
++
++__attribute__ ((noipa))
++float convert(__bf16 value) {
++    return (float)value;
++}
++
++static inline uint32_t f32_bits(float f) {
++    uint32_t u; memcpy(&u, &f, sizeof u); return u;
++}
++static inline __bf16 bf16_from_bits(uint16_t u) {
++    __bf16 b;  memcpy(&b, &u, sizeof b); return b;
++}
++
++/* Fixed bf16 inputs (as raw 16-bit payloads) covering edge cases.  */
++static const uint16_t inputs[] = {
++    0x0000, // +0
++    0x8000, // -0
++    0x7F80, // +inf
++    0xFF80, // -inf
++    0x7FC0, // qNaN (+)  (quiet bit set in bf16)
++    0xFFC0, // qNaN (-)
++    0x7F01, // sNaN (+)  (will be quieted by conversion)
++    0xFF01, // sNaN (-)
++    0x0001, // smallest +subnormal
++    0x007F, // largest  +subnormal
++    0x8001, // smallest -subnormal
++    0x807F, // largest  -subnormal
++    0x0080, // smallest +normal
++    0x3F80, // +1.0
++    0xBF80, // -1.0
++    0x3F00, // +0.5
++    0xBF00, // -0.5
++    0x3FC0, // +1.5
++    0x7F7F, // max finite +
++    0xFF7F, // max finite -
++};
++
++int main(void) {
++    const size_t N = sizeof(inputs)/sizeof(inputs[0]);
++    size_t fails = 0;
++
++    for (size_t i = 0; i < N; ++i) {
++        __bf16 in = bf16_from_bits(inputs[i]);
++        float out = convert(in);
++        uint32_t got = f32_bits(out);
++        uint32_t exp = inputs[i] << 16;
++
++        if (got != exp) {
++            printf("FAIL[%zu]: in_bf16=0x%04X  exp_f32=0x%08X  got_f32=0x%08X\n",
++                   i, inputs[i], exp, got);
++            ++fails;
++        }
++    }
++
++    if (fails != 0)
++      __builtin_abort ();
++}
++
+diff --git a/gcc/testsuite/gcc.target/aarch64/pr121853_2.c b/gcc/testsuite/gcc.target/aarch64/pr121853_2.c
+new file mode 100644
+index 000000000000..e9fb4016bcb7
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/aarch64/pr121853_2.c
+@@ -0,0 +1,14 @@
++/* { dg-do compile } */
++/* { dg-additional-options "-O1" } */
++/* { dg-final { check-function-bodies "**" "" } } */
++
++float convert(__bf16 value) {
++    return (float)value;
++}
++
++/*
++** convert:
++**	movi	v[0-9]+.4s, 0
++**	ext	v[0-9]+.16b, v[0-9]+.16b, v[0-9]+.16b, #14
++**	ret
++*/
+-- 
+2.43.7
+
+

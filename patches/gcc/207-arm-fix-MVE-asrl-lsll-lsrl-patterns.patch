@@ -1,0 +1,143 @@
+From d1ba5b1d5144c5b65098fb3a4bdfa23a426f994b Mon Sep 17 00:00:00 2001
+From: Christophe Lyon <christophe.lyon@linaro.org>
+Date: Wed, 27 Aug 2025 09:42:56 +0000
+Subject: [PATCH] arm: fix MVE asrl lsll lsrl patterns [PR122216]
+
+The thumb2_asrl, thumb2_lsll and thumb2_lsrl patterns were incorrecly
+using (match_dup 0) for the first argument of the shift operator.
+
+This patch replaces that with (match_operand:DI 1
+arm_general_register_operandarm_general_register_operand "0") and
+fixes the related expanders in arm.md to use that additional argument
+and get rid of the copy of operands[1] to operands[0].
+
+Finally, since these patterns are MVE-only, rename them into mve_XXX
+and move them to mve.md.
+
+gcc/ChangeLog:
+
+	PR target/122216
+	* config/arm/thumb2.md (thumb2_asrl, thumb2_lsll, thumb2_lsrl):
+	Move to ...
+	* config/arm/mve.md (mve_asrl, mve_lsll, mve_lsrl): ... here. Use
+	match_operand instead of match_dup.
+	* config/arm/arm.md (ashldi3, ashrdi3, lshrdi3): Remove useless
+	copy. Update for new prototype.
+---
+ gcc/config/arm/arm.md    | 15 +++------------
+ gcc/config/arm/mve.md    | 25 +++++++++++++++++++++++++
+ gcc/config/arm/thumb2.md | 24 ------------------------
+ 3 files changed, 28 insertions(+), 36 deletions(-)
+
+diff --git a/gcc/config/arm/arm.md b/gcc/config/arm/arm.md
+index c99d2942a1c8..6dc46764d0b4 100644
+--- a/gcc/config/arm/arm.md
++++ b/gcc/config/arm/arm.md
+@@ -4606,10 +4606,7 @@
+       if (arm_reg_or_long_shift_imm (operands[2], GET_MODE (operands[2]))
+ 	  && (REG_P (operands[2]) || INTVAL(operands[2]) != 32))
+         {
+-	  if (!reg_overlap_mentioned_p(operands[0], operands[1]))
+-	    emit_insn (gen_movdi (operands[0], operands[1]));
+-
+-	  emit_insn (gen_thumb2_lsll (operands[0], operands[2]));
++	  emit_insn (gen_mve_lsll (operands[0], operands[1], operands[2]));
+ 	  DONE;
+ 	}
+     }
+@@ -4645,10 +4642,7 @@
+   if (TARGET_HAVE_MVE && !BYTES_BIG_ENDIAN
+       && arm_reg_or_long_shift_imm (operands[2], GET_MODE (operands[2])))
+     {
+-      if (!reg_overlap_mentioned_p(operands[0], operands[1]))
+-	emit_insn (gen_movdi (operands[0], operands[1]));
+-
+-      emit_insn (gen_thumb2_asrl (operands[0], operands[2]));
++      emit_insn (gen_mve_asrl (operands[0], operands[1], operands[2]));
+       DONE;
+     }
+ 
+@@ -4680,10 +4674,7 @@
+   if (TARGET_HAVE_MVE && !BYTES_BIG_ENDIAN
+     && long_shift_imm (operands[2], GET_MODE (operands[2])))
+     {
+-      if (!reg_overlap_mentioned_p(operands[0], operands[1]))
+-        emit_insn (gen_movdi (operands[0], operands[1]));
+-
+-      emit_insn (gen_thumb2_lsrl (operands[0], operands[2]));
++      emit_insn (gen_mve_lsrl (operands[0], operands[1], operands[2]));
+       DONE;
+     }
+ 
+diff --git a/gcc/config/arm/mve.md b/gcc/config/arm/mve.md
+index 17a162ba2777..6a3147d59d56 100644
+--- a/gcc/config/arm/mve.md
++++ b/gcc/config/arm/mve.md
+@@ -4714,3 +4714,28 @@
+   "TARGET_HAVE_MVE"
+   "dlstp.<dlstp_elemsize>\t%|lr, %0"
+   [(set_attr "type" "mve_misc")])
++
++;; Scalar shifts
++(define_insn "mve_asrl"
++  [(set (match_operand:DI 0 "arm_general_register_operand" "=r")
++	(ashiftrt:DI (match_operand:DI 1 "arm_general_register_operand" "0")
++		     (match_operand:SI 2 "arm_reg_or_long_shift_imm" "rPg")))]
++  "TARGET_HAVE_MVE"
++  "asrl%?\\t%Q0, %R1, %2"
++  [(set_attr "predicable" "yes")])
++
++(define_insn "mve_lsll"
++  [(set (match_operand:DI 0 "arm_general_register_operand" "=r")
++	(ashift:DI (match_operand:DI 1 "arm_general_register_operand" "0")
++		   (match_operand:SI 2 "arm_reg_or_long_shift_imm" "rPg")))]
++  "TARGET_HAVE_MVE"
++  "lsll%?\\t%Q0, %R1, %2"
++  [(set_attr "predicable" "yes")])
++
++(define_insn "mve_lsrl"
++  [(set (match_operand:DI 0 "arm_general_register_operand" "=r")
++	(lshiftrt:DI (match_operand:DI 1 "arm_general_register_operand" "0")
++		     (match_operand:SI 2 "long_shift_imm" "Pg")))]
++  "TARGET_HAVE_MVE"
++  "lsrl%?\\t%Q0, %R1, %2"
++  [(set_attr "predicable" "yes")])
+diff --git a/gcc/config/arm/thumb2.md b/gcc/config/arm/thumb2.md
+index 172c974b3dac..9d2c071e71e5 100644
+--- a/gcc/config/arm/thumb2.md
++++ b/gcc/config/arm/thumb2.md
+@@ -1734,30 +1734,6 @@
+   [(set_attr "predicable" "yes")]
+ )
+ 
+-(define_insn "thumb2_asrl"
+-  [(set (match_operand:DI 0 "arm_general_register_operand" "+r")
+-	(ashiftrt:DI (match_dup 0)
+-		     (match_operand:SI 1 "arm_reg_or_long_shift_imm" "rPg")))]
+-  "TARGET_HAVE_MVE"
+-  "asrl%?\\t%Q0, %R0, %1"
+-  [(set_attr "predicable" "yes")])
+-
+-(define_insn "thumb2_lsll"
+-  [(set (match_operand:DI 0 "arm_general_register_operand" "+r")
+-	(ashift:DI (match_dup 0)
+-		   (match_operand:SI 1 "arm_reg_or_long_shift_imm" "rPg")))]
+-  "TARGET_HAVE_MVE"
+-  "lsll%?\\t%Q0, %R0, %1"
+-  [(set_attr "predicable" "yes")])
+-
+-(define_insn "thumb2_lsrl"
+-  [(set (match_operand:DI 0 "arm_general_register_operand" "+r")
+-	(lshiftrt:DI (match_dup 0)
+-		     (match_operand:SI 1 "long_shift_imm" "Pg")))]
+-  "TARGET_HAVE_MVE"
+-  "lsrl%?\\t%Q0, %R0, %1"
+-  [(set_attr "predicable" "yes")])
+-
+ ;; Originally expanded by 'doloop_end'.
+ (define_insn "*doloop_end_internal"
+   [(set (pc)
+-- 
+2.43.7
+
+

@@ -1,0 +1,478 @@
+From f2eabd3386d20c0262cd940885f50659c7907b58 Mon Sep 17 00:00:00 2001
+From: Georg-Johann Lay <avr@gjlay.de>
+Date: Sun, 5 Oct 2025 20:56:56 +0200
+Subject: [PATCH] AVR: Speed up IEEE double comparisons.
+
+IEEE double can be compared without first converting them to
+the internal representation.
+
+libgcc/config/avr/libf7/
+	* libf7-common.mk (g_xdd_cmp): Remove le, lt, ge, gt, ne, eq, unord.
+	(F7_ASM_PARTS): Add D_cmp, D_eq, D_ne, D_ge, D_gt, D_le, D_lt, D_unord.
+	* libf7-asm.sx (D_cmp, D_eq, D_ne, D_ge, D_gt, D_le, D_lt, D_unord):
+	New modules.
+	* f7-wraps.h: Rebuild.
+
+gcc/testsuite/
+	* gcc.target/avr/cmpdi-1.c: New test.
+
+(cherry picked from commit e5731a4bc50e95245cb628505142e0adff0bb79e)
+---
+ gcc/testsuite/gcc.target/avr/cmpdi-1.c  | 149 ++++++++++++++++++++
+ libgcc/config/avr/libf7/f7-wraps.h      |  72 +---------
+ libgcc/config/avr/libf7/libf7-asm.sx    | 178 ++++++++++++++++++++++++
+ libgcc/config/avr/libf7/libf7-common.mk |   3 +-
+ 4 files changed, 330 insertions(+), 72 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.target/avr/cmpdi-1.c
+
+diff --git a/gcc/testsuite/gcc.target/avr/cmpdi-1.c b/gcc/testsuite/gcc.target/avr/cmpdi-1.c
+new file mode 100644
+index 000000000000..e7f59c1a29e2
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/avr/cmpdi-1.c
+@@ -0,0 +1,149 @@
++/* { dg-do run { target { ! avr_tiny } } } */
++/* { dg-additional-options { -std=gnu99 -Os -mcall-prologues } } */
++
++typedef __INT8_TYPE__   int8_t;
++typedef __UINT8_TYPE__  uint8_t;
++typedef __UINT16_TYPE__ uint16_t;
++typedef __UINT64_TYPE__ uint64_t;
++typedef __INT64_TYPE__  int64_t;
++
++#define ARRAY_SIZE(X) (sizeof(X) / sizeof(*X))
++
++const __flash uint64_t mant[] =
++  {
++    0x0000000000000,
++    0x0000000000001,
++    0x0000000000100,
++    0x0000000010000,
++    0x0000001000000,
++    0x0000100000000,
++    0x0010000000000,
++    0x1000000000000,
++    0x00000000000ff,
++    0x00000000000ff,
++    0x000000000ffff,
++    0x0000000ffffff,
++    0x00000ffffffff,
++    0x000ffffffffff,
++    0x0ffffffffffff,
++    0xfffffffffffff,
++    0xfffffffffff00,
++    0xfffffffff0000,
++    0xfffffff000000,
++    0xfffff00000000,
++    0xfff0000000000,
++    0xff00000000000,
++    0xf000000000000,
++    0x7ffffffffffff,
++    0x8000000000000,
++    0x8000000000001,
++    0xffffffffffffe
++  };
++
++const __flash uint16_t expo[] =
++  {
++    0x000,
++    0x001,
++    0x002,
++    0x7fe,
++    0x7ff
++  };
++
++#define SMASK ((uint64_t) 1 << 63)
++#define xNAN 0x7f
++
++char d64_nan_p (uint64_t a)
++{
++  return (a & ~SMASK) > (uint64_t) 0x7ff << 52;
++}
++
++int8_t cmp_d64 (uint64_t a, uint64_t b)
++{
++  if (d64_nan_p (a) || d64_nan_p (b))
++    return xNAN;
++
++  if (a & SMASK)     a = SMASK - a;
++  if (b & SMASK)     b = SMASK - b;
++  __asm ("" : "+r" (a));
++  __asm ("" : "+r" (b));
++
++  return a == b
++    ? 0
++    : (int64_t) a > (int64_t) b ? 1 : -1;
++}
++
++extern int8_t eq (uint64_t, uint64_t) __asm("__eqdf2");
++extern int8_t ne (uint64_t, uint64_t) __asm("__nedf2");
++extern int8_t ge (uint64_t, uint64_t) __asm("__gedf2");
++extern int8_t gt (uint64_t, uint64_t) __asm("__gtdf2");
++extern int8_t le (uint64_t, uint64_t) __asm("__ledf2");
++extern int8_t lt (uint64_t, uint64_t) __asm("__ltdf2");
++extern int8_t unord (uint64_t, uint64_t) __asm("__unorddf2");
++
++void test1 (uint64_t a, uint64_t b)
++{
++  int8_t d, c = cmp_d64 (a, b);
++  d = eq (a, b);
++  if (c == xNAN && d) __builtin_exit (1);
++  if (c != xNAN && d != (c == 0)) __builtin_exit (2);
++
++  d = ne (a, b);
++  if (c == xNAN && d) __builtin_exit (3);
++  if (c != xNAN && d != (c != 0)) __builtin_exit (4);
++
++  d = ge (a, b);
++  if (c == xNAN && d) __builtin_exit (5);
++  if (c != xNAN && d != (c >= 0)) __builtin_exit (6);
++
++  d = gt (a, b);
++  if (c == xNAN && d) __builtin_exit (7);
++  if (c != xNAN && d != (c > 0)) __builtin_exit (8);
++
++  d = le (a, b);
++  if (c == xNAN && d) __builtin_exit (9);
++  if (c != xNAN && d != (c <= 0)) __builtin_exit (10);
++
++  d = lt (a, b);
++  if (c == xNAN && d) __builtin_exit (11);
++  if (c != xNAN && d != (c < 0)) __builtin_exit (12);
++
++  d = unord (a, b);
++  if (c == xNAN && !d) __builtin_exit (13);
++  if (c != xNAN && d) __builtin_exit (14);
++}
++
++
++void testAB (uint64_t a, uint64_t b)
++{
++  test1 (a, b);
++  test1 (a, b ^ SMASK);
++  test1 (a ^ SMASK, b);
++  test1 (a ^ SMASK, b ^ SMASK);
++}
++
++void testA (uint64_t a)
++{
++  for (uint8_t i = 0; i < ARRAY_SIZE (mant); ++i)
++    {
++      uint64_t b = mant[i];
++      for (uint8_t j = 0; j < ARRAY_SIZE (expo); ++j)
++	testAB (a, b | ((uint64_t) expo[j] << 52));
++    }
++}
++
++void tests (void)
++{
++  for (uint8_t i = 0; i < ARRAY_SIZE (mant); ++i)
++    {
++      uint64_t a = mant[i];
++      for (uint8_t j = 0; j < ARRAY_SIZE (expo); ++j)
++	testA (a | ((uint64_t) expo[j] << 52));
++    }
++}
++
++
++int main (void)
++{
++  tests ();
++  return 0;
++}
+diff --git a/libgcc/config/avr/libf7/f7-wraps.h b/libgcc/config/avr/libf7/f7-wraps.h
+index 409492ed1d29..7c39783aef05 100644
+--- a/libgcc/config/avr/libf7/f7-wraps.h
++++ b/libgcc/config/avr/libf7/f7-wraps.h
+@@ -79,77 +79,7 @@ _ENDF __divdf3
+ #endif /* F7MOD_D_div_ */
+ 
+ ;; Functions that usually live in libgcc: __<name>df2 for <name> in:
+-;; le lt ge gt ne eq unord
+-
+-;; bool __ledf2 (double, double)  ; le
+-#ifdef F7MOD_D_le_
+-_DEFUN __ledf2
+-    .global F7_NAME(le_impl)
+-    ldi     ZH,     hi8(gs(F7_NAME(le_impl)))
+-    ldi     ZL,     lo8(gs(F7_NAME(le_impl)))
+-    F7jmp   call_xdd
+-_ENDF __ledf2
+-#endif /* F7MOD_D_le_ */
+-
+-;; bool __ltdf2 (double, double)  ; lt
+-#ifdef F7MOD_D_lt_
+-_DEFUN __ltdf2
+-    .global F7_NAME(lt_impl)
+-    ldi     ZH,     hi8(gs(F7_NAME(lt_impl)))
+-    ldi     ZL,     lo8(gs(F7_NAME(lt_impl)))
+-    F7jmp   call_xdd
+-_ENDF __ltdf2
+-#endif /* F7MOD_D_lt_ */
+-
+-;; bool __gedf2 (double, double)  ; ge
+-#ifdef F7MOD_D_ge_
+-_DEFUN __gedf2
+-    .global F7_NAME(ge_impl)
+-    ldi     ZH,     hi8(gs(F7_NAME(ge_impl)))
+-    ldi     ZL,     lo8(gs(F7_NAME(ge_impl)))
+-    F7jmp   call_xdd
+-_ENDF __gedf2
+-#endif /* F7MOD_D_ge_ */
+-
+-;; bool __gtdf2 (double, double)  ; gt
+-#ifdef F7MOD_D_gt_
+-_DEFUN __gtdf2
+-    .global F7_NAME(gt_impl)
+-    ldi     ZH,     hi8(gs(F7_NAME(gt_impl)))
+-    ldi     ZL,     lo8(gs(F7_NAME(gt_impl)))
+-    F7jmp   call_xdd
+-_ENDF __gtdf2
+-#endif /* F7MOD_D_gt_ */
+-
+-;; bool __nedf2 (double, double)  ; ne
+-#ifdef F7MOD_D_ne_
+-_DEFUN __nedf2
+-    .global F7_NAME(ne_impl)
+-    ldi     ZH,     hi8(gs(F7_NAME(ne_impl)))
+-    ldi     ZL,     lo8(gs(F7_NAME(ne_impl)))
+-    F7jmp   call_xdd
+-_ENDF __nedf2
+-#endif /* F7MOD_D_ne_ */
+-
+-;; bool __eqdf2 (double, double)  ; eq
+-#ifdef F7MOD_D_eq_
+-_DEFUN __eqdf2
+-    .global F7_NAME(eq_impl)
+-    ldi     ZH,     hi8(gs(F7_NAME(eq_impl)))
+-    ldi     ZL,     lo8(gs(F7_NAME(eq_impl)))
+-    F7jmp   call_xdd
+-_ENDF __eqdf2
+-#endif /* F7MOD_D_eq_ */
+-
+-;; bool __unorddf2 (double, double)  ; unord
+-#ifdef F7MOD_D_unord_
+-_DEFUN __unorddf2
+-    .global F7_NAME(unord_impl)
+-    ldi     ZH,     hi8(gs(F7_NAME(unord_impl)))
+-    ldi     ZL,     lo8(gs(F7_NAME(unord_impl)))
+-    F7jmp   call_xdd
+-_ENDF __unorddf2
+-#endif /* F7MOD_D_unord_ */
++;; (none)
+ 
+ ;; Functions that usually live in libgcc: __<name> for <name> in:
+ ;; fixdfsi fixdfdi fixunsdfdi fixunsdfsi truncdfsf2
+diff --git a/libgcc/config/avr/libf7/libf7-asm.sx b/libgcc/config/avr/libf7/libf7-asm.sx
+index a06792d155ff..186beb29cc5a 100644
+--- a/libgcc/config/avr/libf7/libf7-asm.sx
++++ b/libgcc/config/avr/libf7/libf7-asm.sx
+@@ -1727,6 +1727,184 @@ ENDF class_D
+ #endif /* F7MOD_D_class_ */
+ 
+ 
++#ifdef F7MOD_D_cmp_
++
++#define A0  18
++#define A1  A0 + 1
++#define A2  A0 + 2
++#define A3  A0 + 3
++#define A4  A0 + 4
++#define A5  A0 + 5
++#define A6  A0 + 6
++#define A7  A0 + 7
++
++#define B0  10
++#define B1  B0 + 1
++#define B2  B0 + 2
++#define B3  B0 + 3
++#define B4  B0 + 4
++#define B5  B0 + 5
++#define B6  B0 + 6
++#define B7  B0 + 7
++
++#define AA5  XH
++#define AA6  ZL
++#define AA7  ZH
++
++#define BB0  A0
++#define BB1  A1
++#define BB2  A2
++#define BB3  A3
++#define BB4  A4
++#define BB5  A5
++#define BB6  A6
++#define BB7  A7
++
++;;; Helper for __<cmp>df2 and __unorddf2.
++;;; T = 1: Comparison is unordered.
++;;; T = 0: Comparison is ordered, and Z, N, C, S flags are set according
++;;; to compare (double A, double B) as if set by a signed int comparison.
++;;; Note that f(+0) = f(-0) = 0.
++;;; In any case, return R24 = 1.
++DEFUN D_cmp
++    rcall   D_cmp.map_i64
++    brts 9f
++    ;; Save A somewhere else...
++    wmov    AA6, A6
++    mov     AA5, A5
++    push    A4
++    push    A3
++    push    A2
++    push    A1
++    mov     r0,  A0
++    ;; ... so that we can use D_cmp.map_i64 on B.
++    wmov    BB6, B6
++    wmov    BB4, B4
++    wmov    BB2, B2
++    wmov    BB0, B0
++    rcall   D_cmp.map_i64
++    ;; Run the following code even when B is NaN (T=1) so as to pop the regs.
++    ;; In the non-NaN case, AA and BB can be compared like int64_t for the
++    ;; sake of comparing A and B as double.
++    CP      r0,  BB0  $  pop r0
++    cpc     r0,  BB1  $  pop r0
++    cpc     r0,  BB2  $  pop r0
++    cpc     r0,  BB3  $  pop r0
++    cpc     r0,  BB4
++    cpc     AA5, BB5
++    cpc     AA6, BB6
++    cpc     AA7, BB7
++9:  ldi     r24, 1
++    ret
++
++;;; A is NaN: Set T=1.
++;;; A is not a NaN: Set T=0, and map double A to int64_t such that
++;;; f(A) <cmp> f(B)  iff  A <cmp> B, i.e. we can treat the result
++;;; as int64_t for the matter of double comparison.
++;;; Clobbers: XL.
++D_cmp.map_i64:
++    bst     A7, 7
++    cbr     A7, 0x80
++    ;; If Inf < |A|, then we have a NaN.
++    CP      __zero_reg__, A0
++    cpc     __zero_reg__, A1
++    cpc     __zero_reg__, A2
++    cpc     __zero_reg__, A3
++    cpc     __zero_reg__, A4
++    cpc     __zero_reg__, A5
++    ldi     XL, lo8(0x7ff0)     $    cpc    XL, A6
++    ldi     XL, hi8(0x7ff0)     $    cpc    XL, A7
++    brlo .Lunord
++    brtc 9f
++    clt
++    .global __negdi2
++    XJMP    __negdi2
++.Lunord:
++    set
++9:  ret
++
++ENDF D_cmp
++#endif /* F7MOD_D_cmp_ */
++
++
++;; bool __ledf2 (double, double);
++#ifdef F7MOD_D_le_
++_DEFUN __ledf2
++    F7call  D_cmp
++    brts 0f
++    breq 1f
++    brlt 1f
++0:  ldi     r24, 0
++1:  ret
++_ENDF __ledf2
++#endif /* F7MOD_D_le_ */
++
++;; bool __ltdf2 (double, double);
++#ifdef F7MOD_D_lt_
++_DEFUN __ltdf2
++    F7call  D_cmp
++    brts 0f
++    brlt 1f
++0:  ldi     r24, 0
++1:  ret
++_ENDF __ltdf2
++#endif /* F7MOD_D_lt_ */
++
++;; bool __gedf2 (double, double);
++#ifdef F7MOD_D_ge_
++_DEFUN __gedf2
++    F7call  D_cmp
++    brts 0f
++    brge 1f
++0:  ldi     r24, 0
++1:  ret
++_ENDF __gedf2
++#endif /* F7MOD_D_ge_ */
++
++;; bool __gtdf2 (double, double);
++#ifdef F7MOD_D_gt_
++_DEFUN __gtdf2
++    F7call  D_cmp
++    brts 0f
++    breq 0f
++    brge 1f
++0:  ldi     r24, 0
++1:  ret
++_ENDF __gtdf2
++#endif /* F7MOD_D_gt_ */
++
++;; bool __nedf2 (double, double);
++#ifdef F7MOD_D_ne_
++_DEFUN __nedf2
++    F7call  D_cmp
++    brts 0f
++    brne 1f
++0:  ldi     r24, 0
++1:  ret
++_ENDF __nedf2
++#endif /* F7MOD_D_ne_ */
++
++;; bool __eqdf2 (double, double);
++#ifdef F7MOD_D_eq_
++_DEFUN __eqdf2
++    F7call  D_cmp
++    brts 0f
++    breq 1f
++0:  ldi     r24, 0
++1:  ret
++_ENDF __eqdf2
++#endif /* F7MOD_D_eq_ */
++
++;; bool __unorddf2 (double, double);
++#ifdef F7MOD_D_unord_
++_DEFUN __unorddf2
++    F7call  D_cmp
++    bld     r24, 0
++    ret
++_ENDF __unorddf2
++#endif /* F7MOD_D_unord_ */
++
++
+ #ifdef F7MOD_call_dd_
+ 
+ ;; Provide double wrappers for functions that operate on f7_t and get f7_t*.
+diff --git a/libgcc/config/avr/libf7/libf7-common.mk b/libgcc/config/avr/libf7/libf7-common.mk
+index 644be2cf195f..0e6acfdbdf77 100644
+--- a/libgcc/config/avr/libf7/libf7-common.mk
++++ b/libgcc/config/avr/libf7/libf7-common.mk
+@@ -24,13 +24,14 @@ F7_ASM_PARTS += store_expo sqrt16 sqrt_approx div
+ 
+ F7_ASM_PARTS += D_class D_fma D_powi
+ F7_ASM_PARTS += D_isnan D_isinf D_isfinite D_signbit D_copysign D_neg D_fabs
++F7_ASM_PARTS += D_cmp D_eq D_ne D_ge D_gt D_le D_lt D_unord
+ 
+ F7_ASM_PARTS += call_dd call_ddd
+ 
+ # Stuff that will be wrapped in f7-wraps.h (included by libf7-asm.sx)
+ # and give f7_asm_D_*.o modules.
+ g_ddd += add sub mul div
+-g_xdd_cmp += le lt ge gt ne eq unord
++g_xdd_cmp +=
+ g_dx += floatunsidf floatsidf extendsfdf2
+ g_xd += fixdfsi fixdfdi fixunsdfdi fixunsdfsi truncdfsf2
+ 
+-- 
+2.43.7
+
+

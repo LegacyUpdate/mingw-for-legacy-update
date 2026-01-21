@@ -1,0 +1,34 @@
+From bfe3b5b00ec80cf9d9c806dd697a1cdfa265386e Mon Sep 17 00:00:00 2001
+From: Sam James <sam@gentoo.org>
+Date: Mon, 24 Mar 2025 04:34:06 +0000
+Subject: [PATCH] libphobos: enable for more hppa tuples
+
+Gentoo uses hppa1.1*-*-linux* and hppa2.0*-*-linux* instead of Debian's
+hppa-*-linux*.
+
+libphobos/ChangeLog:
+
+	* configure.tgt: Add hppa[12]*-*-linux* as a supported target.
+
+(cherry picked from commit 35cf8d85841a6301eeb12668085e326ddd115f6e)
+---
+ libphobos/configure.tgt | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/libphobos/configure.tgt b/libphobos/configure.tgt
+index 456b4d5b96d6..b9ca5e397c8f 100644
+--- a/libphobos/configure.tgt
++++ b/libphobos/configure.tgt
+@@ -36,7 +36,7 @@ case "${target}" in
+   arm*-*-linux*)
+ 	LIBPHOBOS_SUPPORTED=yes
+ 	;;
+-  hppa-*-linux*)
++  hppa-*-linux* | hppa[12]*-*-linux*)
+ 	LIBPHOBOS_SUPPORTED=yes
+ 	;;
+   loongarch*-*-linux*)
+-- 
+2.43.7
+
+

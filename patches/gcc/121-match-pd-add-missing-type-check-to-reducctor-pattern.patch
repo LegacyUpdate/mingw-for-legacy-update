@@ -1,0 +1,65 @@
+From 8bc078455cdc2c53a469bbcadb9a7c3bc7a1929e Mon Sep 17 00:00:00 2001
+From: Alex Coplan <alex.coplan@arm.com>
+Date: Tue, 9 Sep 2025 12:57:14 +0100
+Subject: [PATCH] match.pd: Add missing type check to reduc(ctor) pattern
+ [PR121772]
+
+In this PR we have a reduction of a vector constructor, where the
+type of the constructor is int16x8_t and the elements are int16x4_t;
+i.e. it is representing a concatenation of two vectors.
+
+This triggers a match.pd pattern which looks like it was written to
+handle reductions of vector constructors where the elements of the ctor
+are scalars, not vectors.  There is no type check to enforce this
+property, which leads to the pattern replacing a reduction to scalar
+with an int16x4_t vector in this case, which of course is a type error,
+leading to an invalid GIMPLE ICE.
+
+This patch adds a type check to the pattern, only going ahead with the
+transformation if the element type of the ctor matches that of the
+reduction.
+
+gcc/ChangeLog:
+
+	PR tree-optimization/121772
+	* match.pd: Add type check to reduc(ctor) pattern.
+
+gcc/testsuite/ChangeLog:
+
+	PR tree-optimization/121772
+	* gcc.target/aarch64/torture/pr121772.c: New test.
+
+(cherry picked from commit a7a9b7badc0ba95b510c7e61da6439fca78e31d3)
+---
+ gcc/match.pd                                        | 1 +
+ gcc/testsuite/gcc.target/aarch64/torture/pr121772.c | 5 +++++
+ 2 files changed, 6 insertions(+)
+ create mode 100644 gcc/testsuite/gcc.target/aarch64/torture/pr121772.c
+
+diff --git a/gcc/match.pd b/gcc/match.pd
+index ba036e528370..3d1752055b34 100644
+--- a/gcc/match.pd
++++ b/gcc/match.pd
+@@ -10826,6 +10826,7 @@ and,
+ 			 ? gimple_assign_rhs1 (SSA_NAME_DEF_STMT (@0)) : @0);
+ 	    tree elt = ctor_single_nonzero_element (ctor); }
+       (if (elt
++	   && types_match (type, TREE_TYPE (elt))
+ 	   && !HONOR_SNANS (type)
+ 	   && !HONOR_SIGNED_ZEROS (type))
+ 	{ elt; }))))
+diff --git a/gcc/testsuite/gcc.target/aarch64/torture/pr121772.c b/gcc/testsuite/gcc.target/aarch64/torture/pr121772.c
+new file mode 100644
+index 000000000000..3b4cf4d7d189
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/aarch64/torture/pr121772.c
+@@ -0,0 +1,5 @@
++/* { dg-do compile } */
++#include <arm_neon.h>
++int16_t f(int16x4_t b) {
++  return vaddvq_s16(vcombine_s16(b, vdup_n_s16 (0)));
++}
+-- 
+2.43.7
+
+

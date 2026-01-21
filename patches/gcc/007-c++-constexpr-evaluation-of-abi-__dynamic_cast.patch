@@ -1,0 +1,88 @@
+From b3893433abd8d3a4096f8c51d028115d461fe6aa Mon Sep 17 00:00:00 2001
+From: Patrick Palka <ppalka@redhat.com>
+Date: Mon, 4 Aug 2025 16:43:33 -0400
+Subject: [PATCH] c++: constexpr evaluation of abi::__dynamic_cast [PR120620]
+
+r13-3299 changed our internal declaration of __dynamic_cast to reside
+inside the abi/__cxxabiv1:: namespace instead of the global namespace,
+matching the real declaration.  This inadvertently made us now attempt
+constexpr evaluation of user-written calls to abi::__dynamic_cast since
+cxx_dynamic_cast_fn_p now also returns true for them, but we're not
+prepared to handle arbitrary calls to __dynamic_cast, and therefore ICE.
+
+This patch restores cxx_dynamic_cast_fn_p to return true only for
+synthesized calls to __dynamic_cast, which can be distinguished by
+DECL_ARTIFICIAL, since apparently the synthesized declaration of
+__dynamic_cast doesn't get merged with the actual declaration.
+
+	PR c++/120620
+
+gcc/cp/ChangeLog:
+
+	* constexpr.cc (cxx_dynamic_cast_fn_p): Return true only
+	for synthesized __dynamic_cast.
+
+gcc/testsuite/ChangeLog:
+
+	* g++.dg/cpp2a/constexpr-dynamic19.C: New test.
+	* g++.dg/cpp2a/constexpr-dynamic1a.C: New test.
+
+Reviewed-by: Jason Merrill <jason@redhat.com>
+(cherry picked from commit b51ca7d2f548ffdad03fa779e3ff7bcc3441ff03)
+---
+ gcc/cp/constexpr.cc                              |  6 +++++-
+ gcc/testsuite/g++.dg/cpp2a/constexpr-dynamic19.C | 10 ++++++++++
+ gcc/testsuite/g++.dg/cpp2a/constexpr-dynamic1a.C |  6 ++++++
+ 3 files changed, 21 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/g++.dg/cpp2a/constexpr-dynamic19.C
+ create mode 100644 gcc/testsuite/g++.dg/cpp2a/constexpr-dynamic1a.C
+
+diff --git a/gcc/cp/constexpr.cc b/gcc/cp/constexpr.cc
+index f6b9a808825b..0751490cc71c 100644
+--- a/gcc/cp/constexpr.cc
++++ b/gcc/cp/constexpr.cc
+@@ -2459,7 +2459,11 @@ cxx_dynamic_cast_fn_p (tree fndecl)
+ {
+   return (cxx_dialect >= cxx20
+ 	  && id_equal (DECL_NAME (fndecl), "__dynamic_cast")
+-	  && CP_DECL_CONTEXT (fndecl) == abi_node);
++	  && CP_DECL_CONTEXT (fndecl) == abi_node
++	  /* Only consider implementation-detail __dynamic_cast calls that
++	     correspond to a dynamic_cast, and ignore direct calls to
++	     abi::__dynamic_cast.  */
++	  && DECL_ARTIFICIAL (fndecl));
+ }
+ 
+ /* Often, we have an expression in the form of address + offset, e.g.
+diff --git a/gcc/testsuite/g++.dg/cpp2a/constexpr-dynamic19.C b/gcc/testsuite/g++.dg/cpp2a/constexpr-dynamic19.C
+new file mode 100644
+index 000000000000..27d167cebc35
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/cpp2a/constexpr-dynamic19.C
+@@ -0,0 +1,10 @@
++// PR c++/120620
++// { dg-do compile }
++
++#include <cxxabi.h>
++
++struct A* a;
++
++void f() {
++  void* const p = abi::__dynamic_cast(&a, 0, 0, 42);
++}
+diff --git a/gcc/testsuite/g++.dg/cpp2a/constexpr-dynamic1a.C b/gcc/testsuite/g++.dg/cpp2a/constexpr-dynamic1a.C
+new file mode 100644
+index 000000000000..4077a47055c7
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/cpp2a/constexpr-dynamic1a.C
+@@ -0,0 +1,6 @@
++// Test that including <cxxabi.h>, whence the actual abi:__dynamic_cast
++// is declared, doesn't affect our constexpr dynamic_cast handling.
++// { dg-do compile { target c++20 } }
++
++#include <cxxabi.h>
++#include "constexpr-dynamic1.C"
+-- 
+2.43.7
+
+

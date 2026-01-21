@@ -1,0 +1,100 @@
+From 60db9b6a0af0a8b191d0c1eca7150ac78477e7a1 Mon Sep 17 00:00:00 2001
+From: Harald Anlauf <anlauf@gmx.de>
+Date: Mon, 17 Nov 2025 21:20:08 +0100
+Subject: [PATCH] Fortran: contiguous pointer assignment to select type target
+ [PR122709]
+
+	PR fortran/122709
+
+gcc/fortran/ChangeLog:
+
+	* resolve.cc (resolve_assoc_var): If the associate target is a
+	contiguous pointer, so is the associate variable.
+
+gcc/testsuite/ChangeLog:
+
+	* gfortran.dg/select_contiguous.f90: New test.
+
+(cherry picked from commit 61f154cfe18aebb56a6b09564f00410127f933c4)
+---
+ gcc/fortran/resolve.cc                        |  4 ++
+ .../gfortran.dg/select_contiguous.f90         | 51 +++++++++++++++++++
+ 2 files changed, 55 insertions(+)
+ create mode 100644 gcc/testsuite/gfortran.dg/select_contiguous.f90
+
+diff --git a/gcc/fortran/resolve.cc b/gcc/fortran/resolve.cc
+index 432cb0a3e5b9..3e26551522d2 100644
+--- a/gcc/fortran/resolve.cc
++++ b/gcc/fortran/resolve.cc
+@@ -10465,6 +10465,10 @@ resolve_assoc_var (gfc_symbol* sym, bool resolve_target)
+   /* If the target is a good class object, so is the associate variable.  */
+   if (sym->ts.type == BT_CLASS && gfc_expr_attr (target).class_ok)
+     sym->attr.class_ok = 1;
++
++  /* If the target is a contiguous pointer, so is the associate variable.  */
++  if (gfc_expr_attr (target).pointer && gfc_expr_attr (target).contiguous)
++    sym->attr.contiguous = 1;
+ }
+ 
+ 
+diff --git a/gcc/testsuite/gfortran.dg/select_contiguous.f90 b/gcc/testsuite/gfortran.dg/select_contiguous.f90
+new file mode 100644
+index 000000000000..b947006ba1e9
+--- /dev/null
++++ b/gcc/testsuite/gfortran.dg/select_contiguous.f90
+@@ -0,0 +1,51 @@
++! { dg-do compile }
++! { dg-options "-O2 -Wextra -fdump-tree-optimized" }
++!
++! PR fortran/122709 - bogus warning for contiguous pointer assignment
++!                     to select type target
++!
++! Contributed by <mscfd at gmx dot net>
++
++module sc_mod
++  implicit none
++  public
++
++  type :: t
++     integer :: i = 0
++  end type t
++
++  type :: s
++     class(t), dimension(:), contiguous, pointer :: p => null()
++  end type s
++
++contains
++
++  subroutine foo(x)
++    class(s), intent(in) :: x
++    type(t), dimension(:), contiguous, pointer :: q
++    select type (p_ => x%p)
++    type is (t)
++       q => p_
++       if (.not. is_contiguous(x%p)) stop 1
++       if (.not. is_contiguous(p_))  stop 2     ! Should get optimized out
++       if (.not. is_contiguous(q))   stop 3
++       write(*,*) 'is contiguous: ', is_contiguous(x%p), &
++            is_contiguous(p_), is_contiguous(q)
++    end select
++  end subroutine foo
++
++end module sc_mod
++
++program select_contiguous
++  use sc_mod
++  implicit none
++
++  type(s) :: x
++
++  allocate(t :: x%p(1:10))
++  call foo(x)
++  deallocate(x%p)
++
++end program select_contiguous
++
++! { dg-final { scan-tree-dump-not "_gfortran_stop_numeric" "optimized" } }
+-- 
+2.43.7
+
+

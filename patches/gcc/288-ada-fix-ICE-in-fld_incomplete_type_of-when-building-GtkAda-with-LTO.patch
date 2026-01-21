@@ -1,0 +1,81 @@
+From 0ee13aad5e101637cbc017920590d3f55048071c Mon Sep 17 00:00:00 2001
+From: Eric Botcazou <ebotcazou@adacore.com>
+Date: Mon, 22 Dec 2025 20:50:09 +0100
+Subject: [PATCH] Ada: Fix ICE in fld_incomplete_type_of when building GtkAda
+ with LTO (2)
+
+The change incorrectly resets the alias set of the old pointer/reference,
+which leads to the miscompilation of a few ACATS tests on some platforms.
+
+gcc/ada/
+	PR ada/123060
+	* gcc-interface/utils.cc (update_pointer_to): Preserve the alias
+	sets present on the old pointer and old reference, if any.
+---
+ gcc/ada/gcc-interface/utils.cc | 30 ++++++++++++++++++++++++------
+ 1 file changed, 24 insertions(+), 6 deletions(-)
+
+diff --git a/gcc/ada/gcc-interface/utils.cc b/gcc/ada/gcc-interface/utils.cc
+index e8fe15013798..39585c95b855 100644
+--- a/gcc/ada/gcc-interface/utils.cc
++++ b/gcc/ada/gcc-interface/utils.cc
+@@ -4601,15 +4601,24 @@ update_pointer_to (tree old_type, tree new_type)
+ 	  /* If there is no pointer pointing to NEW_TYPE yet, re-compute the
+ 	     TYPE_CANONICAL of the old pointer but pointing to NEW_TYPE, like
+ 	     build_pointer_type would have done for such a pointer, because we
+-	     will propagate it in the adjustment loop below.  */
++	     will propagate it in the adjustment loop below.  But make sure to
++	     preserve an alias set already present on the old pointer.  */
+ 	  if (TYPE_STRUCTURAL_EQUALITY_P (new_type))
+ 	    SET_TYPE_STRUCTURAL_EQUALITY (ptr);
+ 	  else if (TYPE_CANONICAL (new_type) != new_type
+ 		   || (TYPE_REF_CAN_ALIAS_ALL (ptr)
+ 		       && !lookup_attribute ("may_alias",
+ 					     TYPE_ATTRIBUTES (new_type))))
+-	    TYPE_CANONICAL (ptr)
+-	      = build_pointer_type (TYPE_CANONICAL (new_type));
++	    {
++	      alias_set_type set;
++	      if (TYPE_STRUCTURAL_EQUALITY_P (ptr))
++		set = TYPE_ALIAS_SET (ptr);
++	      else
++		set = TYPE_ALIAS_SET (TYPE_CANONICAL (ptr));
++	      TYPE_CANONICAL (ptr)
++		= build_pointer_type (TYPE_CANONICAL (new_type));
++	      TYPE_ALIAS_SET (TYPE_CANONICAL (ptr)) = set;
++	    }
+ 	}
+ 
+       /* Now adjust them.  */
+@@ -4637,15 +4646,24 @@ update_pointer_to (tree old_type, tree new_type)
+ 	  /* If there is no reference pointing to NEW_TYPE yet, re-compute the
+ 	     TYPE_CANONICAL of the old reference but pointing to NEW_TYPE, like
+ 	     build_reference_type would have done for such a reference, because
+-	     we will propagate it in the adjustment loop below.  */
++	     we will propagate it in the adjustment loop below.  But make sure
++	     to preserve an alias set already present on the old reference.  */
+ 	  if (TYPE_STRUCTURAL_EQUALITY_P (new_type))
+ 	    SET_TYPE_STRUCTURAL_EQUALITY (ref);
+ 	  else if (TYPE_CANONICAL (new_type) != new_type
+ 		   || (TYPE_REF_CAN_ALIAS_ALL (ref)
+ 		       && !lookup_attribute ("may_alias",
+ 					     TYPE_ATTRIBUTES (new_type))))
+-	    TYPE_CANONICAL (ref)
+-	      = build_reference_type (TYPE_CANONICAL (new_type));
++	    {
++	      alias_set_type set;
++	      if (TYPE_STRUCTURAL_EQUALITY_P (ref))
++		set = TYPE_ALIAS_SET (ref);
++	      else
++		set = TYPE_ALIAS_SET (TYPE_CANONICAL (ref));
++	      TYPE_CANONICAL (ref)
++		= build_reference_type (TYPE_CANONICAL (new_type));
++	      TYPE_ALIAS_SET (TYPE_CANONICAL (ref)) = set;
++	    }
+ 	}
+ 
+       /* Now adjust them.  */
+-- 
+2.43.7
+
+

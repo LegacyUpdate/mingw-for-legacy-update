@@ -1,0 +1,51 @@
+From 5b999c3fd21614b5d5895894942916c309afb0e8 Mon Sep 17 00:00:00 2001
+From: Alice Carlotti <alice.carlotti@arm.com>
+Date: Wed, 15 Oct 2025 14:14:43 +0100
+Subject: [PATCH] aarch64: Fix pmsdsfr_el1 encoding
+
+The encoding was fixed in Binutils in May 2024, but we didn't copy the
+fix to GCC at the time.
+
+gcc/ChangeLog:
+
+	* config/aarch64/aarch64-sys-regs.def: Fix pmsdsfr_el1 encoding.
+
+gcc/testsuite/ChangeLog:
+
+	* gcc.target/aarch64/acle/rwsr-armv8p9.c: Fix pmsdsfr_el1
+	encoding.
+---
+ gcc/config/aarch64/aarch64-sys-regs.def              | 2 +-
+ gcc/testsuite/gcc.target/aarch64/acle/rwsr-armv8p9.c | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/gcc/config/aarch64/aarch64-sys-regs.def b/gcc/config/aarch64/aarch64-sys-regs.def
+index 39e6c5c646fb..b2f174f25469 100644
+--- a/gcc/config/aarch64/aarch64-sys-regs.def
++++ b/gcc/config/aarch64/aarch64-sys-regs.def
+@@ -740,7 +740,7 @@
+   SYSREG ("pmscr_el1",		CPENC (3,0,9,9,0),	F_ARCHEXT,		AARCH64_FEATURE (PROFILE))
+   SYSREG ("pmscr_el12",		CPENC (3,5,9,9,0),	F_ARCHEXT,		AARCH64_FEATURE (PROFILE))
+   SYSREG ("pmscr_el2",		CPENC (3,4,9,9,0),	F_ARCHEXT,		AARCH64_FEATURE (PROFILE))
+-  SYSREG ("pmsdsfr_el1",	CPENC (3,4,9,10,4),	F_ARCHEXT,		AARCH64_FEATURE (SPE_FDS))
++  SYSREG ("pmsdsfr_el1",	CPENC (3,0,9,10,4),	F_ARCHEXT,		AARCH64_FEATURE (SPE_FDS))
+   SYSREG ("pmselr_el0",		CPENC (3,3,9,12,5),	0,			AARCH64_NO_FEATURES)
+   SYSREG ("pmsevfr_el1",	CPENC (3,0,9,9,5),	F_ARCHEXT,		AARCH64_FEATURE (PROFILE))
+   SYSREG ("pmsfcr_el1",		CPENC (3,0,9,9,4),	F_ARCHEXT,		AARCH64_FEATURE (PROFILE))
+diff --git a/gcc/testsuite/gcc.target/aarch64/acle/rwsr-armv8p9.c b/gcc/testsuite/gcc.target/aarch64/acle/rwsr-armv8p9.c
+index c49fbb5368e0..1ff51de8ffe1 100644
+--- a/gcc/testsuite/gcc.target/aarch64/acle/rwsr-armv8p9.c
++++ b/gcc/testsuite/gcc.target/aarch64/acle/rwsr-armv8p9.c
+@@ -72,7 +72,7 @@ readwrite_armv8p9a_sysregs (long long int a)
+   a = __arm_rsr64 ("pmicfiltr_el0"); /* { { dg-final { scan-assembler "mrs\tx0, s3_3_c9_c6_0" } } */
+   a = __arm_rsr64 ("pmicntr_el0"); /* { { dg-final { scan-assembler "mrs\tx0, s3_3_c9_c4_0" } } */
+   a = __arm_rsr64 ("pmicntsvr_el1"); /* { { dg-final { scan-assembler "mrs\tx0, s2_0_c14_c12_0" } } */
+-  a = __arm_rsr64 ("pmsdsfr_el1"); /* { { dg-final { scan-assembler "mrs\tx0, s3_4_c9_c10_4" } } */
++  a = __arm_rsr64 ("pmsdsfr_el1"); /* { { dg-final { scan-assembler "mrs\tx0, s3_0_c9_c10_4" } } */
+   a = __arm_rsr64 ("pmsscr_el1"); /* { { dg-final { scan-assembler "mrs\tx0, s3_0_c9_c13_3" } } */
+   a = __arm_rsr64 ("pmuacr_el1"); /* { { dg-final { scan-assembler "mrs\tx0, s3_0_c9_c14_4" } } */
+   a = __arm_rsr64 ("por_el0"); /* { { dg-final { scan-assembler "mrs\tx0, s3_3_c10_c2_4" } } */
+-- 
+2.43.7
+
+

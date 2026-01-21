@@ -1,0 +1,142 @@
+From 3d14459c28280d2a2cbf8463207c85de28f5f7b0 Mon Sep 17 00:00:00 2001
+From: Nathaniel Shead <nathanieloshead@gmail.com>
+Date: Fri, 22 Aug 2025 15:15:01 +1000
+Subject: [PATCH] c++/modules: Provide definitions of synthesized methods
+ outside their defining module [PR120499]
+
+In the PR, we're getting a linker error from _Vector_impl's destructor
+never getting emitted.  This is because of a combination of factors:
+
+1. in imp-member-4_a, the destructor is not used and so there is no
+   definition generated.
+
+2. in imp-member-4_b, the destructor gets synthesized (as part of the
+   synthesis for Coll's destructor) but is not ODR-used and so does not
+   get emitted.  Despite there being a definition provided in this TU,
+   the destructor is still considered imported and so isn't streamed
+   into the module body.
+
+3. in imp-member-4_c, we need to ODR-use the destructor but we only got
+   a forward declaration from imp-member-4_b, so we cannot emit a body.
+
+The point of failure here is step 2; this function has effectively been
+declared in the imp-member-4_b module, and so we shouldn't treat it as
+imported.  This way we'll properly stream the body so that importers can
+emit it.
+
+	PR c++/120499
+
+gcc/cp/ChangeLog:
+
+	* method.cc (synthesize_method): Set the instantiating module.
+
+gcc/testsuite/ChangeLog:
+
+	* g++.dg/modules/imp-member-4_a.C: New test.
+	* g++.dg/modules/imp-member-4_b.C: New test.
+	* g++.dg/modules/imp-member-4_c.C: New test.
+
+Signed-off-by: Nathaniel Shead <nathanieloshead@gmail.com>
+(cherry picked from commit 5b85364a6dd0bbfd3e26d3346b075a0819be7cd4)
+---
+ gcc/cp/method.cc                              |  3 +++
+ gcc/testsuite/g++.dg/modules/imp-member-4_a.C | 25 +++++++++++++++++++
+ gcc/testsuite/g++.dg/modules/imp-member-4_b.C | 17 +++++++++++++
+ gcc/testsuite/g++.dg/modules/imp-member-4_c.C | 14 +++++++++++
+ 4 files changed, 59 insertions(+)
+ create mode 100644 gcc/testsuite/g++.dg/modules/imp-member-4_a.C
+ create mode 100644 gcc/testsuite/g++.dg/modules/imp-member-4_b.C
+ create mode 100644 gcc/testsuite/g++.dg/modules/imp-member-4_c.C
+
+diff --git a/gcc/cp/method.cc b/gcc/cp/method.cc
+index cf16fc9fc25b..22d08d9893fb 100644
+--- a/gcc/cp/method.cc
++++ b/gcc/cp/method.cc
+@@ -1851,6 +1851,9 @@ synthesize_method (tree fndecl)
+   finish_function_body (stmt);
+   finish_function (/*inline_p=*/false);
+ 
++  /* Remember that we were defined in this module.  */
++  set_instantiating_module (fndecl);
++
+   if (!DECL_DELETED_FN (fndecl))
+     expand_or_defer_fn (fndecl);
+ 
+diff --git a/gcc/testsuite/g++.dg/modules/imp-member-4_a.C b/gcc/testsuite/g++.dg/modules/imp-member-4_a.C
+new file mode 100644
+index 000000000000..f0699eb314cf
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/modules/imp-member-4_a.C
+@@ -0,0 +1,25 @@
++// PR c++/120499
++// { dg-additional-options "-fmodules -fdump-lang-module-blocks" }
++// { dg-module-cmi A }
++
++export module A;
++
++struct allocator {
++  ~allocator() {}
++};
++
++export template <typename _Tp>
++struct vector {
++  struct _Vector_impl : public allocator {};
++  _Vector_impl _M_impl;
++  vector() = default;
++};
++
++template <typename T>
++struct regex_token_iterator {
++  vector<int> _M_subs;
++};
++template struct regex_token_iterator<const char*>;
++
++// No definition of _Vector_impl::~_Vector_impl here (not synthesized)
++// { dg-final { scan-lang-dump-not {'::vector@A:1<int>::_Vector_impl@A:1<int>::__dt '} module } }
+diff --git a/gcc/testsuite/g++.dg/modules/imp-member-4_b.C b/gcc/testsuite/g++.dg/modules/imp-member-4_b.C
+new file mode 100644
+index 000000000000..db485095e777
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/modules/imp-member-4_b.C
+@@ -0,0 +1,17 @@
++// PR c++/120499
++// { dg-additional-options "-fmodules -fdump-lang-module-blocks" }
++// { dg-module-cmi B }
++
++export module B;
++import A;
++
++struct Coll {
++  vector<int> vals;
++};
++
++export Coll createColl() {
++  return Coll{};
++}
++
++// But the definition of _Vector_impl::~_Vector_impl has been synthesized here
++// { dg-final { scan-lang-dump-times {\[0\]=decl definition '::vector@A:1<int>::_Vector_impl@A:1<int>::__dt '} 1 module } }
+diff --git a/gcc/testsuite/g++.dg/modules/imp-member-4_c.C b/gcc/testsuite/g++.dg/modules/imp-member-4_c.C
+new file mode 100644
+index 000000000000..d405ce28bf7a
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/modules/imp-member-4_c.C
+@@ -0,0 +1,14 @@
++// PR c++/120499
++// { dg-module-do link }
++// { dg-additional-options "-fmodules -fdump-lang-module" }
++
++import B;
++
++int main() {
++  createColl();
++}
++
++// And we should use the definition of _Vector_impl::~_Vector_impl now.
++// In this case we got the seeded import from A of the declaration
++// so let's just ensure we stream the definition.
++// { dg-final { scan-lang-dump {Reading function definition '::vector@A:1<int>::_Vector_impl@A:1<int>::__dt @A:1'} module } }
+-- 
+2.43.7
+
+

@@ -1,0 +1,187 @@
+From 68da0af878c8394709e84853256e6420e4c59dec Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Wed, 10 Sep 2025 12:34:50 +0200
+Subject: [PATCH] bitint: Fix up lowering optimization of .*_OVERFLOW ifns
+ [PR121828]
+
+THe lowering of .{ADD,SUB,MUL}_OVERFLOW ifns is optimized, so that we don't
+in the common cases uselessly don't create a large _Complex _BitInt
+temporary with the first (real) part being the result and second (imag) part
+just being a huge 0 or 1, although we still do that if it can't be done.
+The optimizable_arith_overflow function checks when that is possible, like
+whether the ifn result is used at most twice, once in REALPART_EXPR and once
+in IMAGPART_EXPR in the same bb, etc.  For IMAGPART_EXPR it then checks
+if it has a single use which is a cast to some integral non-bitint type
+(usually bool or int etc.).  The final check is whether that cast stmt
+appears after the REALPART_EXPR (the usual case), in that case it is
+optimizable, otherwise it is not (because the lowering for optimizable
+ifns of this kind is done at the location of the REALPART_EXPR and it
+tweaks the IMAGPART_EXPR cast location at that point, so otherwise it
+would be set after use.
+
+Now, we also have an optimization for the REALPART_EXPR lhs being used
+in a single stmt - store in the same bb, in that case we don't have to
+store the real part result in a temporary but it can go directly into
+memory.
+Except that nothing checks for the IMAGPART_EXPR cast being before or after
+the store in this case, so the following testcase ICEs because we have
+a use before a def stmt.
+
+In bar (the function handled right already before this patch) we have
+  _6 = .SUB_OVERFLOW (y_4(D), x_5(D));
+  _1 = REALPART_EXPR <_6>;
+  _2 = IMAGPART_EXPR <_6>;
+  a = _1;
+  _3 = (int) _2;
+  baz (_3);
+before the lowering, so we can just store the limbs of the .SUB_OVERFLOW
+into the limbs of a variable and while doing that compute the value we
+eventually store into _3 instead of the former a = _1; stmt.
+In foo we have
+  _5 = .SUB_OVERFLOW (y_3(D), x_4(D));
+  _1 = REALPART_EXPR <_5>;
+  _2 = IMAGPART_EXPR <_5>;
+  t_6 = (int) _2;
+  baz (t_6);
+  a = _1;
+and we can't do that because the lowering would be at the a = _1; stmt
+and would try to set t_6 to the overflow flag at that point.  We don't
+need to punt completely and mark _5 as _Complex _BitInt VAR_DECL though
+in this case, all we need is not merge the a = _1; store with the
+.SUB_OVERFLOW and REALPART_EXPR/IMAGPART_EXPR lowering.  So, add _1
+to m_names and lower the first 3 stmts at the _1 = REALPART_EXPR <_5>;
+location, optimizable_arith_overflow returned non-zero and so the
+cast after IMAGPART_EXPR was after it and then a = _1; will copy from
+the temporary VAR_DECL to memory.
+
+2025-09-10  Jakub Jelinek  <jakub@redhat.com>
+
+	PR middle-end/121828
+	* gimple-lower-bitint.cc (gimple_lower_bitint): For REALPART_EXPR
+	consumed by store in the same bb and with REALPART_EXPR from
+	optimizable_arith_overflow, don't add REALPART_EXPR lhs to
+	the m_names bitmap only if the cast from IMAGPART_EXPR doesn't
+	appear in between the REALPART_EXPR and the store.
+
+	* gcc.dg/bitint-126.c: New test.
+
+(cherry picked from commit 29a8ce3b0bb117ed7f4b998462fe917f2a17f168)
+---
+ gcc/gimple-lower-bitint.cc        | 52 +++++++++++++++++++++++++++++--
+ gcc/testsuite/gcc.dg/bitint-126.c | 26 ++++++++++++++++
+ 2 files changed, 75 insertions(+), 3 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.dg/bitint-126.c
+
+diff --git a/gcc/gimple-lower-bitint.cc b/gcc/gimple-lower-bitint.cc
+index 6e83367ff41f..dec872bd96b0 100644
+--- a/gcc/gimple-lower-bitint.cc
++++ b/gcc/gimple-lower-bitint.cc
+@@ -6600,15 +6600,62 @@ gimple_lower_bitint (void)
+ 	      if (is_gimple_assign (SSA_NAME_DEF_STMT (s)))
+ 		switch (gimple_assign_rhs_code (SSA_NAME_DEF_STMT (s)))
+ 		  {
++		  case REALPART_EXPR:
+ 		  case IMAGPART_EXPR:
+ 		    {
+-		      tree rhs1 = gimple_assign_rhs1 (SSA_NAME_DEF_STMT (s));
++		      gimple *ds = SSA_NAME_DEF_STMT (s);
++		      tree rhs1 = gimple_assign_rhs1 (ds);
+ 		      rhs1 = TREE_OPERAND (rhs1, 0);
+ 		      if (TREE_CODE (rhs1) == SSA_NAME)
+ 			{
+ 			  gimple *g = SSA_NAME_DEF_STMT (rhs1);
+ 			  if (optimizable_arith_overflow (g))
+-			    continue;
++			    {
++			      if (gimple_assign_rhs_code (ds) == IMAGPART_EXPR)
++				continue;
++			      if (gimple_store_p (use_stmt))
++				{
++				  /* Punt if the cast use of IMAGPART_EXPR stmt
++				     appears before the store use_stmt, because
++				     optimizable arith overflow can't be
++				     lowered at the store location in that case.
++				     See PR121828.  */
++				  gimple_stmt_iterator gsi
++				    = gsi_for_stmt (use_stmt);
++				  unsigned int cnt = 0;
++				  do
++				    {
++				      gsi_prev_nondebug (&gsi);
++				      if (gsi_end_p (gsi))
++					break;
++				      gimple *g2 = gsi_stmt (gsi);
++				      if (g2 == ds)
++					break;
++				      if (++cnt == 64)
++					break;
++				      if (!gimple_assign_cast_p (g2))
++					continue;
++				      tree rhs2 = gimple_assign_rhs1 (g2);
++				      if (TREE_CODE (rhs2) != SSA_NAME)
++					continue;
++				      gimple *g3 = SSA_NAME_DEF_STMT (rhs2);
++				      if (!is_gimple_assign (g3))
++					continue;
++				      if (gimple_assign_rhs_code (g3)
++					  != IMAGPART_EXPR)
++					continue;
++				      rhs2 = gimple_assign_rhs1 (g3);
++				      rhs2 = TREE_OPERAND (rhs2, 0);
++				      if (rhs2 != rhs1)
++					continue;
++				      cnt = 64;
++				      break;
++				    }
++				  while (1);
++				  if (cnt == 64)
++				    break;
++				}
++			    }
+ 			}
+ 		    }
+ 		    /* FALLTHRU */
+@@ -6619,7 +6666,6 @@ gimple_lower_bitint (void)
+ 		  case EXACT_DIV_EXPR:
+ 		  case TRUNC_MOD_EXPR:
+ 		  case FIX_TRUNC_EXPR:
+-		  case REALPART_EXPR:
+ 		    if (gimple_store_p (use_stmt)
+ 			&& is_gimple_assign (use_stmt)
+ 			&& !gimple_has_volatile_ops (use_stmt)
+diff --git a/gcc/testsuite/gcc.dg/bitint-126.c b/gcc/testsuite/gcc.dg/bitint-126.c
+new file mode 100644
+index 000000000000..62dfadd6bbfd
+--- /dev/null
++++ b/gcc/testsuite/gcc.dg/bitint-126.c
+@@ -0,0 +1,26 @@
++/* PR middle-end/121828 */
++/* { dg-do compile { target bitint } } */
++/* { dg-options "-std=c23 -O2" } */
++
++void baz (int);
++#if __BITINT_MAXWIDTH__ >= 255
++unsigned _BitInt(255) a;
++
++void
++foo (int x, int y)
++{
++  unsigned _BitInt(255) b;
++  int t = __builtin_sub_overflow (y, x, &b);
++  baz (t);
++  a = b;
++}
++
++void
++bar (int x, int y)
++{
++  unsigned _BitInt(255) b;
++  bool t = __builtin_sub_overflow (y, x, &b);
++  a = b;
++  baz (t);
++}
++#endif
+-- 
+2.43.7
+
+

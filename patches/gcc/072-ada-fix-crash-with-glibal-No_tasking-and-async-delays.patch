@@ -1,0 +1,58 @@
+From 03054f929d921bdb6b0a5cfcefdb07a7011b2cfb Mon Sep 17 00:00:00 2001
+From: Denis Mazzucato <mazzucato@adacore.com>
+Date: Tue, 8 Jul 2025 13:00:08 +0200
+Subject: [PATCH] ada: Fix crash with global No_Tasking and async delays
+
+When optimizations are enabled, the runtime for delays is inlined and expanded.
+If No_Tasking is set globally, for instance via a configuration file, then the
+initialization of _Master, _Chain, and _Task_Name formals is skipped for task
+entities. Later during expansion, these identifiers are expected but won't be
+found, crashing the compiler. This patch fixes Init_Formals by removing the
+check on Global_No_Tasking. If a No_Tasking restriction applies, then a
+violation error will be raised when analyzing the task type.
+
+gcc/ada/ChangeLog:
+
+	* exp_ch3.adb (Init_Formals): Remove the check on Global_No_Tasking.
+	* sem.adb: Fix typo.
+---
+ gcc/ada/exp_ch3.adb | 8 +++-----
+ gcc/ada/sem.adb     | 2 +-
+ 2 files changed, 4 insertions(+), 6 deletions(-)
+
+diff --git a/gcc/ada/exp_ch3.adb b/gcc/ada/exp_ch3.adb
+index 24bd34b04d5c..9e6abc0632ad 100644
+--- a/gcc/ada/exp_ch3.adb
++++ b/gcc/ada/exp_ch3.adb
+@@ -10663,11 +10663,9 @@ package body Exp_Ch3 is
+                        or else (Is_Record_Type (Typ)
+                                  and then Is_Protected_Record_Type (Typ));
+       With_Task  : constant Boolean :=
+-                     not Global_No_Tasking
+-                       and then
+-                     (Has_Task (Typ)
+-                        or else (Is_Record_Type (Typ)
+-                                   and then Is_Task_Record_Type (Typ)));
++                     Has_Task (Typ)
++                       or else (Is_Record_Type (Typ)
++                                 and then Is_Task_Record_Type (Typ));
+       Formals : List_Id;
+ 
+    begin
+diff --git a/gcc/ada/sem.adb b/gcc/ada/sem.adb
+index 06df00ec8718..26d00e829c92 100644
+--- a/gcc/ada/sem.adb
++++ b/gcc/ada/sem.adb
+@@ -1565,7 +1565,7 @@ package body Sem is
+ 
+       --  Compile predefined units with GNAT_Mode set to True, to properly
+       --  process the categorization stuff. However, do not set GNAT_Mode
+-      --  to True for the renamings units (Text_IO, IO_Exceptions, Direct_IO,
++      --  to True for the renaming units (Text_IO, IO_Exceptions, Direct_IO,
+       --  Sequential_IO) as this would prevent pragma Extend_System from being
+       --  taken into account, for example when Text_IO is renaming DEC.Text_IO.
+ 
+-- 
+2.43.7
+
+

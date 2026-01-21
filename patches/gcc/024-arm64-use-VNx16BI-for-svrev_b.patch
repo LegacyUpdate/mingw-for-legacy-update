@@ -1,0 +1,129 @@
+From 701193a7a6d3f3f345bf336e7ebc7d6fa1e0c5ac Mon Sep 17 00:00:00 2001
+From: Richard Sandiford <richard.sandiford@arm.com>
+Date: Thu, 14 Aug 2025 17:56:51 +0100
+Subject: [PATCH] aarch64: Use VNx16BI for svrev_b* [PR121294]
+
+The previous patch for PR121294 handled svtrn1/2, svuzp1/2, and svzip1/2.
+This one extends it to handle svrev intrinsics, where the same kind of
+wrong code can be generated.
+
+gcc/
+	PR target/121294
+	* config/aarch64/aarch64.md (UNSPEC_REV_PRED): New unspec.
+	* config/aarch64/aarch64-sve.md (@aarch64_sve_rev<mode>_acle)
+	(*aarch64_sve_rev<mode>_acle): New patterns.
+	* config/aarch64/aarch64-sve-builtins-base.cc
+	(svrev_impl::expand): Use the new patterns for boolean svrev.
+
+gcc/testsuite/
+	PR target/121294
+	* gcc.target/aarch64/sve/acle/general/rev_2.c: New test.
+---
+ .../aarch64/aarch64-sve-builtins-base.cc      |  5 +++-
+ gcc/config/aarch64/aarch64-sve.md             | 25 ++++++++++++++++-
+ gcc/config/aarch64/aarch64.md                 |  1 +
+ .../aarch64/sve/acle/general/rev_2.c          | 27 +++++++++++++++++++
+ 4 files changed, 56 insertions(+), 2 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.target/aarch64/sve/acle/general/rev_2.c
+
+diff --git a/gcc/config/aarch64/aarch64-sve-builtins-base.cc b/gcc/config/aarch64/aarch64-sve-builtins-base.cc
+index b4396837c246..6eef545dd3f6 100644
+--- a/gcc/config/aarch64/aarch64-sve-builtins-base.cc
++++ b/gcc/config/aarch64/aarch64-sve-builtins-base.cc
+@@ -2857,7 +2857,10 @@ public:
+   rtx
+   expand (function_expander &e) const override
+   {
+-    return e.use_exact_insn (code_for_aarch64_sve_rev (e.vector_mode (0)));
++    auto mode = e.vector_mode (0);
++    return e.use_exact_insn (e.type_suffix (0).bool_p
++			     ? code_for_aarch64_sve_rev_acle (mode)
++			     : code_for_aarch64_sve_rev (mode));
+   }
+ };
+ 
+diff --git a/gcc/config/aarch64/aarch64-sve.md b/gcc/config/aarch64/aarch64-sve.md
+index 2161907c3273..d2bbdc7e1275 100644
+--- a/gcc/config/aarch64/aarch64-sve.md
++++ b/gcc/config/aarch64/aarch64-sve.md
+@@ -9260,7 +9260,30 @@
+ 	(unspec:PRED_ALL [(match_operand:PRED_ALL 1 "register_operand" "Upa")]
+ 			 UNSPEC_REV))]
+   "TARGET_SVE"
+-  "rev\t%0.<Vetype>, %1.<Vetype>")
++  "rev\t%0.<Vetype>, %1.<Vetype>"
++)
++
++(define_expand "@aarch64_sve_rev<mode>_acle"
++  [(set (match_operand:VNx16BI 0 "register_operand")
++	(unspec:VNx16BI
++	  [(match_operand:VNx16BI 1 "register_operand")
++	   (match_dup:PRED_ALL 2)]
++	  UNSPEC_REV_PRED))]
++  "TARGET_SVE"
++  {
++    operands[2] = CONST0_RTX (<MODE>mode);
++  }
++)
++
++(define_insn "*aarch64_sve_rev<mode>_acle"
++  [(set (match_operand:VNx16BI 0 "register_operand" "=Upa")
++	(unspec:VNx16BI
++	  [(match_operand:VNx16BI 1 "register_operand" "Upa")
++	   (match_operand:PRED_ALL 2 "aarch64_simd_imm_zero")]
++	  UNSPEC_REV_PRED))]
++  "TARGET_SVE"
++  "rev\t%0.<Vetype>, %1.<Vetype>"
++)
+ 
+ ;; -------------------------------------------------------------------------
+ ;; ---- [PRED] Special-purpose binary permutes
+diff --git a/gcc/config/aarch64/aarch64.md b/gcc/config/aarch64/aarch64.md
+index 79bbf5fafb31..fa4791d91fcb 100644
+--- a/gcc/config/aarch64/aarch64.md
++++ b/gcc/config/aarch64/aarch64.md
+@@ -280,6 +280,7 @@
+     UNSPEC_PACIBSP
+     UNSPEC_PRLG_STK
+     UNSPEC_REV
++    UNSPEC_REV_PRED
+     UNSPEC_SADALP
+     UNSPEC_SCVTF
+     UNSPEC_SET_LANE
+diff --git a/gcc/testsuite/gcc.target/aarch64/sve/acle/general/rev_2.c b/gcc/testsuite/gcc.target/aarch64/sve/acle/general/rev_2.c
+new file mode 100644
+index 000000000000..3dc4eb928546
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/aarch64/sve/acle/general/rev_2.c
+@@ -0,0 +1,27 @@
++/* { dg-do compile } */
++/* { dg-options "-O2" } */
++
++#include <arm_sve.h>
++
++svbool_t test1()
++{
++  return svrev_b16 (svptrue_b16 ());
++}
++
++svbool_t test2()
++{
++  return svrev_b32 (svptrue_b32 ());
++}
++
++svbool_t test3()
++{
++  return svrev_b64 (svptrue_b64 ());
++}
++
++/* { dg-final { scan-assembler {\tptrue\tp[0-7]\.h} } } */
++/* { dg-final { scan-assembler {\tptrue\tp[0-7]\.s} } } */
++/* { dg-final { scan-assembler {\tptrue\tp[0-7]\.d} } } */
++/* { dg-final { scan-assembler-not {\tptrue\tp[0-7]\.b} } } */
++/* { dg-final { scan-assembler {\trev\tp0\.h} } } */
++/* { dg-final { scan-assembler {\trev\tp0\.s} } } */
++/* { dg-final { scan-assembler {\trev\tp0\.d} } } */
+-- 
+2.43.7
+
+

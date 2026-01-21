@@ -1,0 +1,165 @@
+From 236279e8ed27ef759a01064dc6da55fecf94a620 Mon Sep 17 00:00:00 2001
+From: Patrick Palka <ppalka@redhat.com>
+Date: Fri, 28 Nov 2025 15:38:04 -0500
+Subject: [PATCH] libstdc++: Correctly implement LWG 3946 changes to
+ const_iterator_t [PR122842]
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf8
+Content-Transfer-Encoding: 8bit
+
+LWG 3946 made const_iterator_t/sentinel_t agree with ranges::cbegin/cend
+by defining the aliases in terms of the CPOs, but I defined it the other
+way around in an incorrect way that made the aliases not consider
+range-ness of const T via __possibly_const_range.  This patch
+reimplements the proposed resolution in a more obviously correct way,
+mirroring the wording.
+
+	PR libstdc++/122842
+
+libstdc++-v3/ChangeLog:
+
+	* include/bits/ranges_base.h (__access:_CBegin): Define in
+	terms of const_iterator directly, not const_iterator_t.
+	(__access::_CEnd): Likewise in terms of const_sentinel vs
+	const_sentinel_t.
+	(const_iterator_t): Move down definition and define in terms
+	of ranges::cbegin as per LWG 3946.
+	(const_sentinel_t): Likewise in terms of ranges::cend.
+	* testsuite/24_iterators/const_iterator/1.cc (test02): Correct
+	test for int[], std::array and std::vector.  Also test
+	std::string.
+
+Reviewed-by: Tomasz KamiÅski <tkaminsk@redhat.com>
+Reviewed-by: Jonathan Wakely <jwakely@redhat.com>
+(cherry picked from commit 2d3142c00934c419755c17dd85ecdb0e72f249d1)
+---
+ libstdc++-v3/include/bits/ranges_base.h       | 20 ++++++++-----
+ .../24_iterators/const_iterator/1.cc          | 29 ++++++++++++++-----
+ 2 files changed, 35 insertions(+), 14 deletions(-)
+
+diff --git a/libstdc++-v3/include/bits/ranges_base.h b/libstdc++-v3/include/bits/ranges_base.h
+index 488907da4466..3ca945886ba9 100644
+--- a/libstdc++-v3/include/bits/ranges_base.h
++++ b/libstdc++-v3/include/bits/ranges_base.h
+@@ -529,11 +529,7 @@ namespace ranges
+     using sentinel_t = decltype(ranges::end(std::declval<_Range&>()));
+ 
+ #if __glibcxx_ranges_as_const // >= C++23
+-  template<range _Range>
+-    using const_iterator_t = const_iterator<iterator_t<_Range>>;
+-
+-  template<range _Range>
+-    using const_sentinel_t = const_sentinel<sentinel_t<_Range>>;
++  // const_iterator_t and const_sentinel_t defined below.
+ 
+   template<range _Range>
+     using range_const_reference_t = iter_const_reference_t<iterator_t<_Range>>;
+@@ -685,7 +681,7 @@ namespace ranges
+ 			    (ranges::begin(__access::__possibly_const_range(__t))); }
+ 	{
+ 	  auto& __r = __access::__possibly_const_range(__t);
+-	  return const_iterator_t<decltype(__r)>(ranges::begin(__r));
++	  return const_iterator<decltype(ranges::begin(__r))>(ranges::begin(__r));
+ 	}
+ #else
+       template<typename _Tp>
+@@ -713,7 +709,7 @@ namespace ranges
+ 			    (ranges::end(__access::__possibly_const_range(__t))); }
+ 	{
+ 	  auto& __r = __access::__possibly_const_range(__t);
+-	  return const_sentinel_t<decltype(__r)>(ranges::end(__r));
++	  return const_sentinel<decltype(ranges::end(__r))>(ranges::end(__r));
+ 	}
+ #else
+       template<typename _Tp>
+@@ -817,6 +813,16 @@ namespace ranges
+     inline constexpr ranges::__access::_CData cdata{};
+   }
+ 
++#if __glibcxx_ranges_as_const // >= C++23
++  // _GLIBCXX_RESOLVE_LIB_DEFECTS
++  // 3946. The definition of const_iterator_t should be reworked
++  template<range _Range>
++    using const_iterator_t = decltype(ranges::cbegin(std::declval<_Range&>()));
++
++  template<range _Range>
++    using const_sentinel_t = decltype(ranges::cend(std::declval<_Range&>()));
++#endif
++
+   namespace __detail
+   {
+     template<typename _Tp>
+diff --git a/libstdc++-v3/testsuite/24_iterators/const_iterator/1.cc b/libstdc++-v3/testsuite/24_iterators/const_iterator/1.cc
+index fe952bfad148..f2bcad4f09c9 100644
+--- a/libstdc++-v3/testsuite/24_iterators/const_iterator/1.cc
++++ b/libstdc++-v3/testsuite/24_iterators/const_iterator/1.cc
+@@ -42,12 +42,13 @@ test01()
+     }
+ }
+ 
+-template<class Range, bool Const>
++template<class Range, bool Const, bool Constable = Const>
+ void
+ test02()
+ {
+   if constexpr (Const)
+     {
++      static_assert(Constable);
+       static_assert( ranges::constant_range<Range> );
+       static_assert( std::same_as<ranges::const_iterator_t<Range>, ranges::iterator_t<Range>> );
+       static_assert( std::same_as<ranges::const_sentinel_t<Range>, ranges::sentinel_t<Range>> );
+@@ -64,9 +65,21 @@ test02()
+       static_assert( !ranges::constant_range<Range> );
+       using Wrapped = std::basic_const_iterator<ranges::iterator_t<Range>>;
+ 
+-      static_assert( std::same_as<ranges::const_iterator_t<Range>, Wrapped> );
+-      if constexpr (ranges::common_range<Range>)
+-	static_assert( std::same_as<ranges::const_sentinel_t<Range>, Wrapped> );
++      if constexpr (Constable)
++	{
++	  // Verify LWG 3946 changes to const_iterator/sentinel_t (PR122842).
++	  static_assert( std::same_as<ranges::const_iterator_t<Range>,
++				      ranges::iterator_t<const Range>> );
++	  static_assert( std::same_as<ranges::const_sentinel_t<Range>,
++				      ranges::sentinel_t<const Range>> );
++	}
++      else
++	{
++	  static_assert( std::same_as<ranges::const_iterator_t<Range>, Wrapped> );
++	  if constexpr (ranges::common_range<Range>)
++	    static_assert( std::same_as<ranges::const_sentinel_t<Range>, Wrapped> );
++	}
++
+       static_assert( std::same_as<ranges::range_const_reference_t<Range>,
+ 				 std::iter_reference_t<Wrapped>> );
+ 
+@@ -138,13 +151,14 @@ main()
+   test01<std::string_view::iterator, true>();
+   test01<std::vector<bool>::const_iterator, true>();
+ 
+-  test02<int[42], false>();
++  test02<int[42], false, true>();
+   test02<test_input_range<int>, false>();
+   test02<test_forward_range<int>, false>();
+   test02<test_bidirectional_range<int>, false>();
+   test02<test_random_access_range<int>, false>();
+-  test02<std::array<int, 3>, false>();
+-  test02<std::vector<bool>, false>();
++  test02<std::array<int, 3>, false, true>();
++  test02<std::vector<bool>, false, true>();
++  test02<std::string, false, true>();
+ 
+   test02<const int[42], true>();
+   test02<test_input_range<const int>, true>();
+@@ -155,6 +169,7 @@ main()
+   test02<const std::array<int, 3>, true>();
+   test02<std::string_view, true>();
+   test02<const std::vector<bool>, true>();
++  test02<const std::string, true>();
+ 
+   test03();
+   test04();
+-- 
+2.43.7
+
+

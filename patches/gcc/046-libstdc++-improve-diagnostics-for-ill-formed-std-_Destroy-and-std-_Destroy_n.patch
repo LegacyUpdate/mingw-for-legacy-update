@@ -1,0 +1,292 @@
+From b9a1f1ffa886e107a9e275b3ba001ed76bb33ad7 Mon Sep 17 00:00:00 2001
+From: Jonathan Wakely <jwakely@redhat.com>
+Date: Wed, 21 May 2025 23:48:34 +0100
+Subject: [PATCH] libstdc++: Improve diagnostics for ill-formed std::_Destroy
+ and std::_Destroy_n [PR120390]
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf8
+Content-Transfer-Encoding: 8bit
+
+By using std::is_trivially_destructible instead of the old
+__has_trivial_destructor built-in we no longer need the static_assert to
+deal with types with deleted destructors. All non-destructible types,
+including those with deleted destructors, will now give user-friendly
+diagnostics that clearly explain the problem.
+
+Also combine the _Destroy_aux and _Destroy_n_aux class templates used
+for C++98 into one, so that we perform fewer expensive class template
+instantiations.
+
+libstdc++-v3/ChangeLog:
+
+	PR libstdc++/120390
+	* include/bits/stl_construct.h (_Destroy_aux::__destroy_n): New
+	static member function.
+	(_Destroy_aux<true>::__destroy_n): Likewise.
+	(_Destroy_n_aux): Remove.
+	(_Destroy(ForwardIterator, ForwardIterator)): Remove
+	static_assert. Use is_trivially_destructible instead of
+	__has_trivial_destructor.
+	(_Destroy_n): Likewise. Use _Destroy_aux::__destroy_n instead of
+	_Destroy_n_aux::__destroy_n.
+	* testsuite/20_util/specialized_algorithms/memory_management_tools/destroy_neg.cc:
+	Adjust dg-error strings. Move destroy_n tests to ...
+	* testsuite/20_util/specialized_algorithms/memory_management_tools/destroy_n_neg.cc:
+	New test.
+	* testsuite/23_containers/vector/cons/destructible_debug_neg.cc:
+	Adjust dg-error strings.
+	* testsuite/23_containers/vector/cons/destructible_neg.cc:
+	Likewise.
+
+Reviewed-by: Tomasz KamiÅski <tkaminsk@redhat.com>
+(cherry picked from commit 01789efaea25a48ac45dae8facb6db8abd8ebb14)
+---
+ libstdc++-v3/include/bits/stl_construct.h     | 56 +++++++-----------
+ .../memory_management_tools/destroy_n_neg.cc  | 59 +++++++++++++++++++
+ .../memory_management_tools/destroy_neg.cc    | 20 +++++--
+ .../vector/cons/destructible_debug_neg.cc     |  7 +--
+ .../vector/cons/destructible_neg.cc           |  7 +--
+ 5 files changed, 98 insertions(+), 51 deletions(-)
+ create mode 100644 libstdc++-v3/testsuite/20_util/specialized_algorithms/memory_management_tools/destroy_n_neg.cc
+
+diff --git a/libstdc++-v3/include/bits/stl_construct.h b/libstdc++-v3/include/bits/stl_construct.h
+index 23b8fb754710..3ac75715e0e0 100644
+--- a/libstdc++-v3/include/bits/stl_construct.h
++++ b/libstdc++-v3/include/bits/stl_construct.h
+@@ -181,6 +181,15 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
+ 	  for (; __first != __last; ++__first)
+ 	    std::_Destroy(std::__addressof(*__first));
+ 	}
++
++      template<typename _ForwardIterator, typename _Size>
++	static _GLIBCXX20_CONSTEXPR _ForwardIterator
++	__destroy_n(_ForwardIterator __first, _Size __count)
++	{
++	  for (; __count > 0; (void)++__first, --__count)
++	    std::_Destroy(std::__addressof(*__first));
++	  return __first;
++	}
+     };
+ 
+   template<>
+@@ -189,6 +198,14 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
+       template<typename _ForwardIterator>
+         static void
+         __destroy(_ForwardIterator, _ForwardIterator) { }
++
++      template<typename _ForwardIterator, typename _Size>
++	static _ForwardIterator
++	__destroy_n(_ForwardIterator __first, _Size __count)
++	{
++	  std::advance(__first, __count);
++	  return __first;
++	}
+     };
+ #endif
+ 
+@@ -204,10 +221,7 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
+       typedef typename iterator_traits<_ForwardIterator>::value_type
+                        _Value_type;
+ #if __cplusplus >= 201103L
+-      // A deleted destructor is trivial, this ensures we reject such types:
+-      static_assert(is_destructible<_Value_type>::value,
+-		    "value type is destructible");
+-      if constexpr (!__has_trivial_destructor(_Value_type))
++      if constexpr (!is_trivially_destructible<_Value_type>::value)
+ 	for (; __first != __last; ++__first)
+ 	  std::_Destroy(std::__addressof(*__first));
+ #if __cpp_constexpr_dynamic_alloc // >= C++20
+@@ -221,33 +235,6 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
+ #endif
+     }
+ 
+-#if __cplusplus < 201103L
+-  template<bool>
+-    struct _Destroy_n_aux
+-    {
+-      template<typename _ForwardIterator, typename _Size>
+-	static _GLIBCXX20_CONSTEXPR _ForwardIterator
+-	__destroy_n(_ForwardIterator __first, _Size __count)
+-	{
+-	  for (; __count > 0; (void)++__first, --__count)
+-	    std::_Destroy(std::__addressof(*__first));
+-	  return __first;
+-	}
+-    };
+-
+-  template<>
+-    struct _Destroy_n_aux<true>
+-    {
+-      template<typename _ForwardIterator, typename _Size>
+-        static _ForwardIterator
+-        __destroy_n(_ForwardIterator __first, _Size __count)
+-	{
+-	  std::advance(__first, __count);
+-	  return __first;
+-	}
+-    };
+-#endif
+-
+   /**
+    * Destroy a range of objects.  If the value_type of the object has
+    * a trivial destructor, the compiler should optimize all of this
+@@ -260,10 +247,7 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
+       typedef typename iterator_traits<_ForwardIterator>::value_type
+                        _Value_type;
+ #if __cplusplus >= 201103L
+-      // A deleted destructor is trivial, this ensures we reject such types:
+-      static_assert(is_destructible<_Value_type>::value,
+-		    "value type is destructible");
+-      if constexpr (!__has_trivial_destructor(_Value_type))
++      if constexpr (!is_trivially_destructible<_Value_type>::value)
+ 	for (; __count > 0; (void)++__first, --__count)
+ 	  std::_Destroy(std::__addressof(*__first));
+ #if __cpp_constexpr_dynamic_alloc // >= C++20
+@@ -275,7 +259,7 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
+ 	std::advance(__first, __count);
+       return __first;
+ #else
+-      return std::_Destroy_n_aux<__has_trivial_destructor(_Value_type)>::
++      return std::_Destroy_aux<__has_trivial_destructor(_Value_type)>::
+ 	__destroy_n(__first, __count);
+ #endif
+     }
+diff --git a/libstdc++-v3/testsuite/20_util/specialized_algorithms/memory_management_tools/destroy_n_neg.cc b/libstdc++-v3/testsuite/20_util/specialized_algorithms/memory_management_tools/destroy_n_neg.cc
+new file mode 100644
+index 000000000000..12c0dc575ccf
+--- /dev/null
++++ b/libstdc++-v3/testsuite/20_util/specialized_algorithms/memory_management_tools/destroy_n_neg.cc
+@@ -0,0 +1,59 @@
++// Copyright (C) 2017-2025 Free Software Foundation, Inc.
++//
++// This file is part of the GNU ISO C++ Library.  This library is free
++// software; you can redistribute it and/or modify it under the
++// terms of the GNU General Public License as published by the
++// Free Software Foundation; either version 3, or (at your option)
++// any later version.
++
++// This library is distributed in the hope that it will be useful,
++// but WITHOUT ANY WARRANTY; without even the implied warranty of
++// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++// GNU General Public License for more details.
++
++// You should have received a copy of the GNU General Public License along
++// with this library; see the file COPYING3.  If not see
++// <http://www.gnu.org/licenses/>.
++
++// { dg-do compile { target c++17 } }
++
++#include <memory>
++
++// This has a trivial destructor, but should not be destructible!
++struct DeletedDtor {
++  ~DeletedDtor() = delete;
++};
++
++void
++test01()
++{
++  alignas(DeletedDtor) unsigned char buf[sizeof(DeletedDtor)];
++  auto p = ::new (buf) DeletedDtor();
++  std::destroy_n(p, 1);
++}
++
++class PrivateDtor {
++  ~PrivateDtor() { }
++};
++
++void
++test02()
++{
++  alignas(PrivateDtor) unsigned char buf[sizeof(PrivateDtor)];
++  auto p = ::new (buf) PrivateDtor();
++  std::destroy_n(p, 1);
++}
++
++#if __cpp_constexpr_dynamic_alloc // >= C++20
++consteval bool
++test03()
++{
++  DeletedDtor* p = nullptr;
++  std::destroy_n(p, 0);
++  return true;
++}
++static_assert(test03());
++#endif
++
++// { dg-error "deleted function .*DeletedDtor" "" { target *-*-* } 0 }
++// { dg-error "PrivateDtor.* is private" "" { target *-*-* } 0 }
+diff --git a/libstdc++-v3/testsuite/20_util/specialized_algorithms/memory_management_tools/destroy_neg.cc b/libstdc++-v3/testsuite/20_util/specialized_algorithms/memory_management_tools/destroy_neg.cc
+index 5946a82de3bc..096f218ee2be 100644
+--- a/libstdc++-v3/testsuite/20_util/specialized_algorithms/memory_management_tools/destroy_neg.cc
++++ b/libstdc++-v3/testsuite/20_util/specialized_algorithms/memory_management_tools/destroy_neg.cc
+@@ -29,8 +29,7 @@ test01()
+ {
+   alignas(DeletedDtor) unsigned char buf[sizeof(DeletedDtor)];
+   auto p = ::new (buf) DeletedDtor();
+-  std::destroy(p, p + 1);	// { dg-error "here" }
+-  std::destroy_n(p, 1);		// { dg-error "here" }
++  std::destroy(p, p + 1);
+ }
+ 
+ class PrivateDtor {
+@@ -42,8 +41,19 @@ test02()
+ {
+   alignas(PrivateDtor) unsigned char buf[sizeof(PrivateDtor)];
+   auto p = ::new (buf) PrivateDtor();
+-  std::destroy(p, p + 1);	// { dg-error "here" }
+-  std::destroy_n(p, 1);		// { dg-error "here" }
++  std::destroy(p, p + 1);
+ }
+ 
+-// { dg-error "value type is destructible" "" { target *-*-* } 0 }
++#if __cpp_constexpr_dynamic_alloc // >= C++20
++consteval bool
++test03()
++{
++  DeletedDtor* p = nullptr;
++  std::destroy(p, p);
++  return true;
++}
++static_assert(test03());
++#endif
++
++// { dg-error "deleted function .*DeletedDtor" "" { target *-*-* } 0 }
++// { dg-error "PrivateDtor.* is private" "" { target *-*-* } 0 }
+diff --git a/libstdc++-v3/testsuite/23_containers/vector/cons/destructible_debug_neg.cc b/libstdc++-v3/testsuite/23_containers/vector/cons/destructible_debug_neg.cc
+index 61b99d34a1ca..e6689f7ea265 100644
+--- a/libstdc++-v3/testsuite/23_containers/vector/cons/destructible_debug_neg.cc
++++ b/libstdc++-v3/testsuite/23_containers/vector/cons/destructible_debug_neg.cc
+@@ -43,11 +43,8 @@ test02()
+   std::vector<PrivateDtor> v;
+ }
+ 
+-// { dg-error "value type is destructible" "" { target *-*-* } 0 }
++// { dg-error "deleted function .*DeletedDtor" "" { target *-*-* } 0 }
++// { dg-error "PrivateDtor.* is private" "" { target *-*-* } 0 }
+ 
+ // In Debug Mode the "required from here" errors come from <debug/vector>
+ // { dg-error "required from here" "" { target *-*-* } 182 }
+-
+-// Needed because of PR c++/92193
+-// { dg-prune-output "deleted function" }
+-// { dg-prune-output "private within this context" }
+diff --git a/libstdc++-v3/testsuite/23_containers/vector/cons/destructible_neg.cc b/libstdc++-v3/testsuite/23_containers/vector/cons/destructible_neg.cc
+index 0807d158304c..2bd15bc68eec 100644
+--- a/libstdc++-v3/testsuite/23_containers/vector/cons/destructible_neg.cc
++++ b/libstdc++-v3/testsuite/23_containers/vector/cons/destructible_neg.cc
+@@ -42,8 +42,5 @@ test02()
+   std::vector<PrivateDtor> v; // { dg-error "here" }
+ }
+ 
+-// { dg-error "value type is destructible" "" { target *-*-* } 0 }
+-
+-// Needed because of PR c++/92193
+-// { dg-prune-output "deleted function" }
+-// { dg-prune-output "private within this context" }
++// { dg-error "deleted function .*DeletedDtor" "" { target *-*-* } 0 }
++// { dg-error "PrivateDtor.* is private" "" { target *-*-* } 0 }
+-- 
+2.43.7
+
+

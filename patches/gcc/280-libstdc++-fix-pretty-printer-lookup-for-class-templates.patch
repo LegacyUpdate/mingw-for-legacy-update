@@ -1,0 +1,45 @@
+From a4921df13f034bbd2c8a08bfff0a39b3fe7512e5 Mon Sep 17 00:00:00 2001
+From: Vladimir Bespalov <vlad.bespalov@jetstreamsoft.com>
+Date: Sat, 22 Nov 2025 19:58:08 -0800
+Subject: [PATCH] libstdc++: Fix pretty printer lookup for class templates
+ [PR122812]
+
+Under some circumstances the type.name of a pair<> type starts with
+"struct". This confuses GDB when we use gdb.lookup_type for the name of
+template specialization using "struct pair<...>" in its template
+argument list.
+
+Using type.tag avoids this problem.
+
+libstdc++-v3/ChangeLog:
+
+	PR libstdc++/122812
+	* python/libstdcxx/v6/printers.py (lookup_templ_spec): Use
+	gdb.Type.tag if present.
+
+(cherry picked from commit dce0d564d742617f71297c88e4a1c0d6038f2c47)
+---
+ libstdc++-v3/python/libstdcxx/v6/printers.py | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/libstdc++-v3/python/libstdcxx/v6/printers.py b/libstdc++-v3/python/libstdcxx/v6/printers.py
+index 5f5963cb5954..052a99a28ed5 100644
+--- a/libstdc++-v3/python/libstdcxx/v6/printers.py
++++ b/libstdc++-v3/python/libstdcxx/v6/printers.py
+@@ -133,7 +133,11 @@ def lookup_templ_spec(templ, *args):
+     """
+     Lookup template specialization templ<args...>.
+     """
+-    t = '{}<{}>'.format(templ, ', '.join([str(a) for a in args]))
++    # Similar to PR67440, str(a) might contain unexpected type qualifiers.
++    t = '{}<{}>'.format(templ, ', '.join([ \
++            a.tag if isinstance(a, gdb.Type) and a.tag \
++            else str(a) \
++        for a in args]))
+     try:
+         return gdb.lookup_type(t)
+     except gdb.error as e:
+-- 
+2.43.7
+
+

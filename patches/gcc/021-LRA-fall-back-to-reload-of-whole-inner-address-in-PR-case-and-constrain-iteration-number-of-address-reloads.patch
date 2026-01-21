@@ -1,0 +1,148 @@
+From ef1bd81ee057775c70dceb06c7ae2c409b8877b1 Mon Sep 17 00:00:00 2001
+From: "Vladimir N. Makarov" <vmakarov@redhat.com>
+Date: Thu, 14 Aug 2025 09:30:47 -0400
+Subject: [PATCH] [PR121007, LRA]: Fall back to reload of whole inner address
+ in PR case and constrain iteration number of address reloads
+
+gcc/ChangeLog:
+
+	PR target/121007
+	* lra-constraints.cc (process_address_1): When changing base reg
+	on a reg of the base class, fall back to reload of whole inner address.
+	(process_address): Constrain the iteration number.
+
+gcc/testsuite/ChangeLog:
+
+	PR target/121007
+	* gcc.target/powerpc/pr121007.c: New.
+---
+ gcc/lra-constraints.cc                      | 41 ++++++++++++++-------
+ gcc/testsuite/gcc.target/powerpc/pr121007.c | 40 ++++++++++++++++++++
+ 2 files changed, 68 insertions(+), 13 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.target/powerpc/pr121007.c
+
+diff --git a/gcc/lra-constraints.cc b/gcc/lra-constraints.cc
+index 535991dad06b..630993819459 100644
+--- a/gcc/lra-constraints.cc
++++ b/gcc/lra-constraints.cc
+@@ -3934,6 +3934,16 @@ process_address_1 (int nop, bool check_only_p,
+       enum reg_class cl;
+       rtx set;
+       rtx_insn *insns, *last_insn;
++
++      cl = base_reg_class (ad.mode, ad.as, ad.base_outer_code,
++			   get_index_code (&ad), curr_insn);
++
++      if (REG_P (*ad.base_term)
++	  && ira_class_subset_p[get_reg_class (REGNO (*ad.base_term))][cl])
++	/* It seems base reg is already in the base reg class and changing it
++	   does not make a progress.  So reload the whole inner address.  */
++	goto reload_inner_addr;
++
+       /* Try to reload base into register only if the base is invalid
+          for the address but with valid offset, case (4) above.  */
+       start_sequence ();
+@@ -3979,8 +3989,6 @@ process_address_1 (int nop, bool check_only_p,
+ 	    {
+ 	      *ad.base_term = XEXP (SET_SRC (set), 0);
+ 	      *ad.disp_term = XEXP (SET_SRC (set), 1);
+-	      cl = base_reg_class (ad.mode, ad.as, ad.base_outer_code,
+-				   get_index_code (&ad), curr_insn);
+ 	      regno = REGNO (*ad.base_term);
+ 	      if (regno >= FIRST_PSEUDO_REGISTER
+ 		  && cl != lra_get_allocno_class (regno))
+@@ -4023,11 +4031,11 @@ process_address_1 (int nop, bool check_only_p,
+     }
+   else
+     {
+-      enum reg_class cl = base_reg_class (ad.mode, ad.as,
+-					  SCRATCH, SCRATCH,
+-					  curr_insn);
+-      rtx addr = *ad.inner;
+-
++      enum reg_class cl;
++      rtx addr;
++    reload_inner_addr:
++      cl = base_reg_class (ad.mode, ad.as, SCRATCH, SCRATCH, curr_insn);
++      addr = *ad.inner;
+       new_reg = lra_create_new_reg (Pmode, NULL_RTX, cl, NULL, "addr");
+       /* addr => new_base.  */
+       lra_emit_move (new_reg, addr);
+@@ -4049,14 +4057,21 @@ process_address (int nop, bool check_only_p,
+ 		 rtx_insn **before, rtx_insn **after)
+ {
+   bool res = false;
+-
+-  while (process_address_1 (nop, check_only_p, before, after))
++  /* Use enough iterations to process all address parts:  */
++  for (int i = 0; i < 10; i++)
+     {
+-      if (check_only_p)
+-	return true;
+-      res = true;
++      if (!process_address_1 (nop, check_only_p, before, after))
++	{
++	  return res;
++	}
++      else
++	{
++	  if (check_only_p)
++	    return true;
++	  res = true;
++	}
+     }
+-  return res;
++  fatal_insn ("unable to reload address in ", curr_insn);
+ }
+ 
+ /* Override the generic address_reload_context in order to
+diff --git a/gcc/testsuite/gcc.target/powerpc/pr121007.c b/gcc/testsuite/gcc.target/powerpc/pr121007.c
+new file mode 100644
+index 000000000000..9e6b1be7911f
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/powerpc/pr121007.c
+@@ -0,0 +1,40 @@
++/* { dg-do compile } */
++/* { dg-options "-O2 -mdejagnu-cpu=power9" } */
++
++typedef struct { int a; } A;
++unsigned char *a;
++char b;
++int c;
++void foo (vector char, vector char, vector char);
++
++void
++bar (long stride)
++{
++  vector char v0, v1, v2, v3, v5;
++  vector char r0 = __builtin_vec_vsx_ld (0, a);
++  vector char r2 = __builtin_vec_vsx_ld (2 * stride, a - 3);
++  vector char r3 = __builtin_vec_vsx_ld (3 * stride, a - 3);
++  vector char r4;
++  vector char r6 = __builtin_vec_vsx_ld (6 * stride, a - 3);
++  vector char r7 = __builtin_vec_vsx_ld (7 * stride, a - 3);
++  vector char r14, h, i, j;
++  if (b)
++    return;
++  v1 = __builtin_vec_vsx_ld (9 * stride, a);
++  v2 = __builtin_vec_vsx_ld (10 * stride, a - 3);
++  v3 = __builtin_vec_vsx_ld (11 * stride, a - 3);
++  r3 = __builtin_vec_mergeh (r3, v3);
++  v5 = __builtin_vec_mergel (r2, r6);
++  r14 = __builtin_vec_mergeh (r3, r7);
++  r4 = __builtin_vec_mergeh (v2, r14);
++  v0 = __builtin_vec_mergeh (r0, r4);
++  union { unsigned char a[16]; A b; } temp;
++  vector signed char k;
++  h = __builtin_vec_ld (0, temp.a);
++  i = __builtin_vec_splat (h, 1);
++  temp.b.a = c;
++  k = __builtin_vec_ld (0, (signed char *) temp.a);
++  j = __builtin_vec_and (i, (vector char) k);
++  foo (v1, v0, j);
++  foo (v1, v5, j);
++}
+-- 
+2.43.7
+
+

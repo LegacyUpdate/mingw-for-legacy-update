@@ -1,0 +1,97 @@
+From 746e09b32b5dde185aef06a405b5c643e5a595e7 Mon Sep 17 00:00:00 2001
+From: Richard Earnshaw <rearnsha@arm.com>
+Date: Fri, 28 Mar 2025 12:59:03 +0000
+Subject: [PATCH] arm: Only reverse FP inequalities when -ffinite-math-only
+ [PR110796...]
+
+On Arm we have been failing to fully implement support for IEEE NaNs
+in inequality comparisons because we have allowed reversing of
+inequalities in a way that allows SELECT_CC_MODE to produce different
+answers.  For example, the reverse of GT is UNLE, but if we pass these
+two RTL codes to SELECT_CC_MODE, the former will return CCFPEmode,
+while the latter CCFPmode.
+
+It would be possible to allow fully reversible FPmodes, but to do so
+would involve adding yet more RTL codes, something like NOT_GT and
+NOT_UNLE, for the cases we cannot currently reverse.  NOT_GT would
+then have the same condition code generation as UNLT, but the same
+mode selection as GT.
+
+In the mean time, we need to restrict REVERSIBLE_CC_MODE to
+non-floating modes unless we are compiling with -ffinite-math-only.  In
+that case we can continue to reverse the comparisons, but now we want
+to always select CCFPmode as there's no need to consider the exception
+raising cases.
+
+	PR target/110796
+	PR target/118446
+
+gcc/ChangeLog:
+
+	* config/arm/arm.h (REVERSIBLE_CC_MODE): FP modes are only
+	reversible if flag_finite_math_only.
+	* config/arm/arm.cc (arm_select_cc_mode): Return CCFPmode for all
+	FP comparisons if flag_finite_math_only.
+
+gcc/testsuite/ChangeLog:
+
+	* gcc.target/arm/armv8_2-fp16-arith-1.c: Adjust due to no-longer
+	emitting VCMPE when -ffast-math..
+
+(cherry picked from commit 0a339746e7646bacf2c8aa5512268d23660f26f9)
+---
+ gcc/config/arm/arm.cc                               | 4 +++-
+ gcc/config/arm/arm.h                                | 6 +++++-
+ gcc/testsuite/gcc.target/arm/armv8_2-fp16-arith-1.c | 3 +--
+ 3 files changed, 9 insertions(+), 4 deletions(-)
+
+diff --git a/gcc/config/arm/arm.cc b/gcc/config/arm/arm.cc
+index b30e360b528c..710663183f12 100644
+--- a/gcc/config/arm/arm.cc
++++ b/gcc/config/arm/arm.cc
+@@ -16234,7 +16234,9 @@ arm_select_cc_mode (enum rtx_code op, rtx x, rtx y)
+ 	case LE:
+ 	case GT:
+ 	case GE:
+-	  return CCFPEmode;
++	  return (flag_finite_math_only
++		  ? CCFPmode
++		  : CCFPEmode);
+ 
+ 	default:
+ 	  gcc_unreachable ();
+diff --git a/gcc/config/arm/arm.h b/gcc/config/arm/arm.h
+index 8472b7561272..08d3f0dae3da 100644
+--- a/gcc/config/arm/arm.h
++++ b/gcc/config/arm/arm.h
+@@ -2257,7 +2257,11 @@ extern int making_const_table;
+ 
+ #define SELECT_CC_MODE(OP, X, Y)  arm_select_cc_mode (OP, X, Y)
+ 
+-#define REVERSIBLE_CC_MODE(MODE) 1
++/* Floating-point modes cannot be reversed unless we don't care about
++   NaNs.  */
++#define REVERSIBLE_CC_MODE(MODE)			\
++  (flag_finite_math_only				\
++   || !((MODE) == CCFPmode || (MODE) == CCFPEmode))
+ 
+ #define REVERSE_CONDITION(CODE,MODE) \
+   (((MODE) == CCFPmode || (MODE) == CCFPEmode) \
+diff --git a/gcc/testsuite/gcc.target/arm/armv8_2-fp16-arith-1.c b/gcc/testsuite/gcc.target/arm/armv8_2-fp16-arith-1.c
+index 52b87376dc78..f3fea524809e 100644
+--- a/gcc/testsuite/gcc.target/arm/armv8_2-fp16-arith-1.c
++++ b/gcc/testsuite/gcc.target/arm/armv8_2-fp16-arith-1.c
+@@ -106,8 +106,7 @@ TEST_CMP (greaterthanqual, >=, int16x8_t, float16x8_t)
+ /* { dg-final { scan-assembler-times {vdiv\.f16\ts[0-9]+, s[0-9]+, s[0-9]+} 13 } }  */
+ 
+ /* For float16_t.  */
+-/* { dg-final { scan-assembler-times {vcmp\.f32\ts[0-9]+, s[0-9]+} 2 } }  */
+-/* { dg-final { scan-assembler-times {vcmpe\.f32\ts[0-9]+, s[0-9]+} 4 } }  */
++/* { dg-final { scan-assembler-times {vcmp\.f32\ts[0-9]+, s[0-9]+} 6 } }  */
+ 
+ /* For float16x4_t.  */
+ /* { dg-final { scan-assembler-times {vceq\.f16\td[0-9]+, d[0-9]+} 2 } }  */
+-- 
+2.43.7
+
+

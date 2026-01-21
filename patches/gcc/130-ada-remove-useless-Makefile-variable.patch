@@ -1,0 +1,33 @@
+From d7316971df347a48f5d9addcadbc5f6123285f80 Mon Sep 17 00:00:00 2001
+From: Eric Botcazou <ebotcazou@adacore.com>
+Date: Sun, 5 Oct 2025 10:25:14 +0200
+Subject: [PATCH] Ada: Remove useless Makefile variable
+
+gcc/ada
+	PR ada/118343
+	* Makefile.rtl (LLVM_BUILD): Delete.
+---
+ gcc/ada/Makefile.rtl | 6 ------
+ 1 file changed, 6 deletions(-)
+
+diff --git a/gcc/ada/Makefile.rtl b/gcc/ada/Makefile.rtl
+index cb41e6887cdf..1b9f28c692ee 100644
+--- a/gcc/ada/Makefile.rtl
++++ b/gcc/ada/Makefile.rtl
+@@ -26,12 +26,6 @@ ifndef ADAC
+ ADAC=$(CC)
+ endif
+ 
+-ifeq ($(LLVM_CONFIG),)
+-LLVM_BUILD := $(shell $(ADAC) -v | grep ^llvm-gcc)
+-else
+-LLVM_BUILD := llvm-gcc
+-endif
+-
+ # Objects needed only for tasking
+ GNATRTL_TASKING_OBJS= \
+   a-dispat$(objext) \
+-- 
+2.43.7
+
+

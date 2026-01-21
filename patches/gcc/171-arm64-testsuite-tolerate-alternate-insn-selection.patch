@@ -1,0 +1,47 @@
+From 1e4a2d0d7e2c89e8c3603cbe46e7595a118c9731 Mon Sep 17 00:00:00 2001
+From: Alexandre Oliva <oliva@adacore.com>
+Date: Sat, 25 Oct 2025 22:45:22 -0300
+Subject: [PATCH] [aarch64] [testsuite] tolerate alternate insn selection
+ [PR121599]
+
+On gcc-14, instead of 'movi\td[0-9]*,#0', we select
+'mov\tz[0-9]*\.b,#0', and the testcase fails.
+As in pfalse* tests, tolerate the difference.
+
+for  gcc/testsuite/ChangeLog
+
+	PR target/121599
+	* gcc.target/aarch64/sve2/pr121599.c: Tolerate alterate insn
+	selection.
+
+(cherry picked from commit ba653cb0d26e004c10d20ebd9f009a0a823659b0)
+---
+ gcc/testsuite/gcc.target/aarch64/sve2/pr121599.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/gcc/testsuite/gcc.target/aarch64/sve2/pr121599.c b/gcc/testsuite/gcc.target/aarch64/sve2/pr121599.c
+index 90c5ac97e4f8..da4b7aa602c3 100644
+--- a/gcc/testsuite/gcc.target/aarch64/sve2/pr121599.c
++++ b/gcc/testsuite/gcc.target/aarch64/sve2/pr121599.c
+@@ -7,7 +7,7 @@
+ 
+ /*
+ ** foo:
+-**	movi	d([0-9]+), #0
++**	movi?	[vdz]([0-9]+)\.?b?, #0
+ **	movprfx	z0\.b, p0/z, z0\.b
+ **	usqadd	z0\.b, p0/m, z0\.b, z\1\.b
+ **	ret
+@@ -19,7 +19,7 @@ svuint8_t foo (svbool_t pg, svuint8_t op1)
+ 
+ /*
+ ** bar:
+-**	movi	d([0-9]+), #0
++**	movi?	[vdz]([0-9]+)\.?b?, #0
+ **	movprfx	z0\.b, p0/z, z0\.b
+ **	suqadd	z0\.b, p0/m, z0\.b, z\1\.b
+ **	ret
+-- 
+2.43.7
+
+

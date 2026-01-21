@@ -1,0 +1,104 @@
+From 05e7d542bcd76c37330cc98e4a5bce4699ad23b8 Mon Sep 17 00:00:00 2001
+From: Robin Dapp <rdapp@ventanamicro.com>
+Date: Mon, 1 Sep 2025 11:41:34 +0200
+Subject: [PATCH] RISC-V: Handle overlap in expand_vec_perm PR121742.
+
+In a two-source gather we unconditionally overwrite target with the
+first gather's result already.  If op1 == target this clobbers the
+source operand for the second gather.  This patch uses a temporary in
+that case.
+
+	PR target/121742
+
+gcc/ChangeLog:
+
+	* config/riscv/riscv-v.cc (expand_vec_perm): Use temporary if
+	op1 and target overlap.
+
+gcc/testsuite/ChangeLog:
+
+	* gcc.target/riscv/rvv/autovec/pr121742.c: New test.
+
+(cherry picked from commit f957d352bd6f240829226405e9be7960071d1b9c)
+---
+ gcc/config/riscv/riscv-v.cc                   | 11 +++++--
+ .../gcc.target/riscv/rvv/autovec/pr121742.c   | 30 +++++++++++++++++++
+ 2 files changed, 38 insertions(+), 3 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.target/riscv/rvv/autovec/pr121742.c
+
+diff --git a/gcc/config/riscv/riscv-v.cc b/gcc/config/riscv/riscv-v.cc
+index d04665319ab3..488331d00534 100644
+--- a/gcc/config/riscv/riscv-v.cc
++++ b/gcc/config/riscv/riscv-v.cc
+@@ -3053,15 +3053,17 @@ expand_vec_perm (rtx target, rtx op0, rtx op1, rtx sel)
+   mask_mode = get_mask_mode (data_mode);
+   rtx mask = gen_reg_rtx (mask_mode);
+   rtx max_sel = gen_const_vector_dup (sel_mode, nunits);
++  bool overlap = reg_overlap_mentioned_p (target, op1);
++  rtx tmp_target = overlap ? gen_reg_rtx (data_mode) : target;
+ 
+   /* Step 1: generate a mask that should select everything >= nunits into the
+    * mask.  */
+   expand_vec_cmp (mask, GEU, sel_mod, max_sel);
+ 
+-  /* Step2: gather every op0 values indexed by sel into target,
++  /* Step2: gather every op0 values indexed by sel into TMP_TARGET,
+ 	    we don't need to care about the result of the element
+ 	    whose index >= nunits.  */
+-  emit_vlmax_gather_insn (target, op0, sel_mod);
++  emit_vlmax_gather_insn (tmp_target, op0, sel_mod);
+ 
+   /* Step3: shift the range from (nunits, max_of_mode] to
+ 	    [0, max_of_mode - nunits].  */
+@@ -3071,7 +3073,10 @@ expand_vec_perm (rtx target, rtx op0, rtx op1, rtx sel)
+ 
+   /* Step4: gather those into the previously masked-out elements
+ 	    of target.  */
+-  emit_vlmax_masked_gather_mu_insn (target, op1, tmp, mask);
++  emit_vlmax_masked_gather_mu_insn (tmp_target, op1, tmp, mask);
++
++  if (overlap)
++    emit_move_insn (tmp_target, target);
+ }
+ 
+ /* Implement TARGET_VECTORIZE_VEC_PERM_CONST for RVV.  */
+diff --git a/gcc/testsuite/gcc.target/riscv/rvv/autovec/pr121742.c b/gcc/testsuite/gcc.target/riscv/rvv/autovec/pr121742.c
+new file mode 100644
+index 000000000000..08491f8108a1
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/riscv/rvv/autovec/pr121742.c
+@@ -0,0 +1,30 @@
++/* { dg-do run } */
++/* { dg-require-effective-target riscv_v_ok } */
++/* { dg-options "-march=rv64gcv -mabi=lp64d -O2" } */
++
++typedef unsigned long uint64_t;
++typedef unsigned int uint32_t;
++typedef unsigned char uint8_t;
++typedef uint8_t a __attribute__((vector_size(4)));
++int b, c;
++
++uint64_t d() {
++  a e = {5, 9, 1, 5};
++  a bla = {0, 0, 0, 0};
++  int *f = &b;
++  uint32_t g = 0;
++  int i = 0;
++  for (; i < 2; i++)
++    for (c = 0; c <= 2; c++) {
++      *f ^= e[3] + 9;
++      e = __builtin_shufflevector(
++          ~__builtin_shufflevector(bla, e, 1, 4, 3, 4), e, 0, 1, 1, 7);
++    }
++  return g;
++}
++
++int main() {
++  int j = d ();
++  if (b != 0)
++    __builtin_abort ();
++}
+-- 
+2.43.7
+
+

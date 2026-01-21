@@ -1,0 +1,65 @@
+From d2136fa1e16140a1391497427c0bad5570882105 Mon Sep 17 00:00:00 2001
+From: Eric Botcazou <ebotcazou@adacore.com>
+Date: Thu, 11 Dec 2025 20:08:54 +0100
+Subject: [PATCH] Ada: Fix internal error on incomplete private tagged type
+
+The code expects the partial view but gets the incomplete view instead.
+
+gcc/ada/
+	PR ada/123096
+	* exp_put_image.adb (Build_Record_Put_Image_Procedure): Call
+	Incomplete_Or_Partial_View with Partial_Only set to True.
+
+gcc/testsuite/
+	* gnat.dg/specs/put_image2.ads: New test.
+---
+ gcc/ada/exp_put_image.adb                  |  3 ++-
+ gcc/testsuite/gnat.dg/specs/put_image2.ads | 21 +++++++++++++++++++++
+ 2 files changed, 23 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/gnat.dg/specs/put_image2.ads
+
+diff --git a/gcc/ada/exp_put_image.adb b/gcc/ada/exp_put_image.adb
+index 40b2a65b8212..3859aebb0264 100644
+--- a/gcc/ada/exp_put_image.adb
++++ b/gcc/ada/exp_put_image.adb
+@@ -956,7 +956,8 @@ package body Exp_Put_Image is
+                --  use the first copy instead.
+ 
+                Partial_View := Incomplete_Or_Partial_View
+-                                 (Defining_Identifier (Type_Decl));
++                                 (Defining_Identifier (Type_Decl),
++                                  Partial_Only => True);
+ 
+                pragma Assert (Ekind (Partial_View) in
+                               E_Private_Type
+diff --git a/gcc/testsuite/gnat.dg/specs/put_image2.ads b/gcc/testsuite/gnat.dg/specs/put_image2.ads
+new file mode 100644
+index 000000000000..0f1f2aec6a79
+--- /dev/null
++++ b/gcc/testsuite/gnat.dg/specs/put_image2.ads
+@@ -0,0 +1,21 @@
++-- { dg-do compile }
++-- { dg-options "-gnat2022" }
++
++package Put_Image2 is
++
++  type Abstract_Configuration_Provider is tagged;
++
++  type Configuration_Provider_Access is
++    access all Abstract_Configuration_Provider'Class;
++
++  type Abstract_Configuration_Provider
++    (Child : Configuration_Provider_Access := null) is
++    abstract tagged limited private;
++
++private
++
++  type Abstract_Configuration_Provider
++    (Child : Configuration_Provider_Access := null) is
++    abstract tagged limited null record;
++
++end Put_Image2;
+-- 
+2.43.7
+
+

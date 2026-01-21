@@ -1,0 +1,41 @@
+From b97c46eebe72992ec4cc21df36b272ad431b92ca Mon Sep 17 00:00:00 2001
+From: Gary Dismukes <dismukes@adacore.com>
+Date: Thu, 21 Aug 2025 18:48:12 +0000
+Subject: [PATCH] ada: Compiler crash on container aggregate association with
+ nonstatic key choice
+
+The compiler blows up on a container aggregate with a container element
+association that has a key_choice given by a nonstatic key expression.
+This happens in the size computation for the aggregate due to calling
+Update_Choices with the nonstatic expression.  The fix is simply to
+condition the call to Update_Choices on whether the choice expression
+is static.
+
+gcc/ada/ChangeLog:
+
+	* exp_aggr.adb (Build_Container_Aggr_Code.Build_Size_Expr): In the case
+	of an association with a single choice, only call Update_Choices when
+	the choice expression is nonstatic.
+---
+ gcc/ada/exp_aggr.adb | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/gcc/ada/exp_aggr.adb b/gcc/ada/exp_aggr.adb
+index f0cf8393c7e1..f35e16b67616 100644
+--- a/gcc/ada/exp_aggr.adb
++++ b/gcc/ada/exp_aggr.adb
+@@ -6789,7 +6789,9 @@ package body Exp_Aggr is
+                --  Choice is a single discrete value
+ 
+                elsif Is_Discrete_Type (Etype (Choice)) then
+-                  Update_Choices (Choice, Choice);
++                  if Is_Static_Expression (Choice) then
++                     Update_Choices (Choice, Choice);
++                  end if;
+ 
+                   Temp_Siz_Exp := Make_Integer_Literal (Loc, 1);
+                   Set_Is_Static_Expression (Temp_Siz_Exp);
+-- 
+2.43.7
+
+

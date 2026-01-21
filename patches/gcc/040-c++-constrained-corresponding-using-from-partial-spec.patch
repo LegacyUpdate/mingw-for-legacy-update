@@ -1,0 +1,92 @@
+From ab7ce5ddb774594a4d82dda65bc4bf83a3d673b3 Mon Sep 17 00:00:00 2001
+From: Patrick Palka <ppalka@redhat.com>
+Date: Tue, 19 Aug 2025 11:07:14 -0400
+Subject: [PATCH] c++: constrained corresponding using from partial spec
+ [PR121351]
+
+When comparing constraints during correspondence checking for a using
+from a partial specialization, we need to substitute the partial
+specialization arguments into the constraints rather than the primary
+template arguments.  Otherwise we incorrectly reject e.g. the below
+testcase as ambiguous since we substitute T=int* instead of T=int
+into #1's constraints and don't notice the correspondence.
+
+This patch corrects the recent r16-2771-gb9f1cc4e119da9 fix by using
+outer_template_args instead of TI_ARGS of the DECL_CONTEXT, which
+should always give the correct outer arguments for substitution.
+
+	PR c++/121351
+
+gcc/cp/ChangeLog:
+
+	* class.cc (add_method): Use outer_template_args when
+	substituting outer template arguments into constraints.
+
+gcc/testsuite/ChangeLog:
+
+	* g++.dg/cpp2a/concepts-using7.C: New test.
+
+Reviewed-by: Jason Merrill <jason@redhat.com>
+(cherry picked from commit 0ab1e31807a19d699c462937ca639718360eac0c)
+---
+ gcc/cp/class.cc                              |  8 +++----
+ gcc/testsuite/g++.dg/cpp2a/concepts-using7.C | 23 ++++++++++++++++++++
+ 2 files changed, 27 insertions(+), 4 deletions(-)
+ create mode 100644 gcc/testsuite/g++.dg/cpp2a/concepts-using7.C
+
+diff --git a/gcc/cp/class.cc b/gcc/cp/class.cc
+index 54ccd93b8994..44db14e080a6 100644
+--- a/gcc/cp/class.cc
++++ b/gcc/cp/class.cc
+@@ -1360,14 +1360,14 @@ add_method (tree type, tree method, bool via_using)
+ 	{
+ 	  if (TREE_CODE (fn) == TEMPLATE_DECL)
+ 	    ++processing_template_decl;
+-	  if (tree ti = CLASSTYPE_TEMPLATE_INFO (DECL_CONTEXT (fn)))
++	  if (tree outer_args = outer_template_args (fn))
+ 	    fn_constraints = tsubst_constraint_info (fn_constraints,
+-						     TI_ARGS (ti),
++						     outer_args,
+ 						     tf_warning_or_error,
+ 						     fn);
+-	  if (tree ti = CLASSTYPE_TEMPLATE_INFO (DECL_CONTEXT (method)))
++	  if (tree outer_args = outer_template_args (method))
+ 	    method_constraints = tsubst_constraint_info (method_constraints,
+-							 TI_ARGS (ti),
++							 outer_args,
+ 							 tf_warning_or_error,
+ 							 method);
+ 	  if (TREE_CODE (fn) == TEMPLATE_DECL)
+diff --git a/gcc/testsuite/g++.dg/cpp2a/concepts-using7.C b/gcc/testsuite/g++.dg/cpp2a/concepts-using7.C
+new file mode 100644
+index 000000000000..6e2c0515c2e3
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/cpp2a/concepts-using7.C
+@@ -0,0 +1,23 @@
++// PR c++/121351
++// { dg-do compile { target c++20 } }
++
++template<class T> concept C = true;
++
++template<class T>
++struct A;
++
++template<class T>
++struct A<T*> {
++  template<class U> void f(U) requires C<T>; // #1
++};
++
++template<class T>
++struct B : A<T> {
++  using A<T>::f;
++  template<class U> void f(U) requires C<int>; // #2
++};
++
++int main() {
++  B<int*> b;
++  b.f(42); // OK, #2 corresponds to and therefore hides #1
++}
+-- 
+2.43.7
+
+

@@ -1,0 +1,92 @@
+From 931b835e731572f37c684c08e3313580cb047b0f Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Thu, 14 Aug 2025 22:30:45 +0200
+Subject: [PATCH] c++: Fix up build_cplus_array_type [PR121524]
+
+The following testcase is miscompiled since my r15-3046 change
+to properly apply std attributes after closing ] for arrays to the
+array type.
+Array type is not a class type, so when cplus_decl_attribute is
+called on the ARRAY_TYPE, it doesn't do ATTR_FLAG_TYPE_IN_PLACE.
+Though, for alignas/gnu::aligned/deprecated/gnu::unavailable/gnu::unused
+attributes the handlers of those attributes for non-ATTR_FLAG_TYPE_IN_PLACE
+on types call build_variant_type_copy and modify some flags on the new
+variant type.  They also usually don't clear *no_add_attrs, so the caller
+then checks if the attributes are present on the new type and if not, calls
+build_type_attribute_variant.
+On the following testcase, it results in the B::foo type to be properly
+32 byte aligned.
+The problem happens later when we build_cplus_array_type for C::a.
+elt_type is T (typedef, or using works likewise), we get as m
+main variant type with unsigned int element type but because elt_type
+is different, build_cplus_array_type searches the TYPE_NEXT_VARIANT chain
+to find if there isn't already a useful ARRAY_TYPE to reuse.
+It checks for NULL TYPE_NAME, NULL TYPE_ATTRIBUTES and the right TREE_TYPE.
+Unfortunately this is not good enough, build_variant_type_copy above created
+a variant type on which it modified TYPE_USER_ALIGN and TYPE_ALIGN, but
+TYPE_ATTRIBUTES is still NULL, only the build_type_attribute_variant call
+later adds attributes.
+The problem is that the intermediate type is found in the TYPE_NEXT_VARIANT
+chain and reused.
+
+The following patch adds conditions to prevent problems with the affected
+attributes (except gnu::unused, I think whether TREE_USED is set or not
+shouldn't prevent sharing).  In particular, if TYPE_USER_ALIGN is not
+set on the variant, it wasn't user realigned, if it is set, it verifies
+it has it set because the elt_type has been user aligned and TYPE_ALIGN
+is the expected one.  For deprecated it punts on the flag being set and
+for gnu::unavailable as well.
+
+2025-08-14  Jakub Jelinek  <jakub@redhat.com>
+
+	PR c++/121524
+	* tree.cc (build_cplus_array_type): Don't reuse variant type
+	if it has TREE_DEPRECATED or TREE_UNAVAILABLE flags set or,
+	unless elt_type has TYPE_USER_ALIGN set and TYPE_ALIGN is
+	TYPE_ALIGN of elt_type, TYPE_USER_ALIGN is not set.
+
+	* g++.dg/cpp0x/gen-attrs-89.C: New test.
+
+(cherry picked from commit b125eee2d8526538476834773fb8216035d08598)
+---
+ gcc/cp/tree.cc                            | 7 ++++++-
+ gcc/testsuite/g++.dg/cpp0x/gen-attrs-89.C | 8 ++++++++
+ 2 files changed, 14 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/g++.dg/cpp0x/gen-attrs-89.C
+
+diff --git a/gcc/cp/tree.cc b/gcc/cp/tree.cc
+index 5863b6878f02..30b3aac948e5 100644
+--- a/gcc/cp/tree.cc
++++ b/gcc/cp/tree.cc
+@@ -1185,7 +1185,12 @@ build_cplus_array_type (tree elt_type, tree index_type, int dependent)
+       for (t = m; t; t = TYPE_NEXT_VARIANT (t))
+ 	if (TREE_TYPE (t) == elt_type
+ 	    && TYPE_NAME (t) == NULL_TREE
+-	    && TYPE_ATTRIBUTES (t) == NULL_TREE)
++	    && TYPE_ATTRIBUTES (t) == NULL_TREE
++	    && (!TYPE_USER_ALIGN (t)
++		|| (TYPE_USER_ALIGN (elt_type)
++		    && TYPE_ALIGN (t) == TYPE_ALIGN (elt_type)))
++	    && !TREE_DEPRECATED (t)
++	    && !TREE_UNAVAILABLE (t))
+ 	  break;
+       if (!t)
+ 	{
+diff --git a/gcc/testsuite/g++.dg/cpp0x/gen-attrs-89.C b/gcc/testsuite/g++.dg/cpp0x/gen-attrs-89.C
+new file mode 100644
+index 000000000000..6ec29e1a7551
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/cpp0x/gen-attrs-89.C
+@@ -0,0 +1,8 @@
++// PR c++/121524
++// { dg-do compile { target c++11 } }
++
++typedef unsigned int T;
++struct A { unsigned a[8]; unsigned b; };
++struct B { T foo[8] [[gnu::aligned (32)]]; };
++struct C { T a[8]; T b; };
++static_assert (sizeof (C) == sizeof (A), "");
+-- 
+2.43.7
+
+

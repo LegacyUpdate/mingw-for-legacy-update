@@ -1,0 +1,294 @@
+From 4d8f72b510bf12a5ac7dc5cfa642640d5d0fa0ed Mon Sep 17 00:00:00 2001
+From: Christophe Lyon <christophe.lyon@linaro.org>
+Date: Wed, 26 Nov 2025 13:03:37 +0000
+Subject: [PATCH] arm: Fix constraints in MVE asrl and lsll patterns [PR122858]
+
+The second alternative for operand 1 needs a new constraint which does
+not overlap with Pg, except that it can handle 32 to generate an
+optimal mov.
+
+This patch introduces a new Ph constraint which has the [32..255]
+range.
+
+This fixes a lot of regressions when running the testsuite for an MVE
+target such as -march=armv8.1-m.main+mve.fp+fp.dp -mfloat-abi=hard.
+
+gcc/ChangeLog:
+
+	PR target/122858
+	* config/arm/constraints.md (Ph): New constraint.
+	* config/arm/mve.md (mve_asrl_imm, mve_lsll_imm): Fix constraints
+	of operand 1 and handle 32 as special shift amount.
+
+gcc/testsuite/ChangeLog:
+
+	PR target/122858
+	* gcc.target/arm/mve/pr122858.c: New test.
+
+(cherry picked from commit cf78d402655d5fc9cb8780cb8837889afbe17ff6)
+---
+ gcc/config/arm/constraints.md               |  9 ++-
+ gcc/config/arm/mve.md                       | 71 +++++++++++-------
+ gcc/testsuite/gcc.target/arm/mve/pr122858.c | 83 +++++++++++++++++++++
+ 3 files changed, 132 insertions(+), 31 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.target/arm/mve/pr122858.c
+
+diff --git a/gcc/config/arm/constraints.md b/gcc/config/arm/constraints.md
+index 0c30947090ca..1606667e3b9d 100644
+--- a/gcc/config/arm/constraints.md
++++ b/gcc/config/arm/constraints.md
+@@ -34,8 +34,8 @@
+ ;; in ARM/Thumb-2 state: Da, Db, Dc, Dd, Dn, DN, Dm, Dl, DL, Do, Dv, Dy, Di,
+ ;;			 Dj, Ds, Dt, Dp, Dz, Tu, Te
+ ;; in Thumb-1 state: Pa, Pb, Pc, Pd, Pe
+-;; in Thumb-2 state: Ha, Pg, Pj, PJ, Ps, Pt, Pu, Pv, Pw, Px, Py, Pz, Ra, Rb,
+-;;		     Rd, Rf, Rg, Ri
++;; in Thumb-2 state: Ha, Pg, Ph, Pj, PJ, Ps, Pt, Pu, Pv, Pw, Px, Py, Pz, Ra,
++;;		     Rb, Rd, Rf, Rg, Ri
+ 
+ ;; The following memory constraints have been used:
+ ;; in ARM/Thumb-2 state: Uh, Ut, Uv, Uy, Un, Um, Us, Uo, Up, Uf, Ux, Ul, Uz
+@@ -243,6 +243,11 @@
+   (and (match_code "const_int")
+        (match_test "TARGET_THUMB2 && ival >= 1 && ival <= 32")))
+ 
++(define_constraint "Ph"
++  "@internal In Thumb-2 state a constant in range 32 to 255"
++  (and (match_code "const_int")
++       (match_test "TARGET_THUMB2 && ival >= 32 && ival <= 255")))
++
+ (define_constraint "Ps"
+   "@internal In Thumb-2 state a constant in the range -255 to +255"
+   (and (match_code "const_int")
+diff --git a/gcc/config/arm/mve.md b/gcc/config/arm/mve.md
+index 6e96d9ca22a7..d49b87ab0da1 100644
+--- a/gcc/config/arm/mve.md
++++ b/gcc/config/arm/mve.md
+@@ -4761,10 +4761,10 @@
+ (define_insn_and_split "mve_asrl_imm"
+   [(set (match_operand:DI 0 "arm_general_register_operand" "=r,r")
+ 	  (ashiftrt:DI (match_operand:DI 1 "arm_general_register_operand" "0,r")
+-		       (match_operand:QI 2 "immediate_operand" "Pg,I")))]
++		       (match_operand:QI 2 "immediate_operand" "Pg,Ph")))]
+   "TARGET_HAVE_MVE"
+-  "asrl%?\\t%Q0, %R1, %2"
+-  "&& !satisfies_constraint_Pg (operands[2])"
++  "asrl%?\\t%Q0, %R0, %2"
++  "&& satisfies_constraint_Ph (operands[2])"
+   [(clobber (const_int 0))]
+   "
+   rtx amount = operands[2];
+@@ -4780,30 +4780,36 @@
+     }
+ 
+   /* ival < 0 should have already been handled by mve_asrl. */
+-  gcc_assert (ival > 32);
++  gcc_assert (ival >= 32);
+ 
+-  /* Shift amount above immediate range (ival > 32).
+-     out_hi gets the sign bit
+-     out_lo gets in_hi << (ival - 32) or << 31 if ival >= 64.
+-     If ival >= 64, the result is either 0 or -1, depending on the
+-     input sign.  */
+   rtx in_hi = gen_highpart (SImode, operands[1]);
+   rtx out_lo = gen_lowpart (SImode, operands[0]);
+   rtx out_hi = gen_highpart (SImode, operands[0]);
+ 
+-  emit_insn (gen_rtx_SET (out_lo,
+-			  gen_rtx_fmt_ee (ASHIFTRT,
+-					  SImode,
+-					  in_hi,
+-					  GEN_INT (MIN (ival - 32,
+-							31)))));
++  if (ival == 32)
++    /* out_hi gets the sign bit
++       out_lo gets in_hi.  */
++    emit_insn (gen_movsi (out_lo, in_hi));
++  else
++    /* Shift amount above immediate range (ival > 32).
++       out_hi gets the sign bit
++       out_lo gets in_hi << (ival - 32) or << 31 if ival >= 64.
++       If ival >= 64, the result is either 0 or -1, depending on the
++       input sign.  */
++    emit_insn (gen_rtx_SET (out_lo,
++			    gen_rtx_fmt_ee (ASHIFTRT,
++					    SImode,
++					    in_hi,
++					    GEN_INT (MIN (ival - 32,
++							  31)))));
++
+   /* Copy sign bit, which is OK even if out_lo == in_hi.  */
+   emit_insn (gen_rtx_SET (out_hi,
+ 			  gen_rtx_fmt_ee (ASHIFTRT,
+ 					  SImode,
+ 					  in_hi,
+ 					  GEN_INT (31))));
+-	DONE;
++  DONE;
+   "
+   [(set_attr "predicable" "yes,yes")
+    (set_attr "length" "4,8")])
+@@ -4817,7 +4823,7 @@
+ 		       (match_dup 2))
+ 	  (ashift:DI (match_dup 1) (neg:QI (match_dup 2)))))]
+   "TARGET_HAVE_MVE"
+-  "asrl%?\\t%Q0, %R1, %2"
++  "asrl%?\\t%Q0, %R0, %2"
+   [(set_attr "predicable" "yes")])
+ 
+ ;; General pattern for lsll
+@@ -4851,10 +4857,10 @@
+ (define_insn_and_split "mve_lsll_imm"
+   [(set (match_operand:DI 0 "arm_general_register_operand" "=r,r")
+ 	  (ashift:DI (match_operand:DI 1 "arm_general_register_operand" "0,r")
+-		     (match_operand:QI 2 "immediate_operand" "Pg,I")))]
++		     (match_operand:QI 2 "immediate_operand" "Pg,Ph")))]
+   "TARGET_HAVE_MVE"
+-  "lsll%?\\t%Q0, %R1, %2"
+-  "&& !satisfies_constraint_Pg (operands[2])"
++  "lsll%?\\t%Q0, %R0, %2"
++  "&& satisfies_constraint_Ph (operands[2])"
+   [(clobber (const_int 0))]
+   "
+   rtx amount = operands[2];
+@@ -4877,17 +4883,24 @@
+     }
+ 
+   /* ival < 0 should have already been handled by mve_asrl. */
+-  gcc_assert (ival > 32);
++  gcc_assert (ival >= 32);
+ 
+-  /* Shift amount above immediate range: 32 < ival < 64.  */
+   rtx in_lo = gen_lowpart (SImode, operands[1]);
+   rtx out_lo = gen_lowpart (SImode, operands[0]);
+   rtx out_hi = gen_highpart (SImode, operands[0]);
+-  emit_insn (gen_rtx_SET (out_hi,
+-			  gen_rtx_fmt_ee (ASHIFT,
+-					  SImode,
+-					  in_lo,
+-					  GEN_INT (ival - 32))));
++
++  if (ival == 32)
++    /* Shift by 32 is just a move.  */
++    emit_insn (gen_movsi (out_hi, in_lo));
++  else
++    /* Shift amount above immediate range: 32 < ival < 64.  */
++    emit_insn (gen_rtx_SET (out_hi,
++			    gen_rtx_fmt_ee (ASHIFT,
++					    SImode,
++					    in_lo,
++					    GEN_INT (ival - 32))));
++
++  /* Clear low 32 bits.  */
+   emit_insn (gen_rtx_SET (out_lo, const0_rtx));
+   DONE;
+   "
+@@ -4903,7 +4916,7 @@
+ 		     (match_dup 2))
+ 	  (lshiftrt:DI (match_dup 1) (neg:QI (match_dup 2)))))]
+   "TARGET_HAVE_MVE"
+-  "lsll%?\\t%Q0, %R1, %2"
++  "lsll%?\\t%Q0, %R0, %2"
+   [(set_attr "predicable" "yes")])
+ 
+ (define_insn "mve_lsrl"
+@@ -4911,5 +4924,5 @@
+ 	(lshiftrt:DI (match_operand:DI 1 "arm_general_register_operand" "0")
+ 		     (match_operand:SI 2 "long_shift_imm" "Pg")))]
+   "TARGET_HAVE_MVE"
+-  "lsrl%?\\t%Q0, %R1, %2"
++  "lsrl%?\\t%Q0, %R0, %2"
+   [(set_attr "predicable" "yes")])
+diff --git a/gcc/testsuite/gcc.target/arm/mve/pr122858.c b/gcc/testsuite/gcc.target/arm/mve/pr122858.c
+new file mode 100644
+index 000000000000..3e6d29d9ce6f
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/arm/mve/pr122858.c
+@@ -0,0 +1,83 @@
++/* { dg-do run } */
++/* { dg-require-effective-target arm_mve_hw } */
++/* { dg-options "-O2" } */
++/* { dg-add-options arm_v8_1m_mve } */
++/* { dg-final { check-function-bodies "**" "" "" } } */
++
++extern void abort (void);
++
++/*
++** ashrl_fn:
++**...
++**	asrl	r[0-9]+, r[0-9]+, #31
++**...
++*/
++__attribute__ ((noipa))
++long long ashrl_fn (long long a)
++{
++  long long c;
++
++  c = a >> 31;
++  c += a;
++  return c;
++}
++
++/*
++** ashll_fn:
++**...
++**	add	(r[0-9]+), \1, r[0-9]+, lsl #2
++**...
++*/
++__attribute__ ((noipa))
++long long ashll_fn (long long a)
++{
++  long long c;
++
++  /* Use 34, since 33 causes PR122871.  */
++  c = a << 34;
++  c += a;
++  return c;
++}
++
++/*
++** ashll_fn2:
++**...
++**	lsll	r[0-9]+, r[0-9]+, #7
++**...
++*/
++__attribute__ ((noipa))
++long long ashll_fn2 (long long a /* unused */, long long x)
++{
++  return x << 7;
++}
++
++/*
++** ashll_fn3:
++**...
++**	lsls	r[0-9]+, (r[0-9]+), #2
++**	movs	\1, #0
++**...
++*/
++__attribute__ ((noipa))
++long long ashll_fn3 (long long x)
++{
++  return x << 34;
++}
++
++int main(void)
++{
++  long long var1 = 1;
++  long long var2 = ashll_fn (var1);
++  if (var2 != 0x400000001)
++    abort ();
++
++  var2 = ashrl_fn (var2);
++  if (var2 != 0x400000009)
++    abort ();
++
++  var2 = ashll_fn2 (var2, 0xa987654350000002LL);
++  if (var2 != 0xc3b2a1a800000100LL)
++    abort ();
++
++  return 0;
++}
+-- 
+2.43.7
+
+

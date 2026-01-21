@@ -1,0 +1,75 @@
+From 7f6720874b48df2d81188ce88a2ea8b95e405254 Mon Sep 17 00:00:00 2001
+From: Eric Botcazou <ebotcazou@gcc.gnu.org>
+Date: Sat, 27 Dec 2025 10:24:52 +0100
+Subject: [PATCH] Ada: Fix assertion failure for unfrozen mutably tagged type
+ as actual
+
+...in instance.  An instantiation is a freezing point for the actuals,
+so the mutably tagged type will be frozen by the instantiation, but this
+happens too late in the current implementation of mutably tagged types,
+because the declaration of their CW-equivalent type is not analyzed until
+after the type is frozen.
+
+gcc/ada/
+	PR ada/123306
+	* sem_ch12.adb (Analyze_One_Association): Immediately freeze the
+	root type of mutably tagged types used as actual type parameters.
+
+gcc/testsuite/
+	* gnat.dg/specs/mutably_tagged1.ads: New test.
+---
+ gcc/ada/sem_ch12.adb                            | 11 +++++++++++
+ gcc/testsuite/gnat.dg/specs/mutably_tagged1.ads | 15 +++++++++++++++
+ 2 files changed, 26 insertions(+)
+ create mode 100644 gcc/testsuite/gnat.dg/specs/mutably_tagged1.ads
+
+diff --git a/gcc/ada/sem_ch12.adb b/gcc/ada/sem_ch12.adb
+index bde56723e4e6..7d525a9d54c9 100644
+--- a/gcc/ada/sem_ch12.adb
++++ b/gcc/ada/sem_ch12.adb
+@@ -2596,9 +2596,20 @@ package body Sem_Ch12 is
+                if Ekind (Etype (Match)) /= E_Void
+                  and then Is_Mutably_Tagged_Type (Etype (Match))
+                then
++                  --  The declaration of the CW-equivalent type of a mutably
++                  --  tagged type is analyzed when the tagged type is frozen.
++
++                  if Nkind (I_Node) /= N_Formal_Package_Declaration
++                    and then Ekind (Defining_Identifier (Assoc.An_Formal)) /=
++                                                              E_Incomplete_Type
++                  then
++                     Freeze_Before (I_Node, Root_Type (Etype (Match)));
++                  end if;
++
+                   Rewrite (Match, New_Occurrence_Of
+                     (Class_Wide_Equivalent_Type
+                       (Etype (Match)), Sloc (Match)));
++
+                   Analyze (Match);
+                end if;
+ 
+diff --git a/gcc/testsuite/gnat.dg/specs/mutably_tagged1.ads b/gcc/testsuite/gnat.dg/specs/mutably_tagged1.ads
+new file mode 100644
+index 000000000000..4c03f0ff2d28
+--- /dev/null
++++ b/gcc/testsuite/gnat.dg/specs/mutably_tagged1.ads
+@@ -0,0 +1,15 @@
++-- { dg-do compile }
++-- { dg-options "-gnatX0" }
++
++package Mutably_Tagged1 is
++
++  generic
++    type T is private;
++  package G is
++  end G;
++
++  type Rec is tagged null record with Size'Class => 128;
++
++  package My_G is new G (Rec'Class);
++
++end Mutably_Tagged1;
+-- 
+2.43.7
+
+
