@@ -20,12 +20,12 @@ cd          mingw-w64-v$MINGW_V
 # emulation of several functions needed to prevent underflows in the stat32
 # functions. These are primarily intended for 64-bit builds, but are safe to
 # completely safe to apply here.
-patch -Np1 -i ../../patches/001-mingw-stack-smashing-protection-fix.patch &&
-patch -Np1 -i ../../patches/002-mingw-underflow-check-stat32i64.patch &&
-patch -Np1 -i ../../patches/003-mingw-emulation-_fstat32-_stat32-_wstat32-functions-for-64-bit-msvcrt.patch &&
-patch -Np1 -i ../../patches/004-mingw-emulation-_fstat32i64-_stat32i64-_wstat32i64-for-64-bit-msvcrt.patch &&
-patch -Np1 -i ../../patches/005-mingw-regenerate-crt_Makefile-after-emulation-fixes.patch &&
-patch -Np1 -i ../../patches/006-mingw-check-compiler-support-for-stack-protection.patch &&
+patch -Np1 -i ../../patches/mingw/001-mingw-stack-smashing-protection-fix.patch &&
+patch -Np1 -i ../../patches/mingw/002-mingw-underflow-check-stat32i64.patch &&
+patch -Np1 -i ../../patches/mingw/003-mingw-emulation-_fstat32-_stat32-_wstat32-functions-for-64-bit-msvcrt.patch &&
+patch -Np1 -i ../../patches/mingw/004-mingw-emulation-_fstat32i64-_stat32i64-_wstat32i64-for-64-bit-msvcrt.patch &&
+patch -Np1 -i ../../patches/mingw/005-mingw-regenerate-crt_Makefile-after-emulation-fixes.patch &&
+patch -Np1 -i ../../patches/mingw/006-mingw-check-compiler-support-for-stack-protection.patch &&
 
 # Configure the package. Explanations of the options will come after configure.
 ./configure --prefix=$MINGW_OPT-i686/i686-w64-mingw32 \

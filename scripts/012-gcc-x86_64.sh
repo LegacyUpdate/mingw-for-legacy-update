@@ -26,6 +26,16 @@ mv -v gmp-$GMP_V   gmp
 mv -v mpfr-$MPFR_V mpfr
 mv -v mpc-$MPC_V   mpc
 
+# Apply patches from the gcc-15 release branch, up to the 20260120.
+mkdir patches
+cd    patches
+cp -Rv ../../../patches/gcc/* .
+cd ..
+for patch in patches/*.patch; do
+   echo "Applying $patch to GCC 15.2.0's tarball..."
+   patch -Np1 -i $patch
+done
+
 # Create a directory outside of the source tree.
 
 mkdir build
