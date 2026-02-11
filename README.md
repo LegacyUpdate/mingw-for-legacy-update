@@ -42,7 +42,7 @@ smashing protection as well. These patches can be found in the 'patches/' direct
 for review, and it's recommended that builders copy them into the same directory
 that their source tarballs are in.
 
-There are six patches in total:
+There are six patches to MinGW in total:
 
 ```
 001-mingw-stack-smashing-protection-fix.patch
@@ -53,13 +53,22 @@ There are six patches in total:
 006-mingw-check-compiler-support-for-stack-protection.patch
 ```
 
+In addition, several compiler bugs have been discovered in GCC 15.2.0 that can
+affect us. This includes problems with instruction ordering in the x86 compiler
+that can cause applications (including LegacyUpdate) to crash on Transmeta Cruscoe
+and VIA/Cyrix CPUs.
+
+There are 343 patches in total. Please look at the patches/gcc directory for a
+comprehensive list of the patches. Each patch is unmodified from GCC so that it's
+easier to review later if you are interested.
+
 ## Build Process
 
 # Stage 1: Create a directory in /opt to hold our toolchain
 
 ```
-sudo mkdir -pv /opt/gcc-15.2-binutils-2.45.1-mingw-v13.0.0-i686
-sudo mkdir -pv /opt/gcc-15.2-binutils-2.45.1-mingw-v13.0.0-x86_64
+sudo mkdir -pv /opt/gcc-15.2-20260120-binutils-2.45.1-mingw-v13.0.0-i686
+sudo mkdir -pv /opt/gcc-15.2-20260120-binutils-2.45.1-mingw-v13.0.0-x86_64
 ```
 
 # Stage 2: Download the required files
@@ -171,7 +180,7 @@ computer and run it from a command prompt.
 First, compile the program with:
 
 ```
-PATH=/opt/gcc-15.2-binutils-2.45.1-mingw-v13.0.0-i686/bin:$PATH \
+PATH=/opt/gcc-15.2-20260120-binutils-2.45.1-mingw-v13.0.0-i686/bin:$PATH \
 i686-w64-mingw32-gcc ../testfiles/printf.c -o printf-x86.exe -v -Wl,--verbose &> debug.log
 ```
 
@@ -205,10 +214,10 @@ well as strip the binaries of debugging information. Without this, the toolchain
 is 1.8GB. After this, it is 1.3GB.
 
 ```
-sudo rm -rf /opt/gcc-15.2-binutils-2.45.1-mingw-v13.0.0-i686/share/{man,info}
-sudo strip --strip-unneeded /opt/gcc-15.2-binutils-2.45.1-mingw-v13.0.0-i686/lib/*
-sudo strip --strip-unneeded /opt/gcc-15.2-binutils-2.45.1-mingw-v13.0.0-i686/mingw/lib/*
-sudo strip --strip-unneeded /opt/gcc-15.2-binutils-2.45.1-mingw-v13.0.0-i686/bin/*
+sudo rm -rf /opt/gcc-15.2-20260120-binutils-2.45.1-mingw-v13.0.0-i686/share/{man,info}
+sudo strip --strip-unneeded /opt/gcc-15.2-20260120-binutils-2.45.1-mingw-v13.0.0-i686/lib/*
+sudo strip --strip-unneeded /opt/gcc-15.2-20260120-binutils-2.45.1-mingw-v13.0.0-i686/mingw/lib/*
+sudo strip --strip-unneeded /opt/gcc-15.2-20260120-binutils-2.45.1-mingw-v13.0.0-i686/bin/*
 ```
 
 # Stage 12: Create a tarball with the MinGW toolchain just created for x86.
@@ -219,7 +228,7 @@ for another purpose, you can safely ignore this section.
 
 ```
 cd /opt
-sudo tar -cJvf gcc-15.2-binutils-2.45.1-mingw-v13.0.0-i686.tar.xz gcc-15.2-binutils-2.45.1-mingw-v13.0.0-i686/
+sudo tar -cJvf gcc-15.2-20260120-binutils-2.45.1-mingw-v13.0.0-i686.tar.xz gcc-15.2-20260120-binutils-2.45.1-mingw-v13.0.0-i686/
 ```
 
 # Stage 13: Install the headers for the x86_64 version.
@@ -313,7 +322,7 @@ computer and run it from a command prompt.
 First, compile the program with:
 
 ```
-PATH=/opt/gcc-15.2-binutils-2.45.1-mingw-v13.0.0-x86_64/bin:$PATH \
+PATH=/opt/gcc-15.2-20260120-binutils-2.45.1-mingw-v13.0.0-x86_64/bin:$PATH \
 x86_64-w64-mingw32-gcc ../testfiles/printf.c -o printf-x86_64.exe -v -Wl,--verbose &> debug.log
 ```
 
@@ -346,10 +355,10 @@ well as strip the binaries of debugging information. Without this, the toolchain
 is 1.9GB. After this, it is 1.4GB.
 
 ```
-sudo rm -rf /opt/gcc-15.2-binutils-2.45.1-mingw-v13.0.0-x86_64/share/{man,info}
-sudo strip --strip-unneeded /opt/gcc-15.2-binutils-2.45.1-mingw-v13.0.0-x86_64/lib/*
-sudo strip --strip-unneeded /opt/gcc-15.2-binutils-2.45.1-mingw-v13.0.0-x86_64/mingw/lib/*
-sudo strip --strip-unneeded /opt/gcc-15.2-binutils-2.45.1-mingw-v13.0.0-x86_64/bin/*
+sudo rm -rf /opt/gcc-15.2-20260120-binutils-2.45.1-mingw-v13.0.0-x86_64/share/{man,info}
+sudo strip --strip-unneeded /opt/gcc-15.2-20260120-binutils-2.45.1-mingw-v13.0.0-x86_64/lib/*
+sudo strip --strip-unneeded /opt/gcc-15.2-20260120-binutils-2.45.1-mingw-v13.0.0-x86_64/mingw/lib/*
+sudo strip --strip-unneeded /opt/gcc-15.2-20260120-binutils-2.45.1-mingw-v13.0.0-x86_64/bin/*
 ```
 
 # Stage 23: Create a tarball with the MinGW toolchain just created for x86_64.
@@ -360,7 +369,7 @@ for another purpose, you can safely ignore this section.
 
 ```
 cd /opt
-sudo tar -cJvf gcc-15.2-binutils-2.45.1-mingw-v13.0.0-x86_64.tar.xz gcc-15.2-binutils-2.45.1-mingw-v13.0.0-x86_64/
+sudo tar -cJvf gcc-15.2-20260120-binutils-2.45.1-mingw-v13.0.0-x86_64.tar.xz gcc-15.2-20260120-binutils-2.45.1-mingw-v13.0.0-x86_64/
 ```
 
 # Stage 24: Create a directory to hold our new copy of NSIS
