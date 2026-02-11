@@ -1,0 +1,71 @@
+From a8b02c07cdd852c569554c7a8a88d8a07e290e95 Mon Sep 17 00:00:00 2001
+From: Richard Biener <rguenther@suse.de>
+Date: Fri, 30 Jan 2026 15:32:39 +0100
+Subject: [PATCH] middle-end/123887 - trapping conditional operand turned
+ unconditional
+
+The following properly checks expr_no_side_effects_p on two patterns
+that turns a conditionally evaluated operand into unconditonal.
+
+	PR middle-end/123887
+	* match.pd ((zero_one ==/!= 0) ? .. z <op> y .. -> zero_one * z ..):
+	Check evaluating z unconditionally has no side-effects, like
+	trapping.
+
+	* gcc.dg/torture/pr123887.c: New testcase.
+
+(cherry picked from commit c1fa15791ae458e1bd8db6842dfc021230521a65)
+---
+ gcc/match.pd                            |  6 ++++--
+ gcc/testsuite/gcc.dg/torture/pr123887.c | 14 ++++++++++++++
+ 2 files changed, 18 insertions(+), 2 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.dg/torture/pr123887.c
+
+diff --git a/gcc/match.pd b/gcc/match.pd
+index 0c89447b3376..fb5f5ba20b40 100644
+--- a/gcc/match.pd
++++ b/gcc/match.pd
+@@ -4810,7 +4810,8 @@ DEFINE_INT_AND_FLOAT_ROUND_FN (RINT)
+         (op:c @2 @1))
+   (if (INTEGRAL_TYPE_P (type)
+        && TYPE_PRECISION (type) > 1
+-       && (INTEGRAL_TYPE_P (TREE_TYPE (@0))))
++       && INTEGRAL_TYPE_P (TREE_TYPE (@0))
++       && expr_no_side_effects_p (@2))
+        (op (mult (convert:type @0) @2) @1))))
+ 
+ /* (zero_one != 0) ? z <op> y : y -> ((typeof(y))zero_one * z) <op> y */
+@@ -4822,7 +4823,8 @@ DEFINE_INT_AND_FLOAT_ROUND_FN (RINT)
+         @1)
+   (if (INTEGRAL_TYPE_P (type)
+        && TYPE_PRECISION (type) > 1
+-       && (INTEGRAL_TYPE_P (TREE_TYPE (@0))))
++       && INTEGRAL_TYPE_P (TREE_TYPE (@0))
++       && expr_no_side_effects_p (@2))
+        (op (mult (convert:type @0) @2) @1))))
+ 
+ /* ?: Value replacement. */
+diff --git a/gcc/testsuite/gcc.dg/torture/pr123887.c b/gcc/testsuite/gcc.dg/torture/pr123887.c
+new file mode 100644
+index 000000000000..c2a9659c5b56
+--- /dev/null
++++ b/gcc/testsuite/gcc.dg/torture/pr123887.c
+@@ -0,0 +1,14 @@
++/* { dg-do run } */
++
++typedef struct {
++    unsigned s;
++} struct_t;
++
++struct_t *p;
++bool cond;
++int v = 1;
++int main()
++{
++  int u = 1 + (cond ? p->s : 0);
++  return u - v;
++}
+-- 
+2.43.7
+
+

@@ -1,0 +1,70 @@
+From 84a217416290fb8551509f207fd3acc2adf57259 Mon Sep 17 00:00:00 2001
+From: Richard Biener <rguenther@suse.de>
+Date: Fri, 30 Jan 2026 19:30:40 +0100
+Subject: [PATCH] middle-end/123887 - fix another missing side-effect check
+
+The following fixes up another pattern lacking a check for
+side-effects on operands made evaluated unconditional.
+
+	PR middle-end/123887
+	* match.pd ((a ? x : y) !=/== (b ? x : y)): Make sure
+	x and y have no side-effects before evaluating them
+	unconditionally.
+
+	* gcc.dg/torture/pr123887-2.c: New testcase.
+
+(cherry picked from commit cd6c3d19f6370810a20a2b84dad639200affa4fa)
+---
+ gcc/match.pd                              |  8 ++++++--
+ gcc/testsuite/gcc.dg/torture/pr123887-2.c | 12 ++++++++++++
+ 2 files changed, 18 insertions(+), 2 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.dg/torture/pr123887-2.c
+
+diff --git a/gcc/match.pd b/gcc/match.pd
+index fb5f5ba20b40..5fbf147c63bd 100644
+--- a/gcc/match.pd
++++ b/gcc/match.pd
+@@ -6061,7 +6061,9 @@ DEFINE_INT_AND_FLOAT_ROUND_FN (RINT)
+    (eqne (cnd @0 @1 @2) (cnd @3 @1 @2))
+     (if (!HONOR_NANS (@1)
+ 	 && types_match (TREE_TYPE (@0), TREE_TYPE (@3))
+-         && types_match (type, TREE_TYPE (@0)))
++         && types_match (type, TREE_TYPE (@0))
++	 && expr_no_side_effects_p (@1)
++	 && expr_no_side_effects_p (@2))
+      (cnd (bit_and (bit_xor @0 @3) (ne:type @1 @2))
+       { constant_boolean_node (eqne == NE_EXPR, type); }
+       { constant_boolean_node (eqne != NE_EXPR, type); })))
+@@ -6069,7 +6071,9 @@ DEFINE_INT_AND_FLOAT_ROUND_FN (RINT)
+    (eqne (cnd @0 @1 @2) (cnd @3 @2 @1))
+     (if (!HONOR_NANS (@1)
+ 	 && types_match (TREE_TYPE (@0), TREE_TYPE (@3))
+-         && types_match (type, TREE_TYPE (@0)))
++         && types_match (type, TREE_TYPE (@0))
++	 && expr_no_side_effects_p (@1)
++	 && expr_no_side_effects_p (@2))
+      (cnd (bit_ior (bit_xor @0 @3) (eq:type @1 @2))
+       { constant_boolean_node (eqne != NE_EXPR, type); }
+       { constant_boolean_node (eqne == NE_EXPR, type); })))))
+diff --git a/gcc/testsuite/gcc.dg/torture/pr123887-2.c b/gcc/testsuite/gcc.dg/torture/pr123887-2.c
+new file mode 100644
+index 000000000000..29c43369d6e9
+--- /dev/null
++++ b/gcc/testsuite/gcc.dg/torture/pr123887-2.c
+@@ -0,0 +1,12 @@
++/* { dg-do run } */
++
++[[gnu::noipa]]
++int f(int a, int b, int *x)
++{
++  return (a ? *x : 0) != (b ? *x : 0);
++}
++int main()
++{
++  f(0, 0, 0);
++  return 0;
++}
+-- 
+2.43.7
+
+

@@ -1,0 +1,325 @@
+From 04e8f8ac9401352ec3ddc1dd4d226ba8fc947207 Mon Sep 17 00:00:00 2001
+From: =?utf8?q?Tomasz=20Kami=C5=84ski?= <tkaminsk@redhat.com>
+Date: Mon, 25 Aug 2025 13:15:35 +0200
+Subject: [PATCH] libstdc++: Do not require assignment for vector::resize(n, v)
+ [PR90192]
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf8
+Content-Transfer-Encoding: 8bit
+
+This patch introduces a new function, _M_fill_append, which is invoked when
+copies of the same value are appended to the end of a vector. Unlike
+_M_fill_insert(end(), n, v), _M_fill_append never permute elements in place,
+so it does not require:
+* vector element type to be assignable;
+* a copy of the inserted value, in the case where it points to an
+  element of the vector.
+
+vector::resize(n, v) now uses _M_fill_append, fixing the non-conformance where
+element types were required to be assignable.
+
+In addition, _M_fill_insert(end(), n, v) now delegates to _M_fill_append, which
+eliminates an unnecessary copy of v when the existing capacity is used.
+
+	PR libstdc++/90192
+
+libstdc++-v3/ChangeLog:
+
+	* include/bits/stl_vector.h (vector<T>::_M_fill_append): Declare.
+	(vector<T>::fill): Use _M_fill_append instead of _M_fill_insert.
+	* include/bits/vector.tcc (vector<T>::_M_fill_append): Define
+	(vector<T>::_M_fill_insert): Delegate to _M_fill_append when
+	elements are appended.
+	* testsuite/23_containers/vector/modifiers/moveable.cc: Updated
+	copycount for inserting at the end (appending).
+	* testsuite/23_containers/vector/modifiers/resize.cc: New test.
+	* testsuite/backward/hash_set/check_construct_destroy.cc: Updated
+	copycount, the hash_set constructor uses insert to fill buckets
+	with nullptrs.
+
+Reviewed-by: Jonathan Wakely <jwakely@redhat.com>
+Signed-off-by: Tomasz KamiÅski <tkaminsk@redhat.com>
+(cherry picked from commit 390f3a690cf5c6bc8f7290484cafa6617c1757d4)
+---
+ libstdc++-v3/include/bits/stl_vector.h        |  9 ++-
+ libstdc++-v3/include/bits/vector.tcc          | 60 +++++++++++++++-
+ .../vector/modifiers/moveable.cc              |  6 +-
+ .../23_containers/vector/modifiers/resize.cc  | 69 +++++++++++++++++++
+ .../hash_set/check_construct_destroy.cc       | 25 +++----
+ 5 files changed, 148 insertions(+), 21 deletions(-)
+ create mode 100644 libstdc++-v3/testsuite/23_containers/vector/modifiers/resize.cc
+
+diff --git a/libstdc++-v3/include/bits/stl_vector.h b/libstdc++-v3/include/bits/stl_vector.h
+index 4861edb21465..b74274ae63d9 100644
+--- a/libstdc++-v3/include/bits/stl_vector.h
++++ b/libstdc++-v3/include/bits/stl_vector.h
+@@ -1164,7 +1164,7 @@ _GLIBCXX_BEGIN_NAMESPACE_CONTAINER
+       resize(size_type __new_size, const value_type& __x)
+       {
+ 	if (__new_size > size())
+-	  _M_fill_insert(end(), __new_size - size(), __x);
++	  _M_fill_append(__new_size - size(), __x);
+ 	else if (__new_size < size())
+ 	  _M_erase_at_end(this->_M_impl._M_start + __new_size);
+       }
+@@ -1185,7 +1185,7 @@ _GLIBCXX_BEGIN_NAMESPACE_CONTAINER
+       resize(size_type __new_size, value_type __x = value_type())
+       {
+ 	if (__new_size > size())
+-	  _M_fill_insert(end(), __new_size - size(), __x);
++	  _M_fill_append(__new_size - size(), __x);
+ 	else if (__new_size < size())
+ 	  _M_erase_at_end(this->_M_impl._M_start + __new_size);
+       }
+@@ -2098,6 +2098,11 @@ _GLIBCXX_BEGIN_NAMESPACE_CONTAINER
+       void
+       _M_fill_insert(iterator __pos, size_type __n, const value_type& __x);
+ 
++      // Called by resize(n,x), and the _M_fill_insert(end(), n, x)
++      _GLIBCXX20_CONSTEXPR
++      void
++      _M_fill_append(size_type __n, const value_type& __x);
++
+ #if __cplusplus >= 201103L
+       // Called by resize(n).
+       _GLIBCXX20_CONSTEXPR
+diff --git a/libstdc++-v3/include/bits/vector.tcc b/libstdc++-v3/include/bits/vector.tcc
+index 5d4e9ad05a1c..9fd4b0055ea9 100644
+--- a/libstdc++-v3/include/bits/vector.tcc
++++ b/libstdc++-v3/include/bits/vector.tcc
+@@ -654,8 +654,10 @@ _GLIBCXX_BEGIN_NAMESPACE_CONTAINER
+     {
+       if (__n != 0)
+ 	{
+-	  if (size_type(this->_M_impl._M_end_of_storage
+-			- this->_M_impl._M_finish) >= __n)
++	  if (__position.base() == this->_M_impl._M_finish)
++	    _M_fill_append(__n, __x);
++	  else if (size_type(this->_M_impl._M_end_of_storage
++			       - this->_M_impl._M_finish) >= __n)
+ 	    {
+ #if __cplusplus < 201103L
+ 	      value_type __x_copy = __x;
+@@ -750,6 +752,60 @@ _GLIBCXX_BEGIN_NAMESPACE_CONTAINER
+ 	}
+     }
+ 
++  template<typename _Tp, typename _Alloc>
++    _GLIBCXX20_CONSTEXPR
++    void
++    vector<_Tp, _Alloc>::
++    _M_fill_append(size_type __n, const value_type& __x)
++    {
++       if (size_type(this->_M_impl._M_end_of_storage
++		     - this->_M_impl._M_finish) >= __n)
++	 {
++	   _GLIBCXX_ASAN_ANNOTATE_GROW(__n);
++	   this->_M_impl._M_finish =
++	     std::__uninitialized_fill_n_a(this->_M_impl._M_finish, __n, __x,
++					   _M_get_Tp_allocator());
++	   _GLIBCXX_ASAN_ANNOTATE_GREW(__n);
++	 }
++       else
++	 {
++	   // Make local copies of these members because the compiler thinks
++	   // the allocator can alter them if 'this' is globally reachable.
++	   pointer __old_start = this->_M_impl._M_start;
++	   pointer __old_finish = this->_M_impl._M_finish;
++	   const size_type __old_size = __old_finish - __old_start;
++
++	   const size_type __len =
++	     _M_check_len(__n, "vector::_M_fill_append");
++	   pointer __new_start(this->_M_allocate(__len));
++	   pointer __new_finish(__new_start + __old_size);
++	   __try
++	     {
++	       // See _M_realloc_insert above.
++	       __new_finish = std::__uninitialized_fill_n_a(
++				__new_finish, __n, __x,
++				_M_get_Tp_allocator());
++	       std::__uninitialized_move_if_noexcept_a(
++		 __old_start, __old_finish, __new_start,
++		 _M_get_Tp_allocator());
++	     }
++	   __catch(...)
++	     {
++		std::_Destroy(__new_start + __old_size, __new_finish,
++			      _M_get_Tp_allocator());
++		_M_deallocate(__new_start, __len);
++		__throw_exception_again;
++	      }
++	   std::_Destroy(__old_start, __old_finish, _M_get_Tp_allocator());
++	   _GLIBCXX_ASAN_ANNOTATE_REINIT;
++	   _M_deallocate(__old_start,
++			 this->_M_impl._M_end_of_storage - __old_start);
++	   this->_M_impl._M_start = __new_start;
++	   this->_M_impl._M_finish = __new_finish;
++	   this->_M_impl._M_end_of_storage = __new_start + __len;
++	 }
++    }
++
+ #if __cplusplus >= 201103L
+   template<typename _Tp, typename _Alloc>
+     _GLIBCXX20_CONSTEXPR
+diff --git a/libstdc++-v3/testsuite/23_containers/vector/modifiers/moveable.cc b/libstdc++-v3/testsuite/23_containers/vector/modifiers/moveable.cc
+index 8d0f9ae9bd1e..343a298823e3 100644
+--- a/libstdc++-v3/testsuite/23_containers/vector/modifiers/moveable.cc
++++ b/libstdc++-v3/testsuite/23_containers/vector/modifiers/moveable.cc
+@@ -109,9 +109,11 @@ test05()
+   // when it doesn't reallocate the buffer.
+   VERIFY(copycounter::copycount == 20 + 1);
+   a.insert(a.end(), 50, c);
+-  VERIFY(copycounter::copycount == 70 + 2);
++  // expect when inserting at the end (appending), where existing
++  // elements are not modified
++  VERIFY(copycounter::copycount == 70 + 1);
+   a.insert(a.begin() + 50, 100, c);
+-  VERIFY(copycounter::copycount == 170 + 3);
++  VERIFY(copycounter::copycount == 170 + 2);
+ }
+ 
+ 
+diff --git a/libstdc++-v3/testsuite/23_containers/vector/modifiers/resize.cc b/libstdc++-v3/testsuite/23_containers/vector/modifiers/resize.cc
+new file mode 100644
+index 000000000000..026b0f78b50f
+--- /dev/null
++++ b/libstdc++-v3/testsuite/23_containers/vector/modifiers/resize.cc
+@@ -0,0 +1,69 @@
++// { dg-do run }
++
++#include <vector>
++#include <testsuite_hooks.h>
++
++struct NoAssign
++{
++  NoAssign(int p) : val(p) {}
++  const int val;
++};
++
++struct PrivateAssign
++{
++  PrivateAssign(int p) : val(p) {}
++  PrivateAssign(const PrivateAssign& rhs) : val(rhs.val) {}
++
++  int val;
++
++private:
++  PrivateAssign& operator=(const PrivateAssign&);
++};
++
++#if __cplusplus >= 201102L
++struct DeletedAssign
++{
++  DeletedAssign(int p) : val(p) {}
++  DeletedAssign(const DeletedAssign& rhs) : val(rhs.val) {}
++
++  DeletedAssign& operator=(const DeletedAssign&) = delete;
++
++  int val;
++};
++#endif
++
++template<typename T>
++void
++testPR90129()
++{
++  std::vector<T> v;
++  v.resize(5, T(5));
++  VERIFY( v.size() == 5 );
++  VERIFY( v.front().val == 5 );
++  VERIFY( v.back().val == 5 );
++
++  v.resize(10, T(10));
++  VERIFY( v.size() == 10 );
++  VERIFY( v.front().val == 5 );
++  VERIFY( v.back().val == 10 );
++
++  v.resize(7, T(7));
++  VERIFY( v.size() == 7 );
++  VERIFY( v.front().val == 5 );
++  VERIFY( v.back().val == 10 );
++
++  v.resize(3, T(3));
++  VERIFY( v.size() == 3 );
++  VERIFY( v.front().val == 5 );
++  VERIFY( v.back().val == 5 );
++}
++
++int main()
++{
++  testPR90129<NoAssign>();
++  testPR90129<PrivateAssign>();
++#if __cplusplus >= 201102L
++  testPR90129<DeletedAssign>();
++#endif
++  return 0;
++}
+diff --git a/libstdc++-v3/testsuite/backward/hash_set/check_construct_destroy.cc b/libstdc++-v3/testsuite/backward/hash_set/check_construct_destroy.cc
+index 042de4ebdbe3..aca296d1daf5 100644
+--- a/libstdc++-v3/testsuite/backward/hash_set/check_construct_destroy.cc
++++ b/libstdc++-v3/testsuite/backward/hash_set/check_construct_destroy.cc
+@@ -39,50 +39,45 @@ int main()
+ 
+   int buckets;
+ 
+-  // For C++11 and later add 1 to all counts, because the std::vector used
+-  // internally by the hashtable creates and destroys a temporary object
+-  // using its allocator.
+-  const int extra = __cplusplus >= 201102L ? 1 : 0;
+-
+   tracker_allocator_counter::reset();
+   {
+     Container c;
+     buckets = c.bucket_count();
+-    ok = check_construct_destroy("empty container", buckets+extra, extra) && ok;
++    ok = check_construct_destroy("empty container", buckets, 0) && ok;
+   }
+-  ok = check_construct_destroy("empty container", buckets+extra, buckets+extra) && ok;
++  ok = check_construct_destroy("empty container", buckets, buckets) && ok;
+ 
+ 
+   tracker_allocator_counter::reset();
+   {
+     Container c(arr10, arr10 + 10);
+-    ok = check_construct_destroy("Construct from range", buckets+10+extra, extra) && ok;
++    ok = check_construct_destroy("Construct from range", buckets+10, 0) && ok;
+   }
+-  ok = check_construct_destroy("Construct from range", buckets+10+extra, buckets+10+extra) && ok;
++  ok = check_construct_destroy("Construct from range", buckets+10, buckets+10) && ok;
+ 
+   tracker_allocator_counter::reset();
+   {
+     Container c(arr10, arr10 + 10);
+     c.insert(arr10a[0]);
+-    ok = check_construct_destroy("Insert element", buckets+11+extra, extra) && ok;
++    ok = check_construct_destroy("Insert element", buckets+11, 0) && ok;
+   }
+-  ok = check_construct_destroy("Insert element", buckets+11+extra, buckets+11+extra) && ok;
++  ok = check_construct_destroy("Insert element", buckets+11, buckets+11) && ok;
+ 
+   tracker_allocator_counter::reset();
+   {
+     Container c(arr10, arr10 + 10);
+     c.insert(arr10a, arr10a+3);
+-    ok = check_construct_destroy("Insert short range", buckets+13+extra, extra) && ok;
++    ok = check_construct_destroy("Insert short range", buckets+13, 0) && ok;
+   }
+-  ok = check_construct_destroy("Insert short range", buckets+13+extra, buckets+13+extra) && ok;
++  ok = check_construct_destroy("Insert short range", buckets+13, buckets+13) && ok;
+ 
+   tracker_allocator_counter::reset();
+   {
+     Container c(arr10, arr10 + 10);
+     c.insert(arr10a, arr10a+10);
+-    ok = check_construct_destroy("Insert long range", buckets+20+extra, extra) && ok;
++    ok = check_construct_destroy("Insert long range", buckets+20, 0) && ok;
+   }
+-  ok = check_construct_destroy("Insert long range", buckets+20+extra, buckets+20+extra) && ok;
++  ok = check_construct_destroy("Insert long range", buckets+20, buckets+20) && ok;
+ 
+   return ok ? 0 : 1;
+ }
+-- 
+2.43.7
+
+

@@ -1,0 +1,60 @@
+From 1ad7ee43a0e32e246e69c398b9c37aa23a12c3b6 Mon Sep 17 00:00:00 2001
+From: Iain Buclaw <ibuclaw@gdcproject.org>
+Date: Wed, 28 Jan 2026 23:06:23 +0100
+Subject: [PATCH] d: Fix ICE in ExprVisitor::visit, at d/expr.cc:2224
+ [PR123419]
+
+The original assert expected the type of `__traits(initSymbol)' to be
+exactly `const(void[])', but because D strips const from arrays to allow
+passing slices as mutable ranges to template functions, so it got turned
+into `const(void)[]'.
+
+	PR d/123419
+
+gcc/d/ChangeLog:
+
+	* expr.cc (ExprVisitor::visit (VarExp *)): Adjust assertion.
+
+gcc/testsuite/ChangeLog:
+
+	* gdc.dg/pr123419.d: New test.
+
+(cherry picked from commit ddf94524f9accb47c1fc59191739ec34c5907eb8)
+---
+ gcc/d/expr.cc                   | 2 +-
+ gcc/testsuite/gdc.dg/pr123419.d | 9 +++++++++
+ 2 files changed, 10 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/gdc.dg/pr123419.d
+
+diff --git a/gcc/d/expr.cc b/gcc/d/expr.cc
+index e8b7d4824ef3..3677f31eb92b 100644
+--- a/gcc/d/expr.cc
++++ b/gcc/d/expr.cc
+@@ -2174,7 +2174,7 @@ public:
+ 	      {
+ 		/* Generate a slice for non-zero initialized aggregates,
+ 		   otherwise create an empty array.  */
+-		gcc_assert (e->type->isConst ()
++		gcc_assert (e->type->nextOf ()->isConst ()
+ 			    && e->type->nextOf ()->ty == TY::Tvoid);
+ 
+ 		tree type = build_ctype (e->type);
+diff --git a/gcc/testsuite/gdc.dg/pr123419.d b/gcc/testsuite/gdc.dg/pr123419.d
+new file mode 100644
+index 000000000000..69ad444deb8b
+--- /dev/null
++++ b/gcc/testsuite/gdc.dg/pr123419.d
+@@ -0,0 +1,9 @@
++// { dg-do compile }
++struct S123419 {}
++
++void t123419(T)(T _) {}
++
++void f123419()
++{
++    t123419(__traits(initSymbol, S123419));
++}
+-- 
+2.43.7
+
+

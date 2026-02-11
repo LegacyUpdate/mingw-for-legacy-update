@@ -1,0 +1,80 @@
+From af39be5b6896b3387fea0a73a5f346238891b9d4 Mon Sep 17 00:00:00 2001
+From: Iain Buclaw <ibuclaw@gdcproject.org>
+Date: Thu, 29 Jan 2026 10:11:43 +0100
+Subject: [PATCH] d: Fix buffer overflow detected with -defaultlib= and
+ -debuglib= [PR123349]
+
+	PR d/123349
+
+gcc/d/ChangeLog:
+
+	* d-spec.cc (lang_specific_driver): Use xstrdup to copy -defaultlib
+	and -debuglib argument, and unconditionally free the old value.
+
+gcc/testsuite/ChangeLog:
+
+	* gdc.dg/driver_debuglib.d: New test.
+	* gdc.dg/driver_defaultlib.d: New test.
+
+(cherry picked from commit a492b8c17118592061cc3834e7a169ca724440cb)
+---
+ gcc/d/d-spec.cc                          | 12 ++++--------
+ gcc/testsuite/gdc.dg/driver_debuglib.d   |  2 ++
+ gcc/testsuite/gdc.dg/driver_defaultlib.d |  2 ++
+ 3 files changed, 8 insertions(+), 8 deletions(-)
+ create mode 100644 gcc/testsuite/gdc.dg/driver_debuglib.d
+ create mode 100644 gcc/testsuite/gdc.dg/driver_defaultlib.d
+
+diff --git a/gcc/d/d-spec.cc b/gcc/d/d-spec.cc
+index c78804812e3f..e7c0cf95439c 100644
+--- a/gcc/d/d-spec.cc
++++ b/gcc/d/d-spec.cc
+@@ -162,24 +162,20 @@ lang_specific_driver (cl_decoded_option **in_decoded_options,
+ 	  break;
+ 
+ 	case OPT_defaultlib_:
+-	  if (defaultlib != NULL)
+-	    free (CONST_CAST (char *, defaultlib));
++	  free (CONST_CAST (char *, defaultlib));
+ 	  if (arg != NULL)
+ 	    {
+ 	      args[i] |= SKIPOPT;
+-	      defaultlib = XNEWVEC (char, strlen (arg));
+-	      strcpy (CONST_CAST (char *, defaultlib), arg);
++	      defaultlib = xstrdup (arg);
+ 	    }
+ 	  break;
+ 
+ 	case OPT_debuglib_:
+-	  if (debuglib != NULL)
+-	    free (CONST_CAST (char *, debuglib));
++	  free (CONST_CAST (char *, debuglib));
+ 	  if (arg != NULL)
+ 	    {
+ 	      args[i] |= SKIPOPT;
+-	      debuglib = XNEWVEC (char, strlen (arg));
+-	      strcpy (CONST_CAST (char *, debuglib), arg);
++	      debuglib = xstrdup (arg);
+ 	    }
+ 	  break;
+ 
+diff --git a/gcc/testsuite/gdc.dg/driver_debuglib.d b/gcc/testsuite/gdc.dg/driver_debuglib.d
+new file mode 100644
+index 000000000000..dd06c2af37dc
+--- /dev/null
++++ b/gcc/testsuite/gdc.dg/driver_debuglib.d
+@@ -0,0 +1,2 @@
++// { dg-do compile }
++// { dg-additional-options "-debuglib=a -debuglib=b" }
+diff --git a/gcc/testsuite/gdc.dg/driver_defaultlib.d b/gcc/testsuite/gdc.dg/driver_defaultlib.d
+new file mode 100644
+index 000000000000..5168be071575
+--- /dev/null
++++ b/gcc/testsuite/gdc.dg/driver_defaultlib.d
+@@ -0,0 +1,2 @@
++// { dg-do compile }
++// { dg-additional-options "-defaultlib=a -defaultlib=b" }
+-- 
+2.43.7
+
+

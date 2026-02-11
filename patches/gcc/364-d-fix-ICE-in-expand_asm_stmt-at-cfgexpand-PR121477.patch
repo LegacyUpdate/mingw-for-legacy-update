@@ -1,0 +1,67 @@
+From e49b8f2a46d1baaee01c9924b3cc9b66c9e5f6d3 Mon Sep 17 00:00:00 2001
+From: Iain Buclaw <ibuclaw@gdcproject.org>
+Date: Wed, 28 Jan 2026 18:34:21 +0100
+Subject: [PATCH] d: Fix ICE: in expand_asm_stmt, at cfgexpand.cc:3445
+ [PR121477]
+
+The d_mark_addressable routine that sets TREE_ADDRESSABLE in the D
+front-end did not handle DECL_BIT_FIELD.
+
+	PR d/121477
+
+gcc/d/ChangeLog:
+
+	* d-codegen.cc (d_mark_addressable): Give an error if taking the
+	address of a DECL_BIT_FIELD.
+
+gcc/testsuite/ChangeLog:
+
+	* gdc.dg/pr121477.d: New test.
+
+(cherry picked from commit baaa412ae73c12e2e5ea2552534ec42525f6d21e)
+---
+ gcc/d/d-codegen.cc              |  6 +++++-
+ gcc/testsuite/gdc.dg/pr121477.d | 12 ++++++++++++
+ 2 files changed, 17 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/gdc.dg/pr121477.d
+
+diff --git a/gcc/d/d-codegen.cc b/gcc/d/d-codegen.cc
+index 1a7575aac22c..4b72a2bd08f7 100644
+--- a/gcc/d/d-codegen.cc
++++ b/gcc/d/d-codegen.cc
+@@ -744,8 +744,12 @@ d_mark_addressable (tree exp, bool complain)
+ {
+   switch (TREE_CODE (exp))
+     {
+-    case ADDR_EXPR:
+     case COMPONENT_REF:
++      if (complain && DECL_BIT_FIELD (TREE_OPERAND (exp, 1)))
++	error ("cannot take address of bit-field %qD", TREE_OPERAND (exp, 1));
++
++      /* Fall through.  */
++    case ADDR_EXPR:
+     case ARRAY_REF:
+     case REALPART_EXPR:
+     case IMAGPART_EXPR:
+diff --git a/gcc/testsuite/gdc.dg/pr121477.d b/gcc/testsuite/gdc.dg/pr121477.d
+new file mode 100644
+index 000000000000..3f5bc359272e
+--- /dev/null
++++ b/gcc/testsuite/gdc.dg/pr121477.d
+@@ -0,0 +1,12 @@
++// { dg-do compile }
++// { dg-additional-options "-fpreview=bitfields" }
++struct S121477
++{
++    int x : 4;
++}
++
++void f121477(S121477 s)
++{
++    asm {"%0" :: "m" (s.x); } // { dg-error "cannot take address of bit-field" }
++    asm {"%0" : "=m" (s.x); } // { dg-error "cannot take address of bit-field" }
++}
+-- 
+2.43.7
+
+

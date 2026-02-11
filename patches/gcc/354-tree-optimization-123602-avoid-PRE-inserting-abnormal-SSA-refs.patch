@@ -1,0 +1,71 @@
+From b543575768c3d82711660f7e18b94971ff5fc325 Mon Sep 17 00:00:00 2001
+From: Richard Biener <rguenther@suse.de>
+Date: Mon, 19 Jan 2026 10:21:10 +0100
+Subject: [PATCH] tree-optimization/123602 - avoid PRE-inserting abnormal SSA
+ refs
+
+The following fixes an omission in find_or_generate_expression to
+check for SSA_NAME_OCCURS_IN_ABNORMAL_PHI as already done in
+create_expression_by_pieces.
+
+	PR tree-optimization/123602
+	* tree-ssa-pre.cc (find_or_generate_expression): Do not
+	generate references to abnormal SSA names.
+
+	* g++.dg/torture/pr123603.C: New testcase.
+
+(cherry picked from commit 134bc017ebac60eb53166998ec7efbc2e7f7e3b5)
+---
+ gcc/testsuite/g++.dg/torture/pr123603.C | 20 ++++++++++++++++++++
+ gcc/tree-ssa-pre.cc                     |  7 ++++++-
+ 2 files changed, 26 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/g++.dg/torture/pr123603.C
+
+diff --git a/gcc/testsuite/g++.dg/torture/pr123603.C b/gcc/testsuite/g++.dg/torture/pr123603.C
+new file mode 100644
+index 000000000000..f971a82177c2
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/torture/pr123603.C
+@@ -0,0 +1,20 @@
++// { dg-do compile }
++
++void _setjmp();
++void a() __attribute__((__noreturn__));
++struct b {
++  b(int c) {
++    if (c)
++      a();
++  }
++  ~b();
++};
++int d;
++void l(long);
++void e() {
++  b a(d);
++  for (int f = 0; f < 10 ; ++f) {
++    l(f - 1);
++    _setjmp();
++  }
++}
+diff --git a/gcc/tree-ssa-pre.cc b/gcc/tree-ssa-pre.cc
+index be94b60bad8d..83492b9ebf39 100644
+--- a/gcc/tree-ssa-pre.cc
++++ b/gcc/tree-ssa-pre.cc
+@@ -2758,7 +2758,12 @@ find_or_generate_expression (basic_block block, tree op, gimple_seq *stmts)
+   if (leader)
+     {
+       if (leader->kind == NAME)
+-	return PRE_EXPR_NAME (leader);
++	{
++	  tree name = PRE_EXPR_NAME (leader);
++	  if (SSA_NAME_OCCURS_IN_ABNORMAL_PHI (name))
++	    return NULL_TREE;
++	  return name;
++	}
+       else if (leader->kind == CONSTANT)
+ 	return PRE_EXPR_CONSTANT (leader);
+ 
+-- 
+2.43.7
+
+

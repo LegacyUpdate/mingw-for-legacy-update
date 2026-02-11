@@ -1,0 +1,67 @@
+From 3f5a4b71b7bdc921e52d9ea65586119847834963 Mon Sep 17 00:00:00 2001
+From: Patrick Palka <ppalka@redhat.com>
+Date: Mon, 26 Jan 2026 22:00:16 -0500
+Subject: [PATCH] c++: non-dep decltype folding of concept-id C<Ts...>
+ [PR123676]
+
+Here since the expression within the decltype C<Ts...> is not instantiation
+dependent (we know its type is bool, and don't care about its value)
+finish_decltype_type instantiates it immediately via the usual tsubst_expr
+with NULL_TREE args.  During which however tsubst_pack_expansion isn't
+prepared to handle such a substitution due to an overly strict assert.
+This patch relaxes the assert accordingly.
+
+	PR c++/123676
+
+gcc/cp/ChangeLog:
+
+	* pt.cc (tsubst_pack_expansion): Relax unsubsituted_packs
+	assert to allow !processing_template_decl when args is
+	NULL_TREE.
+
+gcc/testsuite/ChangeLog:
+
+	* g++.dg/cpp2a/concepts-decltype5.C: New test.
+
+Reviewed-by: Jason Merrill <jason@redhat.com>
+(cherry picked from commit 22f51c0f5e62a4e05bccbd0dfb23762ef2eeeff8)
+---
+ gcc/cp/pt.cc                                    |  3 ++-
+ gcc/testsuite/g++.dg/cpp2a/concepts-decltype5.C | 10 ++++++++++
+ 2 files changed, 12 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/g++.dg/cpp2a/concepts-decltype5.C
+
+diff --git a/gcc/cp/pt.cc b/gcc/cp/pt.cc
+index 5823e9bf7cd5..05018a98dac8 100644
+--- a/gcc/cp/pt.cc
++++ b/gcc/cp/pt.cc
+@@ -13945,7 +13945,8 @@ tsubst_pack_expansion (tree t, tree args, tsubst_flags_t complain,
+ 	  /* We can't substitute for this parameter pack.  We use a flag as
+ 	     well as the missing_level counter because function parameter
+ 	     packs don't have a level.  */
+-	  gcc_assert (processing_template_decl || is_auto (parm_pack));
++	  gcc_assert (processing_template_decl || is_auto (parm_pack)
++		      || args == NULL_TREE);
+ 	  unsubstituted_packs = true;
+ 	}
+     }
+diff --git a/gcc/testsuite/g++.dg/cpp2a/concepts-decltype5.C b/gcc/testsuite/g++.dg/cpp2a/concepts-decltype5.C
+new file mode 100644
+index 000000000000..1b6f7f78f2c3
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/cpp2a/concepts-decltype5.C
+@@ -0,0 +1,10 @@
++// PR c++/123676
++// { dg-do compile { target c++20 } }
++
++template<class...>
++concept C = true;
++
++template<class... Ts>
++auto f() -> decltype(C<Ts...>) {
++  return true;
++}
+-- 
+2.43.7
+
+

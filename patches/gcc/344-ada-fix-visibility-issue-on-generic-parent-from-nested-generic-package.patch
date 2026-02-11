@@ -1,0 +1,178 @@
+From 973dc10b8b620e734e8a1068e501ac0d30c2c925 Mon Sep 17 00:00:00 2001
+From: Eric Botcazou <ebotcazou@adacore.com>
+Date: Wed, 21 Jan 2026 11:47:42 +0100
+Subject: [PATCH] Ada: Fix visibility issue on generic parent from nested
+ generic package
+
+The problem is that we temporarily push onto the scope stack and install
+the declarations of a package that is already on the scope stack and whose
+declarations are already visible so, when the temporary condition is over,
+the declarations are uninstalled, thus making them definitively invisible.
+
+It comes from the use of the idiom Scope_Within_Or_Same (Current_Scope, S)
+to detect whether S is open in the current scope, but that's not robust in
+the presence of transient scopes or during instantiation of generic units.
+
+gcc/ada/
+	* sem_ch13.adb (Analyze_Aspects_At_Freeze_Point): Replace call to
+	Scope_Within_Or_Same (Current_Scope, S) with In_Open_Scopes (S) to
+	test whether S is open in the current scope.
+	* sem_util.adb (From_Nested_Package): Likewise.
+
+gcc/testsuite/
+	* gnat.dg/generic_inst16.adb: New test.
+	* gnat.dg/generic_inst16_pkg.ads: New helper.
+	* gnat.dg/generic_inst16_pkg-child.ads: Likewise.
+	* gnat.dg/generic_inst16_pkg-child-grandchild.ads: Likewise.
+	* gnat.dg/generic_inst16_proc.ads: Likewise.
+	* gnat.dg/generic_inst16_proc.adb: Likewise.
+---
+ gcc/ada/sem_ch13.adb                          |  4 +---
+ gcc/ada/sem_util.adb                          |  2 +-
+ gcc/testsuite/gnat.dg/generic_inst16.adb      | 11 ++++++++++
+ .../generic_inst16_pkg-child-grandchild.ads   | 20 +++++++++++++++++++
+ .../gnat.dg/generic_inst16_pkg-child.ads      | 17 ++++++++++++++++
+ gcc/testsuite/gnat.dg/generic_inst16_pkg.ads  |  5 +++++
+ gcc/testsuite/gnat.dg/generic_inst16_proc.adb |  7 +++++++
+ gcc/testsuite/gnat.dg/generic_inst16_proc.ads |  5 +++++
+ 8 files changed, 67 insertions(+), 4 deletions(-)
+ create mode 100644 gcc/testsuite/gnat.dg/generic_inst16.adb
+ create mode 100644 gcc/testsuite/gnat.dg/generic_inst16_pkg-child-grandchild.ads
+ create mode 100644 gcc/testsuite/gnat.dg/generic_inst16_pkg-child.ads
+ create mode 100644 gcc/testsuite/gnat.dg/generic_inst16_pkg.ads
+ create mode 100644 gcc/testsuite/gnat.dg/generic_inst16_proc.adb
+ create mode 100644 gcc/testsuite/gnat.dg/generic_inst16_proc.ads
+
+diff --git a/gcc/ada/sem_ch13.adb b/gcc/ada/sem_ch13.adb
+index d8d3740f6d85..547bcaf886da 100644
+--- a/gcc/ada/sem_ch13.adb
++++ b/gcc/ada/sem_ch13.adb
+@@ -1340,9 +1340,7 @@ package body Sem_Ch13 is
+       --  at the ends of certain declaration lists (like visible-part lists),
+       --  not when this procedure is called at arbitrary freeze points.
+ 
+-      if not Nonoverridable_Only
+-        and then not Scope_Within_Or_Same (Current_Scope, Scope (E))
+-      then
++      if not Nonoverridable_Only and then not In_Open_Scopes (Scope (E)) then
+          if Is_Type (E) and then From_Nested_Package (E) then
+             declare
+                Pack : constant Entity_Id := Scope (E);
+diff --git a/gcc/ada/sem_util.adb b/gcc/ada/sem_util.adb
+index 295e7f74067a..6d513954b96a 100644
+--- a/gcc/ada/sem_util.adb
++++ b/gcc/ada/sem_util.adb
+@@ -9567,7 +9567,7 @@ package body Sem_Util is
+       return
+         Ekind (Pack) = E_Package
+           and then not Is_Frozen (Pack)
+-          and then not Scope_Within_Or_Same (Current_Scope, Pack)
++          and then not In_Open_Scopes (Pack)
+           and then In_Open_Scopes (Scope (Pack));
+    end From_Nested_Package;
+ 
+diff --git a/gcc/testsuite/gnat.dg/generic_inst16.adb b/gcc/testsuite/gnat.dg/generic_inst16.adb
+new file mode 100644
+index 000000000000..859900139bcf
+--- /dev/null
++++ b/gcc/testsuite/gnat.dg/generic_inst16.adb
+@@ -0,0 +1,11 @@
++-- { dg-do link }
++
++with Generic_Inst16_Pkg.Child.Grandchild;
++with Generic_Inst16_Proc;
++
++procedure Generic_Inst16 is
++   package   P1 is new Generic_Inst16_Pkg.Child;
++   procedure P2 is new Generic_Inst16_Proc (P1);
++begin
++   null;
++end;
+diff --git a/gcc/testsuite/gnat.dg/generic_inst16_pkg-child-grandchild.ads b/gcc/testsuite/gnat.dg/generic_inst16_pkg-child-grandchild.ads
+new file mode 100644
+index 000000000000..b8e583d228d8
+--- /dev/null
++++ b/gcc/testsuite/gnat.dg/generic_inst16_pkg-child-grandchild.ads
+@@ -0,0 +1,20 @@
++generic
++package Generic_Inst16_Pkg.Child.Grandchild is
++
++   type CT is new GPT with private;
++
++   Zippo_CT1 : constant CT;
++   Zippo_CT2 : constant CT;
++
++private
++
++   type CT is new PT with
++      record
++         Small_Pi : Natural := 314;
++      end record;
++
++   Zippo_CT1 : constant CT := (Zippo_PT with Small_Pi => 0);
++   Zippo_CT2 : constant CT :=
++     (Generic_Inst16_Pkg.Child.Zippo_PT with Small_Pi => 0);
++
++end Generic_Inst16_Pkg.Child.Grandchild;
+diff --git a/gcc/testsuite/gnat.dg/generic_inst16_pkg-child.ads b/gcc/testsuite/gnat.dg/generic_inst16_pkg-child.ads
+new file mode 100644
+index 000000000000..3a14a350745e
+--- /dev/null
++++ b/gcc/testsuite/gnat.dg/generic_inst16_pkg-child.ads
+@@ -0,0 +1,17 @@
++generic
++package Generic_Inst16_Pkg.Child is
++
++   type PT is new GPT with private;
++
++   Zippo_PT : constant PT;
++   
++private
++   
++   type PT is new GPT with
++      record
++         Pos_Pi : Natural := 314159265;
++      end record;
++
++   Zippo_PT : constant PT := (Pos_Pi => 0);
++
++end Generic_Inst16_Pkg.Child;
+diff --git a/gcc/testsuite/gnat.dg/generic_inst16_pkg.ads b/gcc/testsuite/gnat.dg/generic_inst16_pkg.ads
+new file mode 100644
+index 000000000000..ca01215dbbe5
+--- /dev/null
++++ b/gcc/testsuite/gnat.dg/generic_inst16_pkg.ads
+@@ -0,0 +1,5 @@
++package Generic_Inst16_Pkg is
++
++   type GPT is interface;
++
++end Generic_Inst16_Pkg;
+diff --git a/gcc/testsuite/gnat.dg/generic_inst16_proc.adb b/gcc/testsuite/gnat.dg/generic_inst16_proc.adb
+new file mode 100644
+index 000000000000..7971b21398f3
+--- /dev/null
++++ b/gcc/testsuite/gnat.dg/generic_inst16_proc.adb
+@@ -0,0 +1,7 @@
++with Generic_Inst16_Pkg.Child.Grandchild;
++
++procedure Generic_Inst16_Proc is
++   package Inst_Grandchild is new Inst_Child.Grandchild;
++begin
++   null;
++end;
+diff --git a/gcc/testsuite/gnat.dg/generic_inst16_proc.ads b/gcc/testsuite/gnat.dg/generic_inst16_proc.ads
+new file mode 100644
+index 000000000000..bbc120b9da3b
+--- /dev/null
++++ b/gcc/testsuite/gnat.dg/generic_inst16_proc.ads
+@@ -0,0 +1,5 @@
++with Generic_Inst16_Pkg.Child;
++
++generic
++   with package Inst_Child is new Generic_Inst16_Pkg.Child (<>);
++procedure Generic_Inst16_Proc;
+-- 
+2.43.7
+
+

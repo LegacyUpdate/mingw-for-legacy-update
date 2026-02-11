@@ -1,0 +1,176 @@
+From e0a00ab17f40f33f2a33f1ae3fa67ba38418afb1 Mon Sep 17 00:00:00 2001
+From: Richard Sandiford <rdsandiford@googlemail.com>
+Date: Fri, 12 Dec 2025 17:40:54 +0000
+Subject: [PATCH] vect: Generalise vect_add_slp_permutation [PR122793]
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf8
+Content-Transfer-Encoding: 8bit
+
+The problem seems to be with a packing permutation:
+
+    op0[4] op0[5] op0[6] op0[7]
+
+and with the identity_offset parameter to vect_add_slp_permutation.
+
+Both the repeating_p and !repeating_p paths correctly realise that this
+permutation reduces to an identity.  But the !repeating_p path ends up with
+first_node and second_node both set to the second VEC_PERM_EXPR operand
+(since that path works elementwise, and since no elements are taken from
+the first input).  Therefore, the call:
+
+      vect_add_slp_permutation (vinfo, gsi, node, first_def,
+				second_def, mask_vec, mask[0]);
+
+works regardless of whether vect_add_slp_permutation picks first_def or
+second_def.  In that sense, the parameters to vect_add_slp_permutation are
+already âcanonicalâ.
+
+The repeating_p path instead passes vector 2N as first_def and vector 2N+1
+as second_def, with mask[0] indicating the position of the identity within
+the concatenation of first_def and second_def.  However,
+vect_add_slp_permutation doesn't expect this and instead ignores the
+identity_offset parameter.
+
+	PR tree-optimization/122793
+	* tree-vect-slp.cc (vect_add_slp_permutation): Document the existing
+	identity_offset parameter.  Handle identities that take from the
+	second input rather than the first.
+
+	* gcc.dg/vect/vect-pr122793.c: New testcase.
+
+Co-authored-by: Richard Biener <rguenther@suse.de>
+(cherry picked from commit ece83c6a5aa7ac1cc68d3941797a25601293f310)
+---
+ gcc/testsuite/gcc.dg/vect/vect-pr122793.c | 28 ++++++++++
+ gcc/tree-vect-slp.cc                      | 67 ++++++++++++++---------
+ 2 files changed, 69 insertions(+), 26 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.dg/vect/vect-pr122793.c
+
+diff --git a/gcc/testsuite/gcc.dg/vect/vect-pr122793.c b/gcc/testsuite/gcc.dg/vect/vect-pr122793.c
+new file mode 100644
+index 000000000000..18af3235b845
+--- /dev/null
++++ b/gcc/testsuite/gcc.dg/vect/vect-pr122793.c
+@@ -0,0 +1,28 @@
++/* { dg-additional-options "-msse4" { target sse4_runtime } } */
++
++#include "tree-vect.h"
++
++static void
++foo (unsigned char *d, unsigned char *s, int e, int f)
++{
++  for (int i = 0; i < 4; i++)
++    {
++      d[0] = s[-2];
++      d[5] = (s[5] + s[6]) * 2 - (s[4] + s[7]);
++      d[6] = (s[6] + s[7]) * 2 - (s[5] + s[8]);
++      d[7] = (s[7] + s[8]) * 2 - (s[6] + s[9]);
++      d += e;
++      s += f;
++    }
++}
++
++unsigned char s[128] = { 2 }, d[128];
++
++int
++main ()
++{
++  check_vect ();
++  foo (d, s + 2, 16, 16);
++  if (d[5] != 0)
++    __builtin_abort ();
++}
+diff --git a/gcc/tree-vect-slp.cc b/gcc/tree-vect-slp.cc
+index 961f7ad3bd65..5799ef83a460 100644
+--- a/gcc/tree-vect-slp.cc
++++ b/gcc/tree-vect-slp.cc
+@@ -10663,7 +10663,11 @@ vect_transform_slp_perm_load (vec_info *vinfo,
+ 
+    otherwise add:
+ 
+-      <new SSA name> = FIRST_DEF.  */
++      <new SSA name> = VEC_PERM_EXPR <FIRST_DEF, SECOND_DEF,
++				      { N, N+1, N+2, ... }>
++
++   where N == IDENTITY_OFFSET which is either zero or equal to the
++   number of elements of the result.  */
+ 
+ static void
+ vect_add_slp_permutation (vec_info *vinfo, gimple_stmt_iterator *gsi,
+@@ -10703,36 +10707,47 @@ vect_add_slp_permutation (vec_info *vinfo, gimple_stmt_iterator *gsi,
+ 				       first_def, second_def,
+ 				       mask_vec);
+     }
+-  else if (!types_compatible_p (TREE_TYPE (first_def), vectype))
++  else
+     {
+-      /* For identity permutes we still need to handle the case
+-	 of offsetted extracts or concats.  */
+-      unsigned HOST_WIDE_INT c;
+-      auto first_def_nunits
+-	= TYPE_VECTOR_SUBPARTS (TREE_TYPE (first_def));
+-      if (known_le (TYPE_VECTOR_SUBPARTS (vectype), first_def_nunits))
++      auto def_nunits = TYPE_VECTOR_SUBPARTS (TREE_TYPE (first_def));
++      unsigned HOST_WIDE_INT vecno;
++      poly_uint64 eltno;
++      if (!can_div_trunc_p (poly_uint64 (identity_offset), def_nunits,
++			    &vecno, &eltno))
++	gcc_unreachable ();
++      tree def = vecno & 1 ? second_def : first_def;
++      if (!types_compatible_p (TREE_TYPE (def), vectype))
+ 	{
+-	  unsigned HOST_WIDE_INT elsz
+-	    = tree_to_uhwi (TYPE_SIZE (TREE_TYPE (TREE_TYPE (first_def))));
+-	  tree lowpart = build3 (BIT_FIELD_REF, vectype, first_def,
+-				 TYPE_SIZE (vectype),
+-				 bitsize_int (identity_offset * elsz));
+-	  perm_stmt = gimple_build_assign (perm_dest, lowpart);
++	  /* For identity permutes we still need to handle the case
++	     of offsetted extracts or concats.  */
++	  unsigned HOST_WIDE_INT c;
++	  if (known_le (TYPE_VECTOR_SUBPARTS (vectype), def_nunits))
++	    {
++	      unsigned HOST_WIDE_INT elsz
++		= tree_to_uhwi (TYPE_SIZE (TREE_TYPE (TREE_TYPE (def))));
++	      tree lowpart = build3 (BIT_FIELD_REF, vectype, def,
++				     TYPE_SIZE (vectype),
++				     bitsize_int (eltno * elsz));
++	      perm_stmt = gimple_build_assign (perm_dest, lowpart);
++	    }
++	  else if (constant_multiple_p (TYPE_VECTOR_SUBPARTS (vectype),
++					def_nunits, &c) && c == 2)
++	    {
++	      gcc_assert (known_eq (identity_offset, 0U));
++	      tree ctor = build_constructor_va (vectype, 2,
++						NULL_TREE, first_def,
++						NULL_TREE, second_def);
++	      perm_stmt = gimple_build_assign (perm_dest, ctor);
++	    }
++	  else
++	    gcc_unreachable ();
+ 	}
+-      else if (constant_multiple_p (TYPE_VECTOR_SUBPARTS (vectype),
+-				    first_def_nunits, &c) && c == 2)
++      else
+ 	{
+-	  tree ctor = build_constructor_va (vectype, 2, NULL_TREE, first_def,
+-					    NULL_TREE, second_def);
+-	  perm_stmt = gimple_build_assign (perm_dest, ctor);
++	  /* We need a copy here in case the def was external.  */
++	  gcc_assert (known_eq (eltno, 0U));
++	  perm_stmt = gimple_build_assign (perm_dest, def);
+ 	}
+-      else
+-	gcc_unreachable ();
+-    }
+-  else
+-    {
+-      /* We need a copy here in case the def was external.  */
+-      perm_stmt = gimple_build_assign (perm_dest, first_def);
+     }
+   vect_finish_stmt_generation (vinfo, NULL, perm_stmt, gsi);
+   /* Store the vector statement in NODE.  */
+-- 
+2.43.7
+
+

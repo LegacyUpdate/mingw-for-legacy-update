@@ -1,0 +1,59 @@
+From 38a9c7885e8f0227d263d190698c7f17c820bc27 Mon Sep 17 00:00:00 2001
+From: Richard Biener <rguenther@suse.de>
+Date: Tue, 27 Jan 2026 15:43:53 +0100
+Subject: [PATCH] tree-optimization/110043 - avoid overflow in pointer-query
+
+pointer-query is built around using offset_int to avoid needing
+to deal with overflow.  This falls apart when trying to analyze
+array accesses indexed by __int128.  So don't.
+
+	PR tree-optimization/110043
+	* pointer-query.cc (get_offset_range): Fail for integer
+	types with precision larger than ptrdiff_type_node.
+
+	* gcc.dg/torture/pr110043.c: New testcase.
+
+(cherry picked from commit 7fdb0e1b186b8ade38d454504e3f8bba2b17a9ea)
+---
+ gcc/pointer-query.cc                    | 7 ++++++-
+ gcc/testsuite/gcc.dg/torture/pr110043.c | 9 +++++++++
+ 2 files changed, 15 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/gcc.dg/torture/pr110043.c
+
+diff --git a/gcc/pointer-query.cc b/gcc/pointer-query.cc
+index 1d79d39cbc19..f792cde22ad3 100644
+--- a/gcc/pointer-query.cc
++++ b/gcc/pointer-query.cc
+@@ -74,7 +74,12 @@ get_offset_range (tree x, gimple *stmt, offset_int r[2], range_query *rvals)
+     x = TREE_OPERAND (x, 0);
+ 
+   tree type = TREE_TYPE (x);
+-  if (!INTEGRAL_TYPE_P (type) && !POINTER_TYPE_P (type))
++  if ((!INTEGRAL_TYPE_P (type)
++       /* ???  We get along without caring about overflow by using
++	  offset_int, but that falls apart when indexes are bigger
++	  than pointer differences.  */
++       || TYPE_PRECISION (type) > TYPE_PRECISION (ptrdiff_type_node))
++      && !POINTER_TYPE_P (type))
+     return false;
+ 
+    if (TREE_CODE (x) != INTEGER_CST
+diff --git a/gcc/testsuite/gcc.dg/torture/pr110043.c b/gcc/testsuite/gcc.dg/torture/pr110043.c
+new file mode 100644
+index 000000000000..32c9ad77a79f
+--- /dev/null
++++ b/gcc/testsuite/gcc.dg/torture/pr110043.c
+@@ -0,0 +1,9 @@
++/* { dg-do compile } */
++/* { dg-require-effective-target int128 } */
++
++__int128 g_116_1;
++extern char g_521[][8];
++void func_24() {
++  for (; g_116_1 >= 0;)
++    g_521[g_116_1][g_116_1] &= 0;
++}
+-- 
+2.43.7
+
+

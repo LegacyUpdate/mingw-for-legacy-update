@@ -1,0 +1,86 @@
+From 54103e99fa8383976281ea082d66262b141fecdb Mon Sep 17 00:00:00 2001
+From: Karl Meakin <karl.meakin@arm.com>
+Date: Tue, 20 Jan 2026 16:49:22 +0000
+Subject: [PATCH] aarch64: fix XAR tests
+
+Some tests were failing because the pattern was not accounting for the
+`#` before the immediate argument.
+
+gcc/testsuite/ChangeLog:
+
+	* gcc.target/aarch64/rotate_xar_1.c
+	* gcc.target/aarch64/sha3_1.c
+	* gcc.target/aarch64/sha3_2.c
+	* gcc.target/aarch64/sha3_3.c
+	* gcc.target/aarch64/xar_v2di_nonsve.c: Fix tests.
+
+(cherry picked from commit 2591468a54b15635068735615d5179595c6c6bce)
+---
+ gcc/testsuite/gcc.target/aarch64/rotate_xar_1.c    | 2 +-
+ gcc/testsuite/gcc.target/aarch64/sha3_1.c          | 2 +-
+ gcc/testsuite/gcc.target/aarch64/sha3_2.c          | 2 +-
+ gcc/testsuite/gcc.target/aarch64/sha3_3.c          | 2 +-
+ gcc/testsuite/gcc.target/aarch64/xar_v2di_nonsve.c | 2 +-
+ 5 files changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/gcc/testsuite/gcc.target/aarch64/rotate_xar_1.c b/gcc/testsuite/gcc.target/aarch64/rotate_xar_1.c
+index 73007701cfb4..12b89a672b6a 100644
+--- a/gcc/testsuite/gcc.target/aarch64/rotate_xar_1.c
++++ b/gcc/testsuite/gcc.target/aarch64/rotate_xar_1.c
+@@ -15,7 +15,7 @@ typedef unsigned int __attribute__ ((vector_size (8))) v2si;
+ /*
+ ** G1:
+ **	movi?	[vdz][0-9]+\.?(?:[0-9]*[bhsd])?, #?0
+-** 	xar	v0\.2d, v[0-9]+\.2d, v[0-9]+\.2d, 39
++** 	xar	v0\.2d, v[0-9]+\.2d, v[0-9]+\.2d, #39
+ **      ret
+ */
+ v2di
+diff --git a/gcc/testsuite/gcc.target/aarch64/sha3_1.c b/gcc/testsuite/gcc.target/aarch64/sha3_1.c
+index 0727ce770283..cf02865bfe85 100644
+--- a/gcc/testsuite/gcc.target/aarch64/sha3_1.c
++++ b/gcc/testsuite/gcc.target/aarch64/sha3_1.c
+@@ -6,5 +6,5 @@
+ 
+ /* { dg-final { scan-assembler-times "eor3\\tv\[0-9\]+\.16b, v\[0-9\]+\.16b, v\[0-9\]+\.16b, v\[0-9\]+\.16b" 8 } } */
+ /* { dg-final { scan-assembler-times "rax1\\tv\[0-9\]+\.2d, v\[0-9\]+\.2d, v\[0-9\]+\.2d" 1 } } */
+-/* { dg-final { scan-assembler-times "xar\\tv\[0-9\]+\.2d, v\[0-9\]+\.2d, v\[0-9\]+\.2d, 15" 1 } } */
++/* { dg-final { scan-assembler-times "xar\\tv\[0-9\]+\.2d, v\[0-9\]+\.2d, v\[0-9\]+\.2d, #?15" 1 } } */
+ /* { dg-final { scan-assembler-times "bcax\\tv\[0-9\]+\.16b, v\[0-9\]+\.16b, v\[0-9\]+\.16b, v\[0-9\]+\.16b" 8 } } */
+diff --git a/gcc/testsuite/gcc.target/aarch64/sha3_2.c b/gcc/testsuite/gcc.target/aarch64/sha3_2.c
+index 2d0511611337..8b085cbe9803 100644
+--- a/gcc/testsuite/gcc.target/aarch64/sha3_2.c
++++ b/gcc/testsuite/gcc.target/aarch64/sha3_2.c
+@@ -5,5 +5,5 @@
+ 
+ /* { dg-final { scan-assembler-times "eor3\\tv\[0-9\]+\.16b, v\[0-9\]+\.16b, v\[0-9\]+\.16b, v\[0-9\]+\.16b" 8 } } */
+ /* { dg-final { scan-assembler-times "rax1\\tv\[0-9\]+\.2d, v\[0-9\]+\.2d, v\[0-9\]+\.2d" 1 } } */
+-/* { dg-final { scan-assembler-times "xar\\tv\[0-9\]+\.2d, v\[0-9\]+\.2d, v\[0-9\]+\.2d, 15" 1 } } */
++/* { dg-final { scan-assembler-times "xar\\tv\[0-9\]+\.2d, v\[0-9\]+\.2d, v\[0-9\]+\.2d, #?15" 1 } } */
+ /* { dg-final { scan-assembler-times "bcax\\tv\[0-9\]+\.16b, v\[0-9\]+\.16b, v\[0-9\]+\.16b, v\[0-9\]+\.16b" 8 } } */
+diff --git a/gcc/testsuite/gcc.target/aarch64/sha3_3.c b/gcc/testsuite/gcc.target/aarch64/sha3_3.c
+index 8d8ee77c2934..51ae0a4da6bb 100644
+--- a/gcc/testsuite/gcc.target/aarch64/sha3_3.c
++++ b/gcc/testsuite/gcc.target/aarch64/sha3_3.c
+@@ -5,5 +5,5 @@
+ 
+ /* { dg-final { scan-assembler-times "eor3\\tv\[0-9\]+\.16b, v\[0-9\]+\.16b, v\[0-9\]+\.16b, v\[0-9\]+\.16b" 8 } } */
+ /* { dg-final { scan-assembler-times "rax1\\tv\[0-9\]+\.2d, v\[0-9\]+\.2d, v\[0-9\]+\.2d" 1 } } */
+-/* { dg-final { scan-assembler-times "xar\\tv\[0-9\]+\.2d, v\[0-9\]+\.2d, v\[0-9\]+\.2d, 15" 1 } } */
++/* { dg-final { scan-assembler-times "xar\\tv\[0-9\]+\.2d, v\[0-9\]+\.2d, v\[0-9\]+\.2d, #?15" 1 } } */
+ /* { dg-final { scan-assembler-times "bcax\\tv\[0-9\]+\.16b, v\[0-9\]+\.16b, v\[0-9\]+\.16b, v\[0-9\]+\.16b" 8 } } */
+diff --git a/gcc/testsuite/gcc.target/aarch64/xar_v2di_nonsve.c b/gcc/testsuite/gcc.target/aarch64/xar_v2di_nonsve.c
+index b0f1a97222b3..21adfe65728a 100644
+--- a/gcc/testsuite/gcc.target/aarch64/xar_v2di_nonsve.c
++++ b/gcc/testsuite/gcc.target/aarch64/xar_v2di_nonsve.c
+@@ -12,5 +12,5 @@ xar_v2di (v2di a, v2di b) {
+   v2di c = a ^ b;
+   return (c << 22) ^ (c >> 42);
+ }
+-/* { dg-final { scan-assembler {\txar\tv0.2d, v[0-9]+.2d, v[0-9]+.2d, 42} } } */
++/* { dg-final { scan-assembler {\txar\tv0.2d, v[0-9]+.2d, v[0-9]+.2d, #?42} } } */
+ 
+-- 
+2.43.7
+
+

@@ -1,0 +1,35 @@
+From da3c2f61893afac37caf97068fa9662b6ac9f16e Mon Sep 17 00:00:00 2001
+From: Lili Cui <lili.cui@intel.com>
+Date: Wed, 14 Jan 2026 09:53:04 +0800
+Subject: [PATCH] x86: Disable tight loop alignment for m_CORE_ATOM
+
+For the E-core front end, aligning tight loops provides little benefit.
+
+gcc/ChangeLog:
+
+	* config/i386/x86-tune.def (X86_TUNE_ALIGN_TIGHT_LOOPS):
+	disable tight loop alignment for m_CORE_ATOM.
+
+(cherry picked from commit dfd063aeccb52a51c7d98052920328facec401a9)
+---
+ gcc/config/i386/x86-tune.def | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/gcc/config/i386/x86-tune.def b/gcc/config/i386/x86-tune.def
+index e72a49a5674e..0eee05de533c 100644
+--- a/gcc/config/i386/x86-tune.def
++++ b/gcc/config/i386/x86-tune.def
+@@ -252,7 +252,8 @@ DEF_TUNE (X86_TUNE_FOUR_JUMP_LIMIT, "four_jump_limit",
+ 
+ /* X86_TUNE_ALIGN_TIGHT_LOOPS: if false, tight loops are not aligned. */
+ DEF_TUNE (X86_TUNE_ALIGN_TIGHT_LOOPS, "align_tight_loops",
+-	 ~(m_ZHAOXIN | m_CASCADELAKE | m_SKYLAKE_AVX512))
++	 ~(m_ZHAOXIN | m_CASCADELAKE | m_SKYLAKE_AVX512
++	   | m_CORE_ATOM))
+ 
+ /*****************************************************************************/
+ /* Integer instruction selection tuning                                      */
+-- 
+2.43.7
+
+

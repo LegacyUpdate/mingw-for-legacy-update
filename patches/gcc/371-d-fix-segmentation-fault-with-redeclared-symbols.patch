@@ -1,0 +1,164 @@
+From 3b4846980a323688f69d3d912f44c51b5d3c0d90 Mon Sep 17 00:00:00 2001
+From: Iain Buclaw <ibuclaw@gdcproject.org>
+Date: Thu, 29 Jan 2026 16:26:21 +0100
+Subject: [PATCH] d: Fix Segmentation fault with redeclared symbols [PR123407]
+
+Issue an error if two symbols with the same assembler name have a
+mismatched TREE_CODE.
+
+	PR d/123407
+
+gcc/d/ChangeLog:
+
+	* decl.cc (get_symbol_decl): Handle declarations with matching
+	assembler names, but different TREE_CODE.
+
+gcc/testsuite/ChangeLog:
+
+	* gdc.dg/pr123407a.d: New test.
+	* gdc.dg/pr123407b.d: New test.
+
+(cherry picked from commit 172634608a49603d10b471b0379c71cf53d3e2c0)
+---
+ gcc/d/decl.cc                    | 62 ++++++++++++++++++--------------
+ gcc/testsuite/gdc.dg/pr123407a.d |  4 +++
+ gcc/testsuite/gdc.dg/pr123407b.d |  4 +++
+ 3 files changed, 44 insertions(+), 26 deletions(-)
+ create mode 100644 gcc/testsuite/gdc.dg/pr123407a.d
+ create mode 100644 gcc/testsuite/gdc.dg/pr123407b.d
+
+diff --git a/gcc/d/decl.cc b/gcc/d/decl.cc
+index 11a05959a4ea..1dd57f2e0610 100644
+--- a/gcc/d/decl.cc
++++ b/gcc/d/decl.cc
+@@ -1213,8 +1213,7 @@ get_symbol_decl (Declaration *decl)
+ 
+   /* Deal with placeholder symbols immediately:
+      SymbolDeclaration is used as a shell around an initializer symbol.  */
+-  SymbolDeclaration *sd = decl->isSymbolDeclaration ();
+-  if (sd)
++  if (SymbolDeclaration *sd = decl->isSymbolDeclaration ())
+     {
+       decl->csym = aggregate_initializer_decl (sd->dsym);
+       return decl->csym;
+@@ -1225,8 +1224,7 @@ get_symbol_decl (Declaration *decl)
+     return get_typeinfo_decl ((TypeInfoDeclaration *) decl);
+ 
+   /* FuncAliasDeclaration is used to import functions from another scope.  */
+-  FuncAliasDeclaration *fad = decl->isFuncAliasDeclaration ();
+-  if (fad)
++  if (FuncAliasDeclaration *fad = decl->isFuncAliasDeclaration ())
+     {
+       decl->csym = get_symbol_decl (fad->funcalias);
+       return decl->csym;
+@@ -1261,8 +1259,7 @@ get_symbol_decl (Declaration *decl)
+     }
+ 
+   /* Build the tree for the symbol.  */
+-  FuncDeclaration *fd = decl->isFuncDeclaration ();
+-  if (fd)
++  if (FuncDeclaration *fd = decl->isFuncDeclaration ())
+     {
+       /* Run full semantic on functions we need to know about.  */
+       if (!dmd::functionSemantic (fd))
+@@ -1354,29 +1351,38 @@ get_symbol_decl (Declaration *decl)
+       if (IDENTIFIER_DSYMBOL (mangled_name))
+ 	{
+ 	  Declaration *other = IDENTIFIER_DSYMBOL (mangled_name);
+-	  tree olddecl = decl->csym;
+-	  decl->csym = get_symbol_decl (other);
+-
+-	  /* Update the symbol location to the current definition.  */
+-	  if (DECL_EXTERNAL (decl->csym) && !DECL_INITIAL (decl->csym))
+-	    DECL_SOURCE_LOCATION (decl->csym) = DECL_SOURCE_LOCATION (olddecl);
++	  tree newdecl = decl->csym;
++	  tree olddecl = get_symbol_decl (other);
+ 
+-	  /* The current declaration is a prototype or marked extern, merge
+-	     applied user attributes and return.  */
+-	  if (DECL_EXTERNAL (olddecl) && !DECL_INITIAL (olddecl))
+-	    {
+-	      apply_user_attributes (decl, decl->csym);
+-	      return decl->csym;
+-	    }
+-	  /* The previous declaration is a prototype or marked extern, set the
+-	     current declaration as the main reference of the symbol.  */
+-	  else if (DECL_EXTERNAL (decl->csym) && !DECL_INITIAL (decl->csym))
++	  if (TREE_CODE (olddecl) == TREE_CODE (newdecl))
+ 	    {
+-	      IDENTIFIER_DSYMBOL (mangled_name) = decl;
+-	      DECL_EXTERNAL (decl->csym) = 0;
++	      /* Update the symbol location to the current definition.  */
++	      if (DECL_EXTERNAL (olddecl) && !DECL_INITIAL (olddecl))
++		DECL_SOURCE_LOCATION (olddecl) = DECL_SOURCE_LOCATION (newdecl);
++
++	      /* The current declaration is a prototype or marked extern, merge
++		 applied user attributes and return.  */
++	      if (DECL_EXTERNAL (newdecl) && !DECL_INITIAL (newdecl))
++		{
++		  apply_user_attributes (decl, olddecl);
++		  decl->csym = olddecl;
++		  return decl->csym;
++		}
++	      /* The previous declaration is a prototype or marked extern, set
++		 the current declaration as the main reference of the symbol.
++	       */
++	      else if (DECL_EXTERNAL (olddecl) && !DECL_INITIAL (olddecl))
++		{
++		  IDENTIFIER_DSYMBOL (mangled_name) = decl;
++		  decl->csym = olddecl;
++		  DECL_EXTERNAL (decl->csym) = 0;
++		}
++	      /* Non-extern, non-templated decls shouldn't be defined twice.  */
++	      else if (!decl->isInstantiated ())
++		ScopeDsymbol::multiplyDefined (decl->loc, decl, other);
+ 	    }
+-	  /* Non-extern, non-templated decls shouldn't be defined twice.  */
+-	  else if (!decl->isInstantiated ())
++	  /* Declarations are for conflicting kinds of symbol.  */
++	  else
+ 	    ScopeDsymbol::multiplyDefined (decl->loc, decl, other);
+ 	}
+       else
+@@ -1418,6 +1424,9 @@ get_symbol_decl (Declaration *decl)
+     }
+   else if (TREE_CODE (decl->csym) == FUNCTION_DECL)
+     {
++      FuncDeclaration *fd = decl->isFuncDeclaration ();
++      gcc_assert (fd != NULL);
++
+       /* Dual-context functions require the code generation to build an array
+ 	 for the context pointer of the function, making the delicate task of
+ 	 tracking which context to follow when encountering a non-local symbol,
+@@ -1571,6 +1580,7 @@ get_symbol_decl (Declaration *decl)
+   if (decl->isDataseg () || decl->isCodeseg () || decl->isThreadlocal ())
+     {
+       /* Set TREE_PUBLIC by default, but allow private template to override.  */
++      FuncDeclaration *fd = decl->isFuncDeclaration ();
+       if (!fd || !fd->isNested ())
+ 	TREE_PUBLIC (decl->csym) = 1;
+ 
+diff --git a/gcc/testsuite/gdc.dg/pr123407a.d b/gcc/testsuite/gdc.dg/pr123407a.d
+new file mode 100644
+index 000000000000..112b7d3f63e9
+--- /dev/null
++++ b/gcc/testsuite/gdc.dg/pr123407a.d
+@@ -0,0 +1,4 @@
++// { dg-do compile }
++module pr123407;
++pragma(mangle, "ice") int fun();
++pragma(mangle, "ice") int var; // { dg-error "matches conflicting symbols" }
+diff --git a/gcc/testsuite/gdc.dg/pr123407b.d b/gcc/testsuite/gdc.dg/pr123407b.d
+new file mode 100644
+index 000000000000..78960dbc941b
+--- /dev/null
++++ b/gcc/testsuite/gdc.dg/pr123407b.d
+@@ -0,0 +1,4 @@
++// { dg-do compile }
++module pr123407;
++int fun();
++extern(C) int _D8pr1234073funFZi; // { dg-error "matches conflicting symbols" }
+-- 
+2.43.7
+
+

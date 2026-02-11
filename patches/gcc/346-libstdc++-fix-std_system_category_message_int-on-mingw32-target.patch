@@ -1,0 +1,121 @@
+From 9e2c62a7d397b050427568c83ff5a4c21eb49365 Mon Sep 17 00:00:00 2001
+From: Wang Jinghao <zheng.xianyuwang@gmail.com>
+Date: Sat, 10 Jan 2026 18:43:14 +0800
+Subject: [PATCH] libstdc++: Fix std::system_category().message(int) on mingw32
+ target
+
+On the mingw32 target, std::system_category().message(int) uses
+FormatMessage api to format error messages. When the error message
+contains insert sequences, it is unsafe not to use the
+FORMAT_MESSAGE_IGNORE_INSERTS flag, as seen at:
+https://devblogs.microsoft.com/oldnewthing/20071128-00/?p=24353
+
+The output of FormatMessage ends with "\r\n" and includes a Full stop
+character used by the current thread's UI language. Now, we will remove
+"\r\n" and any trailing '.' from the output in any language environment.
+
+In the testsuite for std::system_category().message(int), we first
+switch the thread UI language to en-US to meet expectations in any
+language environment.
+
+libstdc++-v3/ChangeLog:
+
+	* src/c++11/system_error.cc (system_error_category) [_WIN32]:
+	Use FormatMessageA function instead of FormatMessage macro.
+	* testsuite/19_diagnostics/error_category/system_category.cc:
+	Fix typo in __MINGW32__ macro name.  Adjust behavior on the
+	mingw32 target.
+
+(cherry picked from commit 972be84265c2f8a57ca651256c307486482582c6)
+---
+ libstdc++-v3/src/c++11/system_error.cc        | 21 ++++++++++---------
+ .../error_category/system_category.cc         | 19 ++++++++++++++---
+ 2 files changed, 27 insertions(+), 13 deletions(-)
+
+diff --git a/libstdc++-v3/src/c++11/system_error.cc b/libstdc++-v3/src/c++11/system_error.cc
+index b9a0b2c158fc..de92f1d9abbe 100644
+--- a/libstdc++-v3/src/c++11/system_error.cc
++++ b/libstdc++-v3/src/c++11/system_error.cc
+@@ -161,22 +161,23 @@ namespace
+ #if defined(_WIN32) && !defined(__CYGWIN__)
+       char* buf = nullptr;
+       auto len
+-	= FormatMessage(FORMAT_MESSAGE_FROM_SYSTEM
+-			| FORMAT_MESSAGE_ALLOCATE_BUFFER,
+-			nullptr,
+-			i,
+-			LANG_USER_DEFAULT,
+-			reinterpret_cast<LPTSTR>(&buf),
+-			0,
+-			nullptr);
++	= FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM
++			 | FORMAT_MESSAGE_ALLOCATE_BUFFER
++			 | FORMAT_MESSAGE_IGNORE_INSERTS,
++			 nullptr,
++			 i,
++			 LANG_USER_DEFAULT,
++			 reinterpret_cast<LPTSTR>(&buf),
++			 0,
++			 nullptr);
+       if (len > 0)
+       {
+ 	struct deleter {
+ 	  void operator()(void* p) const { ::LocalFree(p); }
+ 	};
+ 	std::unique_ptr<char[], deleter> guard(buf);
+-	if (len > 3 && !__builtin_memcmp(buf + len - 3, ".\r\n", 3)) [[likely]]
+-	  len -= 3;
++	if (len > 2 && !__builtin_memcmp (buf + len - 2, "\r\n", 2)) [[likely]]
++	  len -= 2 + (buf[len - 3] == '.');
+ 	return string(buf, len);
+       }
+       return string("Unknown error code");
+diff --git a/libstdc++-v3/testsuite/19_diagnostics/error_category/system_category.cc b/libstdc++-v3/testsuite/19_diagnostics/error_category/system_category.cc
+index 196a15347a6b..404d92e91a9f 100644
+--- a/libstdc++-v3/testsuite/19_diagnostics/error_category/system_category.cc
++++ b/libstdc++-v3/testsuite/19_diagnostics/error_category/system_category.cc
+@@ -21,6 +21,11 @@
+ #include <locale>
+ #include <testsuite_hooks.h>
+ 
++#if defined __MINGW32__ || defined __MINGW64__
++#define WIN32_LEAN_AND_MEAN
++#include <windows.h>
++#endif
++
+ void
+ test01()
+ {
+@@ -34,7 +39,7 @@ test02()
+   const std::error_category& cat = std::system_category();
+   std::error_condition cond;
+ 
+-#if defined __MING32__ || defined __MINGW64__
++#if defined __MINGW32__ || defined __MINGW64__
+   cond = cat.default_error_condition(8); // ERROR_NOT_ENOUGH_MEMORY
+   VERIFY( cond.value() == ENOMEM );
+   VERIFY( cond.category() == std::generic_category() );
+@@ -112,9 +117,17 @@ test03()
+   // set "C" locale to get expected message
+   auto loc = std::locale::global(std::locale::classic());
+ 
+-#if defined __MING32__ || defined __MINGW64__
++#if defined __MINGW32__ || defined __MINGW64__
++  // On Windows, set thread preferred UI languages to "en-US"
++  // to get expected message
++  ULONG num_langs = 1;
++  SetThreadPreferredUILanguages(MUI_LANGUAGE_NAME, L"en-US\0", &num_langs);
++
+   std::string msg = std::system_category().message(5); // ERROR_ACCESS_DENIED
+-  VERIFY(msg == "Access denied");
++  // Windows returns "Access is denied" but Wine returns "Access denied".
++  VERIFY(msg == "Access is denied" || msg == "Access denied");
++
++  SetThreadPreferredUILanguages(MUI_RESET_FILTERS, nullptr, nullptr);
+ #else
+   std::string msg = std::system_category().message(EBADF);
+   VERIFY( msg.find("file") != std::string::npos );
+-- 
+2.43.7
+
+

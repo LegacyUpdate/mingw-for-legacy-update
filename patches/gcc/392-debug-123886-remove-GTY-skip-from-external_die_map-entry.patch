@@ -1,0 +1,34 @@
+From 36d1b6216e4ec6827c85498723877cadc3a48590 Mon Sep 17 00:00:00 2001
+From: Richard Biener <rguenther@suse.de>
+Date: Fri, 30 Jan 2026 14:55:58 +0100
+Subject: [PATCH] debug/123886 - remove GTY((skip)) from external_die_map entry
+
+The following avoids GCing IDENTIFIER_POINTERs referenced from
+external_die_map after we clear ggc_protect_identifiers.  I never
+expected those to be GCed.
+
+	PR debug/123886
+	* dwarf2out.cc (sym_off_pair::sym): Remove GTY((skip)).
+
+(cherry picked from commit 2b44a1ab15cfd0936860bbb78ece649e9b5ca0a0)
+---
+ gcc/dwarf2out.cc | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/gcc/dwarf2out.cc b/gcc/dwarf2out.cc
+index 9dda6a648cdc..38a54ff19c0a 100644
+--- a/gcc/dwarf2out.cc
++++ b/gcc/dwarf2out.cc
+@@ -5942,7 +5942,7 @@ equate_type_number_to_die (tree type, dw_die_ref type_die)
+ static dw_die_ref maybe_create_die_with_external_ref (tree);
+ struct GTY(()) sym_off_pair
+ {
+-  const char * GTY((skip)) sym;
++  const char *sym;
+   unsigned HOST_WIDE_INT off;
+ };
+ static GTY(()) hash_map<tree, sym_off_pair> *external_die_map;
+-- 
+2.43.7
+
+

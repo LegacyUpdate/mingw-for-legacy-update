@@ -1,0 +1,56 @@
+From f7421d25a2926f85292f6e45916fca01f4716140 Mon Sep 17 00:00:00 2001
+From: =?utf8?q?Torbj=C3=B6rn=20SVENSSON?= <torbjorn.svensson@foss.st.com>
+Date: Thu, 29 Jan 2026 09:26:26 +0100
+Subject: [PATCH] gcc: avoid redefinition of CONST_CAST2 macro
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf8
+Content-Transfer-Encoding: 8bit
+
+When building GCC with host=mingw, the following warning can be seen
+multiple times in the build log if the MinGW GCC version is older than
+r13-4881-g9149a5b7e0a:
+
+In file included from /build/gcc/c/c-typeck.cc:27:0:
+/build/gcc/system.h:1172:0: warning: "CONST_CAST2" redefined
+ #define CONST_CAST2(TOTYPE,FROMTYPE,X) (const_cast<TOTYPE> (X))
+
+In file included from /usr/lib/gcc/x86_64-w64-mingw32/7.3-win32/include/c++/x86_64-w64-mingw32/bits/gthr.h:148:0,
+                 from /usr/lib/gcc/x86_64-w64-mingw32/7.3-win32/include/c++/ext/atomicity.h:35,
+                 from /usr/lib/gcc/x86_64-w64-mingw32/7.3-win32/include/c++/memory:73,
+                 from /build/gcc/gcc/system.h:231,
+                 from /build/gcc/gcc/c/c-typeck.cc:27:
+/usr/lib/gcc/x86_64-w64-mingw32/7.3-win32/include/c++/x86_64-w64-mingw32/bits/gthr-default.h:33:0: note: this is the location of the previous definition
+ #define CONST_CAST2(TOTYPE,FROMTYPE,X) ((__extension__(union {FROMTYPE _q; TOTYPE _nq;})(X))._nq)
+
+To ensure that the recent definition is used, always undefine any
+potential define before defining the new macro.
+
+gcc/ChangeLog:
+
+	* system.h: Avoid redefinition of CONST_CAST2 macro.
+
+Signed-off-by: TorbjÃ¶rn SVENSSON <torbjorn.svensson@foss.st.com>
+---
+ gcc/system.h | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/gcc/system.h b/gcc/system.h
+index e516b49d04a7..3e59090340e9 100644
+--- a/gcc/system.h
++++ b/gcc/system.h
+@@ -226,6 +226,11 @@ extern int fprintf_unlocked (FILE *, const char *, ...);
+ # include <sstream>
+ #endif
+ # include <memory>
++
++/* Some versions of GCC exposes an internal copy of the CONST_CAST2 macro that
++   might be incompatible with the current version of the GCC sources.  */
++#undef CONST_CAST2
++
+ # include <cstring>
+ # include <initializer_list>
+ # include <new>
+-- 
+2.43.7
+
+

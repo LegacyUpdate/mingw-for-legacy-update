@@ -1,0 +1,92 @@
+From a423c594989e10be8dabe3d7175dfda3aac49d20 Mon Sep 17 00:00:00 2001
+From: Patrick Palka <ppalka@redhat.com>
+Date: Thu, 5 Feb 2026 09:13:42 -0500
+Subject: [PATCH] c++: cv-qualified pack index propagation [PR122169]
+
+Since type pack indexes can be cv-qualified, we need to propagate their
+qualifiers when substituting them.
+
+	PR c++/122169
+
+gcc/cp/ChangeLog:
+
+	* pt.cc (tsubst_pack_index): Propagate cv-qualifiers of
+	PACK_INDEX_TYPE.
+
+gcc/testsuite/ChangeLog:
+
+	* g++.dg/cpp26/pack-indexing19.C: New test.
+
+Reviewed-by: Marek Polacek <polacek@redhat.com>
+Reviewed-by: Jason Merrill <jason@redhat.com>
+(cherry picked from commit 6385a3582c0b6b30479bc68f7d2b74e327ec44d7)
+---
+ gcc/cp/pt.cc                                 |  9 ++++--
+ gcc/testsuite/g++.dg/cpp26/pack-indexing19.C | 32 ++++++++++++++++++++
+ 2 files changed, 39 insertions(+), 2 deletions(-)
+ create mode 100644 gcc/testsuite/g++.dg/cpp26/pack-indexing19.C
+
+diff --git a/gcc/cp/pt.cc b/gcc/cp/pt.cc
+index 05018a98dac8..883f7bbac7c5 100644
+--- a/gcc/cp/pt.cc
++++ b/gcc/cp/pt.cc
+@@ -14141,10 +14141,15 @@ tsubst_pack_index (tree t, tree args, tsubst_flags_t complain, tree in_decl)
+   tree index = tsubst_expr (PACK_INDEX_INDEX (t), args, complain, in_decl);
+   const bool parenthesized_p = (TREE_CODE (t) == PACK_INDEX_EXPR
+ 				&& PACK_INDEX_PARENTHESIZED_P (t));
++  tree r;
+   if (!value_dependent_expression_p (index) && TREE_CODE (pack) == TREE_VEC)
+-    return pack_index_element (index, pack, parenthesized_p, complain);
++    r = pack_index_element (index, pack, parenthesized_p, complain);
+   else
+-    return make_pack_index (pack, index);
++    r = make_pack_index (pack, index);
++  if (TREE_CODE (t) == PACK_INDEX_TYPE)
++    r = cp_build_qualified_type (r, cp_type_quals (t) | cp_type_quals (r),
++				 complain | tf_ignore_bad_quals);
++  return r;
+ }
+ 
+ /* Make an argument pack out of the TREE_VEC VEC.  */
+diff --git a/gcc/testsuite/g++.dg/cpp26/pack-indexing19.C b/gcc/testsuite/g++.dg/cpp26/pack-indexing19.C
+new file mode 100644
+index 000000000000..cd9370579080
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/cpp26/pack-indexing19.C
+@@ -0,0 +1,32 @@
++// PR c++/122169
++// { dg-do compile { target c++26 } }
++
++template<class T, class U>
++concept same_as = __is_same(T, U);
++
++template<class... Ts>
++void f() {
++  using T = Ts...[0];
++  static_assert(same_as<const T, const int>);
++
++  []<int I>() {
++    using U = Ts...[I];
++    static_assert(same_as<const U, const int>);
++  }.template operator()<0>();
++}
++
++template void f<int>();
++
++
++template<class... Ts>
++void g() {
++  using T = Ts...[0];
++  static_assert(same_as<const T, const volatile int>);
++
++  []<int I>() {
++    using U = Ts...[I];
++    static_assert(same_as<const U, const volatile int>);
++  }.template operator()<0>();
++}
++
++template void g<volatile int>();
+-- 
+2.43.7
+
+

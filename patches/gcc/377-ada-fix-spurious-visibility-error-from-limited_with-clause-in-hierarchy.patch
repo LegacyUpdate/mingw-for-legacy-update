@@ -1,0 +1,162 @@
+From 86e5c7dbf45327ca7b73175b9ebc281652c8e89b Mon Sep 17 00:00:00 2001
+From: Eric Botcazou <ebotcazou@adacore.com>
+Date: Fri, 30 Jan 2026 11:58:58 +0100
+Subject: [PATCH] Ada: Fix spurious visibility error from limited_with clause
+ in hierarchy
+
+The problem is that the compiler installs the limited view of a package that
+is already installed by the virtue of being an ancestor of the main unit.
+
+gcc/ada/
+	PR ada/123867
+	* sem_ch10.adb (Analyze_Compilation_Unit): Output info message
+	when -gnatdi is specified.
+	(Install_Parents): Likewise.  Set the Is_Visible_Lib_Unit flag
+	on the unit.
+	(Install_Private_With_Clauses): Do not output info message here.
+	(Remove_Parents): Output info message when -gnatdi is specified
+	and clear the Is_Visible_Lib_Unit flag on the unit.
+
+gcc/testsuite/
+	* gnat.dg/specs/limited_with3.ads: New test.
+	* gnat.dg/specs/limited_with3-child.ads: New helper.
+	* gnat.dg/specs/limited_with3-child-grandchild.ads: Likewise.
+	* gnat.dg/specs/limited_with3-child-grandchild-grandgrandchild.ads:
+	Likewise.
+---
+ gcc/ada/sem_ch10.adb                          | 44 ++++++++++++++++---
+ ...with3-child-grandchild-grandgrandchild.ads |  5 +++
+ .../specs/limited_with3-child-grandchild.ads  |  5 +++
+ .../gnat.dg/specs/limited_with3-child.ads     |  7 +++
+ gcc/testsuite/gnat.dg/specs/limited_with3.ads |  4 ++
+ 5 files changed, 59 insertions(+), 6 deletions(-)
+ create mode 100644 gcc/testsuite/gnat.dg/specs/limited_with3-child-grandchild-grandgrandchild.ads
+ create mode 100644 gcc/testsuite/gnat.dg/specs/limited_with3-child-grandchild.ads
+ create mode 100644 gcc/testsuite/gnat.dg/specs/limited_with3-child.ads
+ create mode 100644 gcc/testsuite/gnat.dg/specs/limited_with3.ads
+
+diff --git a/gcc/ada/sem_ch10.adb b/gcc/ada/sem_ch10.adb
+index e3d9925ab581..3365eebfb5ad 100644
+--- a/gcc/ada/sem_ch10.adb
++++ b/gcc/ada/sem_ch10.adb
+@@ -1146,6 +1146,20 @@ package body Sem_Ch10 is
+ 
+       --  Now analyze the unit (package, subprogram spec, body) itself
+ 
++      if Debug_Flag_I then
++         if Nkind (Unit_Node) in N_Package_Declaration
++                               | N_Package_Renaming_Declaration
++                               | N_Subprogram_Declaration
++                               | N_Generic_Declaration
++           or else (Nkind (Unit_Node) = N_Subprogram_Body
++                     and then Acts_As_Spec (Unit_Node))
++         then
++            Write_Str ("install unit ");
++            Write_Name (Chars (Defining_Entity (Unit_Node)));
++            Write_Eol;
++         end if;
++      end if;
++
+       Analyze (Unit_Node);
+ 
+       if Warn_On_Redundant_Constructs then
+@@ -4684,6 +4698,18 @@ package body Sem_Ch10 is
+          end if;
+       end if;
+ 
++      if Debug_Flag_I then
++         Write_Str ("install parent unit ");
++         Write_Name (Chars (P_Name));
++         Write_Eol;
++      end if;
++
++      --  Skip this for predefined units because of the rtsfind mechanism
++
++      if not In_Predefined_Unit (P_Name) then
++         Set_Is_Visible_Lib_Unit (P_Name);
++      end if;
++
+       --  This is the recursive call that ensures all parents are loaded
+ 
+       if Is_Child_Spec (P) then
+@@ -4756,12 +4782,6 @@ package body Sem_Ch10 is
+       Item   : Node_Id;
+ 
+    begin
+-      if Debug_Flag_I then
+-         Write_Str ("install private with clauses of ");
+-         Write_Name (Chars (P));
+-         Write_Eol;
+-      end if;
+-
+       if Nkind (Parent (Decl)) = N_Compilation_Unit then
+          Item := First (Context_Items (Parent (Decl)));
+          while Present (Item) loop
+@@ -7324,6 +7344,18 @@ package body Sem_Ch10 is
+          --  in the reverse order of their installation.
+ 
+          Remove_Parents (P);
++
++         if Debug_Flag_I then
++            Write_Str ("remove parent unit ");
++            Write_Name (Chars (P_Name));
++            Write_Eol;
++         end if;
++
++         --  Skip this for predefined units because of the rtsfind mechanism
++
++         if not In_Predefined_Unit (P_Name) then
++            Set_Is_Visible_Lib_Unit (P_Name, False);
++         end if;
+       end if;
+    end Remove_Parents;
+ 
+diff --git a/gcc/testsuite/gnat.dg/specs/limited_with3-child-grandchild-grandgrandchild.ads b/gcc/testsuite/gnat.dg/specs/limited_with3-child-grandchild-grandgrandchild.ads
+new file mode 100644
+index 000000000000..fb862cd4b911
+--- /dev/null
++++ b/gcc/testsuite/gnat.dg/specs/limited_with3-child-grandchild-grandgrandchild.ads
+@@ -0,0 +1,5 @@
++package Limited_With3.Child.Grandchild.Grandgrandchild is
++
++  function F return T is (Three);
++
++end Limited_With3.Child.Grandchild.Grandgrandchild;
+diff --git a/gcc/testsuite/gnat.dg/specs/limited_with3-child-grandchild.ads b/gcc/testsuite/gnat.dg/specs/limited_with3-child-grandchild.ads
+new file mode 100644
+index 000000000000..270c6a7ef147
+--- /dev/null
++++ b/gcc/testsuite/gnat.dg/specs/limited_with3-child-grandchild.ads
+@@ -0,0 +1,5 @@
++package Limited_With3.Child.Grandchild is
++
++  function F return T is (Two);
++
++end Limited_With3.Child.Grandchild;
+diff --git a/gcc/testsuite/gnat.dg/specs/limited_with3-child.ads b/gcc/testsuite/gnat.dg/specs/limited_with3-child.ads
+new file mode 100644
+index 000000000000..71452f561516
+--- /dev/null
++++ b/gcc/testsuite/gnat.dg/specs/limited_with3-child.ads
+@@ -0,0 +1,7 @@
++package Limited_With3.Child is
++
++  type T is (One, Two, Three);
++
++  function F return T is (One);
++
++end Limited_With3.Child;
+diff --git a/gcc/testsuite/gnat.dg/specs/limited_with3.ads b/gcc/testsuite/gnat.dg/specs/limited_with3.ads
+new file mode 100644
+index 000000000000..13597635da58
+--- /dev/null
++++ b/gcc/testsuite/gnat.dg/specs/limited_with3.ads
+@@ -0,0 +1,4 @@
++limited with Limited_With3.Child;
++
++package Limited_With3 is
++end Limited_With3;
+-- 
+2.43.7
+
+

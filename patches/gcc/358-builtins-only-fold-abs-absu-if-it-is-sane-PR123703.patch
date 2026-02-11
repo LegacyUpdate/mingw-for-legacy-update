@@ -1,0 +1,63 @@
+From 33a0437ba5984e230488daf67207354172bed3ae Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Fri, 23 Jan 2026 10:37:46 +0100
+Subject: [PATCH] builtins: Only fold abs/absu if it is sane [PR123703]
+
+To my surprise the C FE marks as builtin even a declaration which has incorrect
+return type.  Normally gimple_builtin_call_types_compatible_p etc. will
+just punt in cases where the return type is wrong, but builtins.cc doesn't
+use that.  For e.g. the mathfn builtins like sqrt and many others, it will
+punt on weird return types, but for fold_builtin_abs it doesn't and happily
+tests TYPE_UNSIGNED on it and fold_convert the integral operand to it etc.,
+which ICEs if the return type is aggregate.
+
+The following patch fixes it by punting if type is not integral.
+
+2026-01-23  Jakub Jelinek  <jakub@redhat.com>
+
+	PR middle-end/123703
+	* builtins.cc (fold_builtin_abs): Return NULL_TREE if type is not
+	integral.
+
+	* gcc.c-torture/compile/pr123703.c: New test.
+
+(cherry picked from commit 0ba37a153fc86ca1ea9a243d6ea8c60e8de70e08)
+---
+ gcc/builtins.cc                                |  2 +-
+ gcc/testsuite/gcc.c-torture/compile/pr123703.c | 10 ++++++++++
+ 2 files changed, 11 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/gcc.c-torture/compile/pr123703.c
+
+diff --git a/gcc/builtins.cc b/gcc/builtins.cc
+index a387863558bc..50a59755be1a 100644
+--- a/gcc/builtins.cc
++++ b/gcc/builtins.cc
+@@ -9522,7 +9522,7 @@ fold_builtin_fabs (location_t loc, tree arg, tree type)
+ static tree
+ fold_builtin_abs (location_t loc, tree arg, tree type)
+ {
+-  if (!validate_arg (arg, INTEGER_TYPE))
++  if (!validate_arg (arg, INTEGER_TYPE) || !INTEGRAL_TYPE_P (type))
+     return NULL_TREE;
+ 
+   if (TYPE_UNSIGNED (type))
+diff --git a/gcc/testsuite/gcc.c-torture/compile/pr123703.c b/gcc/testsuite/gcc.c-torture/compile/pr123703.c
+new file mode 100644
+index 000000000000..a7f68a6147bc
+--- /dev/null
++++ b/gcc/testsuite/gcc.c-torture/compile/pr123703.c
+@@ -0,0 +1,10 @@
++/* PR middle-end/123703 */
++
++struct S { int a; };
++struct S abs (int);
++
++struct S
++bar (int j)
++{
++  return abs (j);
++}
+-- 
+2.43.7
+
+

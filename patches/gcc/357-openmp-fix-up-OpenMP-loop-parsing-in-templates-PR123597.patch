@@ -1,0 +1,119 @@
+From 786def4bda52096c50b4294d402c33bc41da9807 Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Fri, 23 Jan 2026 08:37:36 +0100
+Subject: [PATCH] openmp: Fix up OpenMP loop parsing in templates [PR123597]
+
+The following testcase is miscompiled, because since r14-3490
+because in this case the sum variable is moved out of the loop's
+body into an outer BIND_EXPR and becomes shared, so from what
+has been previously private can result in data races.
+
+In the C++ FE, BIND_EXPRs are mostly created for 2 reasons.
+One is when something calls c_build_bind_expr and that function
+creates a BIND_EXPR because there are decls to attach to it,
+this happens for !processing_template_decl e.g. from do_poplevel
+or poplevel (the latter for sk_cleanup which I think don't appear
+if processing_template_decl).  And the other case are BIND_EXPRs
+created by begin_compound_stmt if processing_template_decl, those
+don't stand for the need to collect decls inside of it, but to
+say the source had {} at this point, take it into account when
+instantiating the template.
+
+Now, on the testcase when parsing the body of the inner collapsed
+loop we call cp_parser_statement -> cp_parser_compound_statement
+-> begin_compound_statement because the body is surrounded by {}s
+and that returns a BIND_EXPR with the processing_template_decl
+meaning, the source had {} here.
+But the r14-3490 code then calls substitute_in_tree in a loop, trying
+to replace placeholders it created with the parsed bodies.  And while
+doing that, considers all BIND_EXPRs with !BIND_EXPR_VARS redundant
+and just throws them away.
+They are redundant when !processing_template_decl, but when
+processing_template_decl they I think always have !BIND_EXPR_VARS,
+the vars inside of such bodies aren't pushed into any BIND_EXPR yet,
+they just have a DECL_EXPR somewhere, and the pushing of the instantiated
+copies of those will be done only during instantiation.
+
+The following patch fixes it by not treating BIND_EXPRs with !BIND_EXPR_VARS
+as redundant if processing_template_decl, it is fine to merge two
+BIND_EXPRs with nothing in between them.
+
+2026-01-23  Jakub Jelinek  <jakub@redhat.com>
+
+	PR c++/123597
+	* parser.cc (substitute_in_tree_walker, substitute_in_tree): Don't
+	consider BIND_EXPRs with !BIND_EXPR_VARS redundant if
+	processing_template_decl.
+
+	* g++.dg/gomp/pr123597.C: New test.
+
+(cherry picked from commit 1ae53b20c2474c28da13835719cceeee0702c966)
+---
+ gcc/cp/parser.cc                     | 10 +++++++++-
+ gcc/testsuite/g++.dg/gomp/pr123597.C | 25 +++++++++++++++++++++++++
+ 2 files changed, 34 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/g++.dg/gomp/pr123597.C
+
+diff --git a/gcc/cp/parser.cc b/gcc/cp/parser.cc
+index 2839e80f06a2..317901bb1691 100644
+--- a/gcc/cp/parser.cc
++++ b/gcc/cp/parser.cc
+@@ -46898,6 +46898,9 @@ substitute_in_tree_walker (tree *tp, int *walk_subtrees ATTRIBUTE_UNUSED,
+   else if (TREE_CODE (*tp) == BIND_EXPR
+ 	   && BIND_EXPR_BODY (*tp) == sit->orig
+ 	   && !BIND_EXPR_VARS (*tp)
++	   /* BIND_EXPRs in templates likely have NULL BIND_EXPR_VARS,
++	      are created by begin_compound_stmt and are not redundant.  */
++	   && !processing_template_decl
+ 	   && (sit->flatten || TREE_CODE (sit->repl) == BIND_EXPR))
+     {
+       *tp = sit->repl;
+@@ -46942,7 +46945,12 @@ substitute_in_tree (tree *context, tree orig, tree repl, bool flatten)
+   struct sit_data data;
+ 
+   gcc_assert (*context && orig && repl);
+-  if (TREE_CODE (repl) == BIND_EXPR && !BIND_EXPR_VARS (repl))
++  /* Look through redundant BIND_EXPR.  BIND_EXPRs in templates likely have
++     NULL BIND_EXPR_VARS, are created by begin_compound_stmt and are not
++     redundant.  */
++  if (TREE_CODE (repl) == BIND_EXPR
++      && !BIND_EXPR_VARS (repl)
++      && !processing_template_decl)
+     repl = BIND_EXPR_BODY (repl);
+   data.orig = orig;
+   data.repl = repl;
+diff --git a/gcc/testsuite/g++.dg/gomp/pr123597.C b/gcc/testsuite/g++.dg/gomp/pr123597.C
+new file mode 100644
+index 000000000000..9f8417c029a6
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/gomp/pr123597.C
+@@ -0,0 +1,25 @@
++// PR c++/123597
++// { dg-do compile }
++// { dg-additional-options "-fdump-tree-gimple" }
++// { dg-final { scan-tree-dump-not " shared\\\(sum\\\)" "gimple" } }
++
++template <typename T>
++void
++foo (T *x)
++{
++  #pragma omp teams distribute parallel for collapse(2)
++  for (long i = 0; i < 5; i++)
++    for (long j = 0; j < 5; j++)
++      {
++        T sum = 0;
++        for (long k = 0; k < 5; k++)
++          sum += 2;
++        x[i + 5 * j] = sum;
++      }
++}
++
++void
++bar (int *x)
++{
++  foo (x);
++}
+-- 
+2.43.7
+
+

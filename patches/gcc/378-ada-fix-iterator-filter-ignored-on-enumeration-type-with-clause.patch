@@ -1,0 +1,101 @@
+From 8a9f2bd7abb21d12df688bf250e1f30491adbb1f Mon Sep 17 00:00:00 2001
+From: Eric Botcazou <ebotcazou@adacore.com>
+Date: Sun, 1 Feb 2026 20:18:41 +0100
+Subject: [PATCH] Ada: Fix iterator filter ignored on enumeration type with
+ clause
+
+The problem comes from an oversight in Expand_N_Loop_Statement.
+
+gcc/ada/
+	PR ada/121316
+	* exp_ch5.adb (Expand_Iterator_Loop_Over_Array): Minor tweak.
+	(Expand_Iterator_Loop_Over_Container): Likewise.
+	(Expand_N_Loop_Statement): Use Statements (N) throughout.
+
+gcc/testsuite/
+	* gnat.dg/iter7.adb: New test.
+
+Co-authored-by: Liam Powell <liam@liampwll.com>
+---
+ gcc/ada/exp_ch5.adb             | 13 ++++++++-----
+ gcc/testsuite/gnat.dg/iter7.adb | 15 +++++++++++++++
+ 2 files changed, 23 insertions(+), 5 deletions(-)
+ create mode 100644 gcc/testsuite/gnat.dg/iter7.adb
+
+diff --git a/gcc/ada/exp_ch5.adb b/gcc/ada/exp_ch5.adb
+index bdd7d19dcc0e..07f6ed48e58f 100644
+--- a/gcc/ada/exp_ch5.adb
++++ b/gcc/ada/exp_ch5.adb
+@@ -4965,7 +4965,10 @@ package body Exp_Ch5 is
+       Array_Dim  : constant Pos        := Number_Dimensions (Array_Typ);
+       Id         : constant Entity_Id  := Defining_Identifier (I_Spec);
+       Loc        : constant Source_Ptr := Sloc (Isc);
+-      Stats      : List_Id    := Statements (N);
++
++      Stats : List_Id := Statements (N);
++      --  Maybe wrapped in a conditional if a filter is present
++
+       Core_Loop  : Node_Id;
+       Dim1       : Int;
+       Ind_Comp   : Node_Id;
+@@ -5255,7 +5258,7 @@ package body Exp_Ch5 is
+       Id_Kind  : constant Entity_Kind := Ekind (Id);
+       Loc      : constant Source_Ptr  := Sloc (N);
+ 
+-      Stats    : List_Id     := Statements (N);
++      Stats : List_Id := Statements (N);
+       --  Maybe wrapped in a conditional if a filter is present
+ 
+       Cursor         : Entity_Id;
+@@ -5776,7 +5779,7 @@ package body Exp_Ch5 is
+             Loop_Id : constant Entity_Id := Defining_Identifier (LPS);
+             Ltype   : constant Entity_Id := Etype (Loop_Id);
+             Btype   : constant Entity_Id := Base_Type (Ltype);
+-            Stats   : constant List_Id   := Statements (N);
++
+             Expr    : Node_Id;
+             Decls   : List_Id;
+             New_Id  : Entity_Id;
+@@ -5797,7 +5800,7 @@ package body Exp_Ch5 is
+                Set_Statements (N,
+                   New_List (Make_If_Statement (Loc,
+                     Condition => Iterator_Filter (LPS),
+-                    Then_Statements => Stats)));
++                    Then_Statements => Statements (N))));
+                Analyze_List (Statements (N));
+             end if;
+ 
+@@ -5917,7 +5920,7 @@ package body Exp_Ch5 is
+                        Declarations => Decls,
+                        Handled_Statement_Sequence =>
+                          Make_Handled_Sequence_Of_Statements (Loc,
+-                           Statements => Stats))),
++                           Statements => Statements (N)))),
+ 
+                    End_Label => End_Label (N)));
+ 
+diff --git a/gcc/testsuite/gnat.dg/iter7.adb b/gcc/testsuite/gnat.dg/iter7.adb
+new file mode 100644
+index 000000000000..a983603fb8a8
+--- /dev/null
++++ b/gcc/testsuite/gnat.dg/iter7.adb
+@@ -0,0 +1,15 @@
++--  { dg-do run }
++--  { dg-options "-gnat2022" }
++
++procedure Iter7 is
++
++   type Enum is (A, B, C);
++   for Enum use (A => 1, B => 2, C => 3);
++
++   Enum_Filter : array (Enum) of Boolean := (others => False);
++
++begin
++   for F in Enum when Enum_Filter (F) loop
++      raise Program_Error;
++   end loop;
++end;
+-- 
+2.43.7
+
+

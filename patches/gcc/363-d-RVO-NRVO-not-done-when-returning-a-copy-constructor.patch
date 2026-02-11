@@ -1,0 +1,173 @@
+From 5e31b24e4748584c8bf6db1644a23653e96daa42 Mon Sep 17 00:00:00 2001
+From: Iain Buclaw <ibuclaw@gdcproject.org>
+Date: Wed, 28 Jan 2026 12:45:26 +0100
+Subject: [PATCH] d: RVO/NRVO not done when returning a copy constructor
+
+RVO was already being done when returning a constructor call via a
+temporary, which in the front-end AST looks like:
+
+    return S.this((__tmp = {}, &__tmp), args...);
+
+But this was not being done for copy construction calls, which instead
+looks like:
+
+    return __copytmp = {}, S.this(&__copytmp, V(1).s), __copytmp;
+
+This pattern is now matched and the temporary gets set up as a
+DECL_VALUE_EXPR of the RESULT_DECL.
+
+	PR d/123422
+
+gcc/d/ChangeLog:
+
+	* expr.cc (ExprVisitor::visit (ArrayLiteralExp *)): Don't add
+	TARGET_EXPR around constructor.
+	* toir.cc (IRVisitor::visit (ReturnStatement *)): Recognize more
+	patterns for return value optimization.
+
+gcc/testsuite/ChangeLog:
+
+	* gdc.dg/torture/pr123422.d: New test.
+
+(cherry picked from commit 92f976fc2a87a867f70921b577f7c79acd214eaf)
+---
+ gcc/d/expr.cc                           |  2 +-
+ gcc/d/toir.cc                           | 57 +++++++++++++++++--------
+ gcc/testsuite/gdc.dg/torture/pr123422.d | 25 +++++++++++
+ 3 files changed, 66 insertions(+), 18 deletions(-)
+ create mode 100644 gcc/testsuite/gdc.dg/torture/pr123422.d
+
+diff --git a/gcc/d/expr.cc b/gcc/d/expr.cc
+index 2b466a68cffb..e8b7d4824ef3 100644
+--- a/gcc/d/expr.cc
++++ b/gcc/d/expr.cc
+@@ -2709,7 +2709,7 @@ public:
+ 	gcc_assert (tb->ty == TY::Tarray);
+ 	ctor = force_target_expr (ctor);
+ 	ctor = d_array_value (type, size_int (e->elements->length),
+-			      build_address (force_target_expr (ctor)));
++			      build_address (ctor));
+ 	this->result_ = compound_expr (saved_elems, ctor);
+       }
+     else
+diff --git a/gcc/d/toir.cc b/gcc/d/toir.cc
+index 427a662eeda3..2dc7e3ff2d61 100644
+--- a/gcc/d/toir.cc
++++ b/gcc/d/toir.cc
+@@ -1022,41 +1022,64 @@ public:
+ 	/* Detect a call to a constructor function, or if returning a struct
+ 	   literal, write result directly into the return value.  */
+ 	StructLiteralExp *sle = NULL;
++	DeclarationExp *de = NULL;
++	VarExp *ve = NULL;
+ 	bool using_rvo_p = false;
+ 
+ 	if (DotVarExp *dve = (s->exp->isCallExp ()
+ 			      ? s->exp->isCallExp ()->e1->isDotVarExp ()
+ 			      : NULL))
+ 	  {
++	    /* Look for `var.__ctor(copytmp = {}, &copytmp)'  */
+ 	    if (dve->var->isCtorDeclaration ())
+ 	      {
+ 		if (CommaExp *ce = dve->e1->isCommaExp ())
+ 		  {
+-		    /* Temporary initialized inside a return expression, and
+-		       used as the return value.  Replace it with the hidden
+-			reference to allow RVO return.  */
+-		    DeclarationExp *de = ce->e1->isDeclarationExp ();
+-		    VarExp *ve = ce->e2->isVarExp ();
+-		    if (de != NULL && ve != NULL
+-			&& ve->var == de->declaration
+-			&& ve->var->storage_class & STCtemp)
+-		      {
+-			tree var = get_symbol_decl (ve->var);
+-			TREE_ADDRESSABLE (var) = 1;
+-			SET_DECL_VALUE_EXPR (var, decl);
+-			DECL_HAS_VALUE_EXPR_P (var) = 1;
+-			SET_DECL_LANG_NRVO (var, this->func_->shidden);
+-			using_rvo_p = true;
+-		      }
++		    de = ce->e1->isDeclarationExp ();
++		    ve = ce->e2->isVarExp ();
+ 		  }
+ 		else
+ 		  sle = dve->e1->isStructLiteralExp ();
+ 	      }
+ 	  }
++	else if (CommaExp *ce1 = s->exp->isCommaExp ())
++	  {
++	    /* Look for `copytmp = {}, copytmp.__ctor(), copytmp'  */
++	    if (CommaExp *ce2 = ce1->e2->isCommaExp ())
++	      {
++		DotVarExp *dve = ce2->e1->isCallExp ()
++		  ? ce2->e1->isCallExp ()->e1->isDotVarExp () : NULL;
++
++		if (dve && dve->var->isCtorDeclaration ())
++		  {
++		    de = ce1->e1->isDeclarationExp ();
++		    ve = ce2->e2->isVarExp ();
++		  }
++	      }
++	    else
++	      {
++		de = ce1->e1->isDeclarationExp ();
++		ve = ce1->e2->isVarExp ();
++	      }
++	  }
+ 	else
+ 	  sle = s->exp->isStructLiteralExp ();
+ 
+-	if (sle != NULL)
++	if (de != NULL && ve != NULL
++	    && ve->var == de->declaration
++	    && ve->var->storage_class & STCtemp)
++	  {
++	    /* Temporary initialized inside a return expression, and
++	       used as the return value.  Replace it with the hidden
++	       reference to allow RVO return.  */
++	    tree var = get_symbol_decl (ve->var);
++	    TREE_ADDRESSABLE (var) = 1;
++	    SET_DECL_VALUE_EXPR (var, decl);
++	    DECL_HAS_VALUE_EXPR_P (var) = 1;
++	    SET_DECL_LANG_NRVO (var, this->func_->shidden);
++	    using_rvo_p = true;
++	  }
++	else if (sle != NULL)
+ 	  {
+ 	    StructDeclaration *sd = type->baseElemOf ()->isTypeStruct ()->sym;
+ 	    sle->sym = build_address (this->func_->shidden);
+diff --git a/gcc/testsuite/gdc.dg/torture/pr123422.d b/gcc/testsuite/gdc.dg/torture/pr123422.d
+new file mode 100644
+index 000000000000..468a953af9b0
+--- /dev/null
++++ b/gcc/testsuite/gdc.dg/torture/pr123422.d
+@@ -0,0 +1,25 @@
++// { dg-do run }
++// { dg-skip-if "needs gcc/config.d" { ! d_runtime } }
++struct S123422
++{
++    S123422* ptr;
++    this(int) { ptr = &this; }
++    this(ref inout S123422) { ptr = &this; }
++}
++
++struct V123422
++{
++    S123422 s;
++    this(int) { s = S123422(1); }
++}
++
++S123422 foo()
++{
++    return V123422(1).s;
++}
++
++void main()
++{
++    S123422 s = foo();
++    assert(&s == s.ptr);
++}
+-- 
+2.43.7
+
+

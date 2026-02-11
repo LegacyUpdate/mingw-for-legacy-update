@@ -1,0 +1,83 @@
+From 41ea5419a939c551d1cad3d814940700cc8debcc Mon Sep 17 00:00:00 2001
+From: Kyrylo Tkachov <ktkachov@nvidia.com>
+Date: Thu, 5 Feb 2026 06:48:34 -0800
+Subject: [PATCH] aarch64: Adjust PR117048 scan assembly test
+
+This test needed adjustment for the changes from PR123584.
+Pushing to trunk.
+
+Signed-off-by: Kyrylo Tkachov <ktkachov@nvidia.com>
+
+gcc/testsuite/
+
+	PR target/117048
+	PR target/123584
+	* gcc.target/aarch64/simd/pr117048.c: Scan for # in assembly immediate.
+
+(cherry picked from commit 216bda11307c98904db164e1db1f198ceea53db1)
+---
+ gcc/testsuite/gcc.target/aarch64/simd/pr117048.c | 12 ++++++------
+ 1 file changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/gcc/testsuite/gcc.target/aarch64/simd/pr117048.c b/gcc/testsuite/gcc.target/aarch64/simd/pr117048.c
+index 621c0f46fc4b..0e8e233e39c7 100644
+--- a/gcc/testsuite/gcc.target/aarch64/simd/pr117048.c
++++ b/gcc/testsuite/gcc.target/aarch64/simd/pr117048.c
+@@ -8,7 +8,7 @@
+ 
+ /*
+ ** func_shl_eor:
+-**	xar	v0\.2d, v([0-9]+)\.2d, v([0-9]+)\.2d, 63
++**	xar	v0\.2d, v([0-9]+)\.2d, v([0-9]+)\.2d, #63
+ **	ret 
+ */
+ uint64x2_t
+@@ -19,7 +19,7 @@ func_shl_eor (uint64x2_t a, uint64x2_t b) {
+ 
+ /*
+ ** func_add_eor:
+-**	xar	v0\.2d, v([0-9]+)\.2d, v([0-9]+)\.2d, 63
++**	xar	v0\.2d, v([0-9]+)\.2d, v([0-9]+)\.2d, #63
+ **	ret 
+ */
+ uint64x2_t
+@@ -30,7 +30,7 @@ func_add_eor (uint64x2_t a, uint64x2_t b) {
+ 
+ /*
+ ** func_shl_orr:
+-**	xar	v0\.2d, v([0-9]+)\.2d, v([0-9]+)\.2d, 63
++**	xar	v0\.2d, v([0-9]+)\.2d, v([0-9]+)\.2d, #63
+ **	ret 
+ */
+ uint64x2_t
+@@ -41,7 +41,7 @@ func_shl_orr (uint64x2_t a, uint64x2_t b) {
+ 
+ /*
+ ** func_add_orr:
+-**	xar	v0\.2d, v([0-9]+)\.2d, v([0-9]+)\.2d, 63
++**	xar	v0\.2d, v([0-9]+)\.2d, v([0-9]+)\.2d, #63
+ **	ret 
+ */
+ uint64x2_t
+@@ -52,7 +52,7 @@ func_add_orr (uint64x2_t a, uint64x2_t b) {
+ 
+ /*
+ ** func_shl_add:
+-**	xar	v0\.2d, v([0-9]+)\.2d, v([0-9]+)\.2d, 63
++**	xar	v0\.2d, v([0-9]+)\.2d, v([0-9]+)\.2d, #63
+ **	ret 
+ */
+ uint64x2_t
+@@ -63,7 +63,7 @@ func_shl_add (uint64x2_t a, uint64x2_t b) {
+ 
+ /*
+ ** func_add_add:
+-**	xar	v0\.2d, v([0-9]+)\.2d, v([0-9]+)\.2d, 63
++**	xar	v0\.2d, v([0-9]+)\.2d, v([0-9]+)\.2d, #63
+ **	ret 
+ */
+ uint64x2_t
+-- 
+2.43.7
+
+

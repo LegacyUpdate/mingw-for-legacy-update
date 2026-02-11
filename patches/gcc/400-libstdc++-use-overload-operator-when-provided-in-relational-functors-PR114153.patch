@@ -1,0 +1,771 @@
+From aa01b849ab8589906fbcf82b0d49d4315f8743b8 Mon Sep 17 00:00:00 2001
+From: =?utf8?q?Tomasz=20Kami=C5=84ski?= <tkaminsk@redhat.com>
+Date: Fri, 16 Jan 2026 14:01:53 +0100
+Subject: [PATCH] libstdc++: Use overload operator<=> when provided in
+ relational functors [PR114153]
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf8
+Content-Transfer-Encoding: 8bit
+
+The implementation of less<> did not consider the possibility of t < u being
+rewritten from overloaded operator<=>. This lead to situation when for t,u that:
+* provide overload operator<=>, such that (t < u) is rewritten to (t <=> u) < 0,
+* are convertible to pointers,
+the expression std::less<>(t, u) would incorrectly result in call of
+std::less<void*> on values converted to the pointers, instead of t < u.
+The similar issues also occurred for greater<>, less_equal<>, greater_equal<>,
+their range equivalents, and in three_way_compare for heterogeneous calls.
+
+This patch addresses above, by also checking for free-functions and member
+overloads of operator<=>, before falling back to pointer comparison. We do
+not put any constraints on the return type of selected operator, in particular
+in being one of the standard defined comparison categories, as the language
+does not put any restriction of returned type, and if (t <=> u) is well
+formed, (t op u) is interpreted as (t <=> u) op 0. If that later expression
+is ill-formed, the expression using op also is (see included tests).
+
+The relational operator rewrites try both order of arguments, t < u,
+can be rewritten into operator<=>(t, u) < 0 or 0 < operator<=>(u, t), it
+means that we need to test both operator<=>(T, U) and operator<=>(U, T)
+if T and U are not the same types. This is now extracted into
+__not_overloaded_spaceship helper concept, placed in <concepts>, to
+avoid extending set of includes.
+
+The compare_three_way functor defined in compare, already considers overloaded
+operator<=>, however it does not consider reversed candidates, leading
+to situation in which t <=> u results in 0 <=> operator<=>(u, t), while
+compare_three_way{}(t, u) uses pointer comparison. This is also addressed by
+using __not_overloaded_spaceship, that check both order of arguments.
+
+Finally, as operator<=> is introduced in C++20, for std::less(_equal)?<>,
+std::greater(_equal)?<>, we use provide separate __ptr_cmp implementation
+in that mode, that relies on use of requires expression. We use a nested
+requires clause to guarantee short-circuiting of their evaluation.
+The operator() of aforementioned functors is reworked to use if constexpr,
+in all standard modes (as we allow is as extension), eliminating the need
+for _S_cmp function.
+
+	PR libstdc++/114153
+
+libstdc++-v3/ChangeLog:
+
+	* include/bits/ranges_cmp.h (__detail::__less_builtin_ptr_cmp):
+	Add __not_overloaded_spaceship spaceship check.
+	* include/bits/stl_function.h (greater<void>::operator())
+	(less<void>::operator(), greater_equal<void>::operator())
+	(less_equal<void>::operator()): Implement using if constexpr.
+	(greater<void>::__S_cmp, less<void>::__S_cmp)
+	(greater_equal<void>::__ptr_comp, less_equal<void>::S_cmp):
+	Remove.
+	(greater<void>::__ptr_cmp, less<void>::__ptr_cmp)
+	(greater_equal<void>::__ptr_comp, less_equal<void>::ptr_cmp): Change
+	tostatic constexpr variable. Define in terms of requires expressions
+	and __not_overloaded_spaceship check.
+	* include/std/concepts: (__detail::__not_overloaded_spaceship):
+	Define.
+	* libsupc++/compare: (__detail::__3way_builtin_ptr_cmp): Use
+	__not_overloaded_spaceship concept.
+	* testsuite/20_util/function_objects/comparisons_pointer_spaceship.cc: New test.
+
+Reviewed-by: Jonathan Wakely <jwakely@redhat.com>
+Signed-off-by: Tomasz KamiÅski <tkaminsk@redhat.com>
+(cherry picked from commit 8fad43b7850a99b32c48570fc2a3d8ae5a76542a)
+---
+ libstdc++-v3/include/bits/ranges_cmp.h        |   7 +-
+ libstdc++-v3/include/bits/stl_function.h      | 183 ++++++----
+ libstdc++-v3/include/std/concepts             |  16 +
+ libstdc++-v3/libsupc++/compare                |   5 +-
+ .../comparisons_pointer_spaceship.cc          | 336 ++++++++++++++++++
+ 5 files changed, 468 insertions(+), 79 deletions(-)
+ create mode 100644 libstdc++-v3/testsuite/20_util/function_objects/comparisons_pointer_spaceship.cc
+
+diff --git a/libstdc++-v3/include/bits/ranges_cmp.h b/libstdc++-v3/include/bits/ranges_cmp.h
+index cd5f7b8b37a2..c571ba94c013 100644
+--- a/libstdc++-v3/include/bits/ranges_cmp.h
++++ b/libstdc++-v3/include/bits/ranges_cmp.h
+@@ -68,10 +68,11 @@ namespace ranges
+ 	= requires (_Tp&& __t, _Up&& __u) { { __t < __u } -> same_as<bool>; }
+ 	  && convertible_to<_Tp, const volatile void*>
+ 	  && convertible_to<_Up, const volatile void*>
+-	  && (! requires(_Tp&& __t, _Up&& __u)
++	  && ! requires(_Tp&& __t, _Up&& __u)
+ 	      { operator<(std::forward<_Tp>(__t), std::forward<_Up>(__u)); }
+-	      && ! requires(_Tp&& __t, _Up&& __u)
+-	      { std::forward<_Tp>(__t).operator<(std::forward<_Up>(__u)); });
++	  && ! requires(_Tp&& __t, _Up&& __u)
++	      { std::forward<_Tp>(__t).operator<(std::forward<_Up>(__u)); }
++	  && std::__detail::__not_overloaded_spaceship<_Tp, _Up>;
+   } // namespace __detail
+ 
+   // [range.cmp] Concept-constrained comparisons
+diff --git a/libstdc++-v3/include/bits/stl_function.h b/libstdc++-v3/include/bits/stl_function.h
+index 136fd01c9847..0f7fe4e70c45 100644
+--- a/libstdc++-v3/include/bits/stl_function.h
++++ b/libstdc++-v3/include/bits/stl_function.h
+@@ -59,6 +59,9 @@
+ #if __cplusplus > 201103L
+ #include <bits/move.h>
+ #endif
++#if __cplusplus >= 202002L
++#include <concepts>
++#endif
+ 
+ namespace std _GLIBCXX_VISIBILITY(default)
+ {
+@@ -525,8 +528,15 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
+ 	noexcept(noexcept(std::forward<_Tp>(__t) > std::forward<_Up>(__u)))
+ 	-> decltype(std::forward<_Tp>(__t) > std::forward<_Up>(__u))
+ 	{
+-	  return _S_cmp(std::forward<_Tp>(__t), std::forward<_Up>(__u),
+-			__ptr_cmp<_Tp, _Up>{});
++#pragma GCC diagnostic push
++#pragma GCC diagnostic ignored "-Wc++17-extensions" // if constexpr
++	  if constexpr (__ptr_cmp<_Tp, _Up>)
++	    return greater<const volatile void*>{}(
++	      static_cast<const volatile void*>(std::forward<_Tp>(__t)),
++	      static_cast<const volatile void*>(std::forward<_Up>(__u)));
++	  else
++	    return std::forward<_Tp>(__t) > std::forward<_Up>(__u);
++#pragma GCC diagnostic pop
+ 	}
+ 
+       template<typename _Tp, typename _Up>
+@@ -537,20 +547,20 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
+       typedef __is_transparent is_transparent;
+ 
+     private:
+-      template <typename _Tp, typename _Up>
+-	static constexpr decltype(auto)
+-	_S_cmp(_Tp&& __t, _Up&& __u, false_type)
+-	{ return std::forward<_Tp>(__t) > std::forward<_Up>(__u); }
+-
+-      template <typename _Tp, typename _Up>
+-	static constexpr bool
+-	_S_cmp(_Tp&& __t, _Up&& __u, true_type) noexcept
++#if __cplusplus >= 202002L
++      template<typename _Tp, typename _Up>
++	static constexpr bool __ptr_cmp = requires
+ 	{
+-	  return greater<const volatile void*>{}(
+-	      static_cast<const volatile void*>(std::forward<_Tp>(__t)),
+-	      static_cast<const volatile void*>(std::forward<_Up>(__u)));
+-	}
+-
++	  requires
++	       ! requires
++		{ operator>(std::declval<_Tp>(), std::declval<_Up>()); }
++	    && ! requires
++		{ std::declval<_Tp>().operator>(std::declval<_Up>()); }
++	    && __detail::__not_overloaded_spaceship<_Tp, _Up>
++	    && is_convertible_v<_Tp, const volatile void*>
++	    && is_convertible_v<_Up, const volatile void*>;
++	};
++#else
+       // True if there is no viable operator> member function.
+       template<typename _Tp, typename _Up, typename = void>
+ 	struct __not_overloaded2 : true_type { };
+@@ -572,9 +582,11 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
+ 	: false_type { };
+ 
+       template<typename _Tp, typename _Up>
+-	using __ptr_cmp = __and_<__not_overloaded<_Tp, _Up>,
+-	      is_convertible<_Tp, const volatile void*>,
+-	      is_convertible<_Up, const volatile void*>>;
++	static constexpr bool __ptr_cmp = __and_<
++	  __not_overloaded<_Tp, _Up>,
++	  is_convertible<_Tp, const volatile void*>,
++	  is_convertible<_Up, const volatile void*>>::value;
++#endif
+     };
+ 
+   /// One of the @link comparison_functors comparison functors@endlink.
+@@ -587,8 +599,15 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
+ 	noexcept(noexcept(std::forward<_Tp>(__t) < std::forward<_Up>(__u)))
+ 	-> decltype(std::forward<_Tp>(__t) < std::forward<_Up>(__u))
+ 	{
+-	  return _S_cmp(std::forward<_Tp>(__t), std::forward<_Up>(__u),
+-			__ptr_cmp<_Tp, _Up>{});
++#pragma GCC diagnostic push
++#pragma GCC diagnostic ignored "-Wc++17-extensions" // if constexpr
++	  if constexpr (__ptr_cmp<_Tp, _Up>)
++	    return less<const volatile void*>{}(
++	      static_cast<const volatile void*>(std::forward<_Tp>(__t)),
++	      static_cast<const volatile void*>(std::forward<_Up>(__u)));
++	  else
++	    return std::forward<_Tp>(__t) < std::forward<_Up>(__u);
++#pragma GCC diagnostic pop
+ 	}
+ 
+       template<typename _Tp, typename _Up>
+@@ -599,20 +618,20 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
+       typedef __is_transparent is_transparent;
+ 
+     private:
+-      template <typename _Tp, typename _Up>
+-	static constexpr decltype(auto)
+-	_S_cmp(_Tp&& __t, _Up&& __u, false_type)
+-	{ return std::forward<_Tp>(__t) < std::forward<_Up>(__u); }
+-
+-      template <typename _Tp, typename _Up>
+-	static constexpr bool
+-	_S_cmp(_Tp&& __t, _Up&& __u, true_type) noexcept
++#if __cplusplus >= 202002L
++      template<typename _Tp, typename _Up>
++	static constexpr bool __ptr_cmp = requires
+ 	{
+-	  return less<const volatile void*>{}(
+-	      static_cast<const volatile void*>(std::forward<_Tp>(__t)),
+-	      static_cast<const volatile void*>(std::forward<_Up>(__u)));
+-	}
+-
++	  requires
++	       ! requires
++		{ operator<(std::declval<_Tp>(), std::declval<_Up>()); }
++	    && ! requires
++		{ std::declval<_Tp>().operator<(std::declval<_Up>()); }
++	    && __detail::__not_overloaded_spaceship<_Tp, _Up>
++	    && is_convertible_v<_Tp, const volatile void*>
++	    && is_convertible_v<_Up, const volatile void*>;
++	};
++#else
+       // True if there is no viable operator< member function.
+       template<typename _Tp, typename _Up, typename = void>
+ 	struct __not_overloaded2 : true_type { };
+@@ -634,9 +653,11 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
+ 	: false_type { };
+ 
+       template<typename _Tp, typename _Up>
+-	using __ptr_cmp = __and_<__not_overloaded<_Tp, _Up>,
+-	      is_convertible<_Tp, const volatile void*>,
+-	      is_convertible<_Up, const volatile void*>>;
++	static constexpr bool __ptr_cmp = __and_<
++	  __not_overloaded<_Tp, _Up>,
++	  is_convertible<_Tp, const volatile void*>,
++	  is_convertible<_Up, const volatile void*>>::value;
++#endif
+     };
+ 
+   /// One of the @link comparison_functors comparison functors@endlink.
+@@ -649,8 +670,15 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
+ 	noexcept(noexcept(std::forward<_Tp>(__t) >= std::forward<_Up>(__u)))
+ 	-> decltype(std::forward<_Tp>(__t) >= std::forward<_Up>(__u))
+ 	{
+-	  return _S_cmp(std::forward<_Tp>(__t), std::forward<_Up>(__u),
+-			__ptr_cmp<_Tp, _Up>{});
++#pragma GCC diagnostic push
++#pragma GCC diagnostic ignored "-Wc++17-extensions" // if constexpr
++	  if constexpr (__ptr_cmp<_Tp, _Up>)
++	    return greater_equal<const volatile void*>{}(
++	      static_cast<const volatile void*>(std::forward<_Tp>(__t)),
++	      static_cast<const volatile void*>(std::forward<_Up>(__u)));
++	  else
++	    return std::forward<_Tp>(__t) >= std::forward<_Up>(__u);
++#pragma GCC diagnostic pop
+ 	}
+ 
+       template<typename _Tp, typename _Up>
+@@ -661,20 +689,20 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
+       typedef __is_transparent is_transparent;
+ 
+     private:
+-      template <typename _Tp, typename _Up>
+-	static constexpr decltype(auto)
+-	_S_cmp(_Tp&& __t, _Up&& __u, false_type)
+-	{ return std::forward<_Tp>(__t) >= std::forward<_Up>(__u); }
+-
+-      template <typename _Tp, typename _Up>
+-	static constexpr bool
+-	_S_cmp(_Tp&& __t, _Up&& __u, true_type) noexcept
++#if __cplusplus >= 202002L
++      template<typename _Tp, typename _Up>
++	static constexpr bool __ptr_cmp = requires
+ 	{
+-	  return greater_equal<const volatile void*>{}(
+-	      static_cast<const volatile void*>(std::forward<_Tp>(__t)),
+-	      static_cast<const volatile void*>(std::forward<_Up>(__u)));
+-	}
+-
++	  requires
++	       ! requires
++		{ operator>=(std::declval<_Tp>(), std::declval<_Up>()); }
++	    && ! requires
++		{ std::declval<_Tp>().operator>=(std::declval<_Up>()); }
++	    && __detail::__not_overloaded_spaceship<_Tp, _Up>
++	    && is_convertible_v<_Tp, const volatile void*>
++	    && is_convertible_v<_Up, const volatile void*>;
++	};
++#else
+       // True if there is no viable operator>= member function.
+       template<typename _Tp, typename _Up, typename = void>
+ 	struct __not_overloaded2 : true_type { };
+@@ -696,9 +724,11 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
+ 	: false_type { };
+ 
+       template<typename _Tp, typename _Up>
+-	using __ptr_cmp = __and_<__not_overloaded<_Tp, _Up>,
+-	      is_convertible<_Tp, const volatile void*>,
+-	      is_convertible<_Up, const volatile void*>>;
++	static constexpr bool __ptr_cmp = __and_<
++	  __not_overloaded<_Tp, _Up>,
++	  is_convertible<_Tp, const volatile void*>,
++	  is_convertible<_Up, const volatile void*>>::value;
++#endif
+     };
+ 
+   /// One of the @link comparison_functors comparison functors@endlink.
+@@ -711,8 +741,15 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
+ 	noexcept(noexcept(std::forward<_Tp>(__t) <= std::forward<_Up>(__u)))
+ 	-> decltype(std::forward<_Tp>(__t) <= std::forward<_Up>(__u))
+ 	{
+-	  return _S_cmp(std::forward<_Tp>(__t), std::forward<_Up>(__u),
+-			__ptr_cmp<_Tp, _Up>{});
++#pragma GCC diagnostic push
++#pragma GCC diagnostic ignored "-Wc++17-extensions" // if constexpr
++	  if constexpr (__ptr_cmp<_Tp, _Up>)
++	    return less_equal<const volatile void*>{}(
++	      static_cast<const volatile void*>(std::forward<_Tp>(__t)),
++	      static_cast<const volatile void*>(std::forward<_Up>(__u)));
++	  else
++	    return std::forward<_Tp>(__t) <= std::forward<_Up>(__u);
++#pragma GCC diagnostic pop
+ 	}
+ 
+       template<typename _Tp, typename _Up>
+@@ -723,20 +760,20 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
+       typedef __is_transparent is_transparent;
+ 
+     private:
+-      template <typename _Tp, typename _Up>
+-	static constexpr decltype(auto)
+-	_S_cmp(_Tp&& __t, _Up&& __u, false_type)
+-	{ return std::forward<_Tp>(__t) <= std::forward<_Up>(__u); }
+-
+-      template <typename _Tp, typename _Up>
+-	static constexpr bool
+-	_S_cmp(_Tp&& __t, _Up&& __u, true_type) noexcept
++#if __cplusplus >= 202002L
++      template<typename _Tp, typename _Up>
++	static constexpr bool __ptr_cmp = requires
+ 	{
+-	  return less_equal<const volatile void*>{}(
+-	      static_cast<const volatile void*>(std::forward<_Tp>(__t)),
+-	      static_cast<const volatile void*>(std::forward<_Up>(__u)));
+-	}
+-
++	  requires
++	       ! requires
++		{ operator<=(std::declval<_Tp>(), std::declval<_Up>()); }
++	    && ! requires
++		{ std::declval<_Tp>().operator<=(std::declval<_Up>()); }
++	    && __detail::__not_overloaded_spaceship<_Tp, _Up>
++	    && is_convertible_v<_Tp, const volatile void*>
++	    && is_convertible_v<_Up, const volatile void*>;
++	};
++#else
+       // True if there is no viable operator<= member function.
+       template<typename _Tp, typename _Up, typename = void>
+ 	struct __not_overloaded2 : true_type { };
+@@ -758,9 +795,11 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
+ 	: false_type { };
+ 
+       template<typename _Tp, typename _Up>
+-	using __ptr_cmp = __and_<__not_overloaded<_Tp, _Up>,
+-	      is_convertible<_Tp, const volatile void*>,
+-	      is_convertible<_Up, const volatile void*>>;
++	static constexpr bool __ptr_cmp = __and_<
++	  __not_overloaded<_Tp, _Up>,
++	  is_convertible<_Tp, const volatile void*>,
++	  is_convertible<_Up, const volatile void*>>::value;
++#endif
+     };
+ #endif // __glibcxx_transparent_operators
+   /** @}  */
+diff --git a/libstdc++-v3/include/std/concepts b/libstdc++-v3/include/std/concepts
+index 5899f032434a..b60b52bab9a5 100644
+--- a/libstdc++-v3/include/std/concepts
++++ b/libstdc++-v3/include/std/concepts
+@@ -384,6 +384,22 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
+   template<typename _Rel, typename _Tp, typename _Up>
+     concept strict_weak_order = relation<_Rel, _Tp, _Up>;
+ 
++  namespace __detail
++  {
++    // operator<=> are automatically reversed, so we need to consider
++    // both directions if types are different.
++    template<typename _Tp, typename _Up>
++      concept __not_overloaded_spaceship
++        =  ! requires(_Tp&& __t, _Up&& __u)
++	    { operator<=>(static_cast<_Tp&&>(__t), static_cast<_Up&&>(__u)); }
++	&& ! requires(_Tp&& __t, _Up&& __u)
++	    { static_cast<_Tp&&>(__t).operator<=>(static_cast<_Up&&>(__u)); }
++	&& (is_same_v<_Tp, _Up>
++	    || (! requires(_Tp&& __t, _Up&& __u)
++	         { operator<=>(static_cast<_Up&&>(__u), static_cast<_Tp&&>(__t)); }
++	       && ! requires(_Tp&& __t, _Up&& __u)
++	         { static_cast<_Up&&>(__u).operator<=>(static_cast<_Tp&&>(__t)); }));
++  }
+ _GLIBCXX_END_NAMESPACE_VERSION
+ } // namespace
+ #endif // __cpp_lib_concepts
+diff --git a/libstdc++-v3/libsupc++/compare b/libstdc++-v3/libsupc++/compare
+index 8811bc095d0b..97b3a3ed5a17 100644
+--- a/libstdc++-v3/libsupc++/compare
++++ b/libstdc++-v3/libsupc++/compare
+@@ -537,10 +537,7 @@ namespace std _GLIBCXX_VISIBILITY(default)
+ 	  { static_cast<_Tp&&>(__t) <=> static_cast<_Up&&>(__u); }
+ 	  && convertible_to<_Tp, const volatile void*>
+ 	  && convertible_to<_Up, const volatile void*>
+-	  && ! requires(_Tp&& __t, _Up&& __u)
+-	  { operator<=>(static_cast<_Tp&&>(__t), static_cast<_Up&&>(__u)); }
+-	  && ! requires(_Tp&& __t, _Up&& __u)
+-	  { static_cast<_Tp&&>(__t).operator<=>(static_cast<_Up&&>(__u)); };
++	  && __not_overloaded_spaceship<_Tp, _Up>;
+   } // namespace __detail
+ 
+   // _GLIBCXX_RESOLVE_LIB_DEFECTS
+diff --git a/libstdc++-v3/testsuite/20_util/function_objects/comparisons_pointer_spaceship.cc b/libstdc++-v3/testsuite/20_util/function_objects/comparisons_pointer_spaceship.cc
+new file mode 100644
+index 000000000000..80fa94b5dbf0
+--- /dev/null
++++ b/libstdc++-v3/testsuite/20_util/function_objects/comparisons_pointer_spaceship.cc
+@@ -0,0 +1,336 @@
++// { dg-do run { target c++20 } }
++
++#include <compare>
++#include <cstring>
++#include <functional>
++#include <testsuite_hooks.h>
++
++constexpr const char arr[] = "efgh\0abcd\0ijkl";
++constexpr const char* s1 = arr;
++constexpr const char* s2 = arr+5;
++constexpr const char* s3 = arr+6;
++
++struct CStrNone
++{
++  const char* str;
++
++  constexpr
++  operator const char*() const
++  { return str; }
++};
++
++template<typename ResultCreator>
++struct CStrMem
++{
++  const char* str;
++
++  constexpr
++  operator const char*() const
++  { return str; }
++
++  auto operator<=>(CStrMem const& rhs) const
++  { return ResultCreator::create(std::strcmp(this->str, rhs.str)); }
++
++  auto operator<=>(const char* rhs) const
++  { return ResultCreator::create(std::strcmp(this->str, rhs)); }
++};
++
++template<typename ResultCreator>
++struct CStrFriend
++{
++  const char* str;
++
++  constexpr
++  operator const char*() const
++  { return str; }
++
++  friend auto operator<=>(CStrFriend lhs, CStrFriend rhs)
++  { return ResultCreator::create(std::strcmp(lhs.str, rhs.str)); }
++
++  friend auto operator<=>(CStrFriend lhs, const char* rhs)
++  { return ResultCreator::create(std::strcmp(lhs.str, rhs)); }
++};
++
++template<typename ResultCreator>
++struct CStrFree
++{
++  const char* str;
++
++  constexpr
++  operator const char*() const
++  { return str; }
++};
++
++template<typename RC>
++auto operator<=>(CStrFree<RC> lhs, CStrFree<RC> rhs)
++{ return RC::create(std::strcmp(lhs.str, rhs.str)); }
++
++template<typename RC>
++auto operator<=>(CStrFree<RC> lhs, const char* rhs)
++{ return RC::create(std::strcmp(lhs.str, rhs)); }
++
++template<typename ResultCreator>
++struct CStrMixed
++{
++  const char* str;
++
++  constexpr
++  operator const char*() const
++  { return str; }
++};
++
++template<typename RC>
++auto operator<=>(CStrMixed<RC> lhs, CStrMixed<RC> rhs)
++{ return RC::create(std::strcmp(lhs.str, rhs.str)); }
++
++template<typename RC>
++auto operator<=>(CStrMixed<RC> lhs, CStrFree<RC> rhs)
++{ return RC::create(std::strcmp(lhs.str, rhs.str)); }
++
++// If the type returned from shapeship does not support relational
++// operators, then synthesized operators are ill-formed, SFINAEable.
++struct ReturnVoid
++{
++  constexpr static void
++  create(int) { }
++};
++
++struct NoOperators
++{
++  constexpr static NoOperators
++  create(int)
++  { return NoOperators(); }
++};
++
++// std defined ordering types are expected
++template<typename Ord = std::strong_ordering>
++struct ReturnOrd
++{
++  constexpr static Ord
++  create(int cmp)
++  { return cmp <=> 0; }
++};
++
++// However, other types that provide required
++// operators are supported.
++struct ReturnInt
++{
++  constexpr static int
++  create(int cmp)
++  { return cmp; }
++};
++
++struct CustomOrd
++{
++  constexpr static CustomOrd
++  create(int cmp)
++  { return CustomOrd(cmp); }
++
++  CustomOrd() = default;
++
++  explicit constexpr
++  CustomOrd(int cmp)
++  : v(cmp) {}
++
++  friend constexpr bool
++  operator<(CustomOrd c, std::nullptr_t)
++  { return c.v < 0; }
++
++  friend constexpr bool
++  operator<(std::nullptr_t, CustomOrd c)
++  { return 0 < c.v; }
++
++  friend constexpr bool
++  operator>(CustomOrd c, std::nullptr_t)
++  { return c.v > 0; }
++
++  friend constexpr bool
++  operator>(std::nullptr_t, CustomOrd c)
++  { return 0 > c.v; }
++
++  friend constexpr bool
++  operator<=(CustomOrd c, std::nullptr_t)
++  { return c.v <= 0; }
++
++  friend constexpr bool
++  operator<=(std::nullptr_t, CustomOrd c)
++  { return 0 <= c.v; }
++
++  friend constexpr bool
++  operator>=(CustomOrd c, std::nullptr_t)
++  { return c.v >= 0; }
++
++  friend constexpr bool
++  operator>=(std::nullptr_t, CustomOrd c)
++  { return 0 >= c.v; }
++
++  friend constexpr CustomOrd
++  operator<=>(CustomOrd c, std::nullptr_t)
++  { return c; }
++
++  friend constexpr CustomOrd
++  operator<=>(std::nullptr_t, CustomOrd c)
++  { return CustomOrd(-c.v); }
++
++private:
++  int v = 0;
++};
++
++template<typename CStr1, typename CStr2>
++void
++test_relational(bool use_overloaded)
++{
++  CStr1 cs1{s1}; CStr2 cs2{s2};
++
++  if (use_overloaded)
++  {
++    // Overloaded operaetors compare content of the string,
++    // and cs1 > cs2;
++
++    VERIFY( !(cs1 < cs2) );
++    VERIFY( !std::less<>{}(cs1, cs2) );
++    VERIFY( !std::ranges::less{}(cs1, cs2) );
++
++    VERIFY( (cs1 > cs2) );
++    VERIFY( std::greater<>{}(cs1, cs2) );
++    VERIFY( std::ranges::greater{}(cs1, cs2) );
++
++    VERIFY( !(cs1 < cs2) );
++    VERIFY( !std::less_equal<>{}(cs1, cs2) );
++    VERIFY( !std::ranges::less_equal{}(cs1, cs2) );
++
++    VERIFY( (cs1 > cs2) );
++    VERIFY( std::greater_equal<>{}(cs1, cs2) );
++    VERIFY( std::ranges::greater_equal{}(cs1, cs2) );
++  }
++  else
++  {
++    // Without overloaded operators, we comapre pointers,
++    // and cs1 < cs2;
++
++    VERIFY( (cs1 < cs2) );
++    VERIFY( std::less<>{}(cs1, cs2) );
++    VERIFY( std::ranges::less{}(cs1, cs2) );
++
++    VERIFY( !(cs1 > cs2) );
++    VERIFY( !std::greater<>{}(cs1, cs2) );
++    VERIFY( !std::ranges::greater{}(cs1, cs2) );
++
++    VERIFY( (cs1 < cs2) );
++    VERIFY( std::less_equal<>{}(cs1, cs2) );
++    VERIFY( std::ranges::less_equal{}(cs1, cs2) );
++
++    VERIFY( !(cs1 > cs2) );
++    VERIFY( !std::greater_equal<>{}(cs1, cs2) );
++    VERIFY( !std::ranges::greater_equal{}(cs1, cs2) );
++  }
++}
++
++template<typename CStr>
++void
++test_relational_type(bool use_overloaded)
++{
++  test_relational<CStr, CStr>(use_overloaded);
++  test_relational<CStr, const char*>(use_overloaded);
++  test_relational<const char*, CStr>(use_overloaded);
++}
++
++template<typename RC>
++void
++test_relational_return()
++{
++  test_relational_type<CStrMem<RC>>(true);
++  test_relational_type<CStrFriend<RC>>(true);
++  test_relational_type<CStrFree<RC>>(true);
++  test_relational<CStrMixed<RC>, CStrFree<RC>>(true);
++  test_relational<CStrFree<RC>, CStrMixed<RC>>(true);
++}
++
++template<typename CStr1, typename CStr2>
++void
++test_spaceship(bool use_overloaded)
++{
++  CStr1 cs1{s1}; CStr2 cs2{s2};
++
++  if (use_overloaded)
++  {
++    // Overloaded operaetors compare content of the string,
++    // and cs1 > cs2;
++    VERIFY( (cs1 <=> cs2) > 0 );
++    VERIFY( std::compare_three_way{}(cs1, cs2) > 0 );
++  }
++  else
++  {
++    // Without overloaded operators, we comapre pointers,
++    // and cs1 < cs2;
++    VERIFY( (cs1 <=> cs2) < 0 );
++    VERIFY( std::compare_three_way{}(cs1, cs2) < 0 );
++  }
++}
++
++template<typename CStr>
++void
++test_spaceship_type(bool use_overloaded)
++{
++  test_spaceship<CStr, CStr>(use_overloaded);
++  test_spaceship<CStr, const char*>(use_overloaded);
++  test_spaceship<const char*, CStr>(use_overloaded);
++}
++
++template<typename Ordering>
++void
++test_std_ordering()
++{
++  using RC = ReturnOrd<Ordering>;
++  test_relational_return<RC>();
++  test_spaceship_type<CStrMem<RC>>(true);
++  test_spaceship_type<CStrFriend<RC>>(true);
++  test_spaceship_type<CStrFree<RC>>(true);
++  test_spaceship<CStrMixed<RC>, CStrFree<RC>>(true);
++  test_spaceship<CStrFree<RC>, CStrMixed<RC>>(true);
++}
++
++template<typename CStr1, typename CStr2>
++void
++test_no_relational()
++{
++  CStr1 c1{}; CStr2 c2{};
++  static_assert(!requires { c1 < c2; });
++  static_assert(!requires { c1 > c2; });
++  static_assert(!requires { c1 <= c2; });
++  static_assert(!requires { c1 >= c2; });
++}
++
++template<typename CStr>
++void
++test_no_relational_type()
++{
++  test_no_relational<CStr, CStr>();
++  test_no_relational<CStr, const char*>();
++  test_no_relational<const char*, CStr>();
++}
++
++template<typename RC>
++void
++test_no_relational_return()
++{
++  test_no_relational_type<CStrMem<RC>>();
++  test_no_relational_type<CStrFriend<RC>>();
++  test_no_relational_type<CStrFree<RC>>();
++  test_no_relational<CStrMixed<RC>, CStrFree<RC>>();
++  test_no_relational<CStrFree<RC>, CStrMixed<RC>>();
++}
++
++int main()
++{
++  test_std_ordering<std::strong_ordering>();
++  test_std_ordering<std::weak_ordering>();
++  test_std_ordering<std::partial_ordering>();
++
++  test_relational_type<CStrNone>(false);
++  test_relational_return<ReturnInt>();
++  test_relational_return<CustomOrd>();
++
++  test_no_relational_return<ReturnVoid>();
++  test_no_relational_return<NoOperators>();
++}
+-- 
+2.43.7
+
+

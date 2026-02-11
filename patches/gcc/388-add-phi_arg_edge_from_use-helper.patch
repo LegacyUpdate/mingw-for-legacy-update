@@ -1,0 +1,55 @@
+From 6a0fdbd31f617dabb97921a1be7a564e5a3144bf Mon Sep 17 00:00:00 2001
+From: Richard Biener <rguenther@suse.de>
+Date: Tue, 20 Jan 2026 10:22:49 +0100
+Subject: [PATCH] Add phi_arg_edge_from_use helper
+
+I've needed this a few times now and indenting nested
+phi_arg_index_from_use inside gimple_phi_arg_edge is difficult.
+
+	* tree-phinodes.h (phi_arg_index_from_use): Use gphi *.
+	(phi_arg_edge_from_use): New helper composing
+	phi_arg_index_from_use and gimple_phi_arg_edge.
+
+(cherry picked from commit 1acf01fcb6c66bb16577ee2d452cba3104cf3d96)
+---
+ gcc/tree-phinodes.h | 13 +++++++++++--
+ 1 file changed, 11 insertions(+), 2 deletions(-)
+
+diff --git a/gcc/tree-phinodes.h b/gcc/tree-phinodes.h
+index 643dbef7cc4f..73aae715c7e3 100644
+--- a/gcc/tree-phinodes.h
++++ b/gcc/tree-phinodes.h
+@@ -50,13 +50,13 @@ phi_arg_index_from_use (use_operand_p use)
+ {
+   struct phi_arg_d *element, *root;
+   size_t index;
+-  gimple *phi;
++  gphi *phi;
+ 
+   /* Since the use is the first thing in a PHI argument element, we can
+      calculate its index based on casting it to an argument, and performing
+      pointer arithmetic.  */
+ 
+-  phi = USE_STMT (use);
++  phi = as_a <gphi *> (USE_STMT (use));
+ 
+   element = (struct phi_arg_d *)use;
+   root = gimple_phi_arg (phi, 0);
+@@ -71,4 +71,13 @@ phi_arg_index_from_use (use_operand_p use)
+  return index;
+ }
+ 
++/* Return the edge into the PHI node USE.  */
++
++inline edge
++phi_arg_edge_from_use (use_operand_p use)
++{
++  gphi *phi = as_a <gphi *> (USE_STMT (use));
++  return gimple_phi_arg_edge (phi, phi_arg_index_from_use (use));
++}
++
+ #endif /* GCC_TREE_PHINODES_H */
+-- 
+2.43.7
+
+

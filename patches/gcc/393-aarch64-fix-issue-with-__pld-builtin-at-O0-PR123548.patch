@@ -1,0 +1,78 @@
+From aefa9e6f2d094b50fc12c6ff2df080a534b4a594 Mon Sep 17 00:00:00 2001
+From: Alfie Richards <alfie.richards@arm.com>
+Date: Thu, 15 Jan 2026 14:29:51 +0000
+Subject: [PATCH] aarch64: Fix issue with __pld builtin at -O0 [PR 123548]
+
+This fixes the issues with __pld by changing the arguments in arm_acle.h
+to be const which seems to stop the creation of SSA nodes.
+
+	PR target/123548
+
+gcc/ChangeLog:
+
+	* config/aarch64/arm_acle.h (__plix): Change arguments to be
+	const.
+	(__pldx): Change arguments to be const.
+
+gcc/testsuite/ChangeLog:
+
+	* gcc.target/aarch64/pr123548.c: New test.
+---
+ gcc/config/aarch64/arm_acle.h               |  8 ++++----
+ gcc/testsuite/gcc.target/aarch64/pr123548.c | 18 ++++++++++++++++++
+ 2 files changed, 22 insertions(+), 4 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.target/aarch64/pr123548.c
+
+diff --git a/gcc/config/aarch64/arm_acle.h b/gcc/config/aarch64/arm_acle.h
+index d9e2401ea9f6..822b5bd6da38 100644
+--- a/gcc/config/aarch64/arm_acle.h
++++ b/gcc/config/aarch64/arm_acle.h
+@@ -94,16 +94,16 @@ __pli (void const volatile *__addr)
+ 
+ __extension__ extern __inline void
+ __attribute__ ((__always_inline__, __gnu_inline__, __artificial__))
+-__plix (unsigned int __cache, unsigned int __rettn,
++__plix (const unsigned int __cache, const unsigned int __rettn,
+ 	void const volatile *__addr)
+ {
+   return __builtin_aarch64_plix (__cache, __rettn, __addr);
+ }
+ 
+ __extension__ extern __inline void
+-__attribute__ ((__always_inline__, __gnu_inline__, __artificial__))
+-__pldx (unsigned int __access, unsigned int __cache, unsigned int __rettn,
+-	void const volatile *__addr)
++  __attribute__ ((__always_inline__, __gnu_inline__, __artificial__))
++  __pldx (const unsigned int __access, const unsigned int __cache,
++	  const unsigned int __rettn, void const volatile *__addr)
+ {
+   return __builtin_aarch64_pldx (__access, __cache, __rettn, __addr);
+ }
+diff --git a/gcc/testsuite/gcc.target/aarch64/pr123548.c b/gcc/testsuite/gcc.target/aarch64/pr123548.c
+new file mode 100644
+index 000000000000..c3e752197ce9
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/aarch64/pr123548.c
+@@ -0,0 +1,18 @@
++/* { dg-do compile } */
++/* { dg-options "-O0" } */
++/* { dg-final { check-function-bodies "**" "" "" } } */
++
++#include <arm_acle.h>
++
++void
++test (void *a)
++{
++  __pldx (1, 1, 1, a);
++}
++/*
++** test:
++**...
++**	prfm\tPSTL2STRM, \[x[0-9]+\]
++**...
++**	ret
++*/
+-- 
+2.43.7
+
+

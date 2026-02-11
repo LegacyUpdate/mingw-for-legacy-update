@@ -1,0 +1,100 @@
+From a4abdfc2211b0eadf49300dbc1973d882415c9b7 Mon Sep 17 00:00:00 2001
+From: Jeff Law <jlaw@ventanamicro.com>
+Date: Thu, 2 Oct 2025 06:25:47 -0600
+Subject: [PATCH] [RISC-V][PR target/122051] Fix pmode_reg_or_uimm5_operand for
+ thead vector
+
+For this bug we're failing during vsetvl insertion, but the real problem
+happens earlier.
+
+Basically the slide instructions are using pmode_reg_or_uimm5_operand which has
+an implementation that was appropriate when we integrated RVV, but which is
+bogus once thead vector was added.  It was just a thin wrapper around
+vector_length_operand.
+
+vector_length_operand rejects most constants when thead vector is enabled.  LRA
+saw the rK constraint, so it figured the (const_int 1) was a sensible
+substitution for the relevant operand.  It was only during vsetvl insertion
+that we made another change to the insn and tried to recognize it and boom
+things blew up.
+
+This patch makes pmode_reg_or_uimm5_operand independent of
+vector_length_operand and everything is happy again.
+
+Tested on riscv32-elf (verifying the selector properly skips the test) and
+riscv64-elf where the ICE could be seen.  Bootstrap on the Pioneer and BPI just
+started a short while ago, so no data for another 7/24 hours respectively, but
+not expecting issues.
+
+	PR target/122051
+gcc/
+	* config/riscv/predicates.md (pmode_reg_or_uimm5_operand): Implement
+	directly rather than using vector_length_operand.
+
+gcc/testsuite/
+	* gcc.target/riscv/pr122051.c: New test.
+
+(cherry picked from commit c34ccc8ba23aa7cbf5e2d88186abf0c384a675a3)
+---
+ gcc/config/riscv/predicates.md            | 11 +++++------
+ gcc/testsuite/gcc.target/riscv/pr122051.c | 24 +++++++++++++++++++++++
+ 2 files changed, 29 insertions(+), 6 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.target/riscv/pr122051.c
+
+diff --git a/gcc/config/riscv/predicates.md b/gcc/config/riscv/predicates.md
+index 715ac9620320..b4d1a97860eb 100644
+--- a/gcc/config/riscv/predicates.md
++++ b/gcc/config/riscv/predicates.md
+@@ -589,13 +589,12 @@
+ (define_predicate "ge_operator"
+   (match_code "ge,geu"))
+ 
+-;; pmode_reg_or_uimm5_operand can be used by vsll.vx/vsrl.vx/vsra.vx instructions.
+-;; Since it has the same predicate with vector_length_operand which allows register
+-;; or immediate (0 ~ 31), we define this predicate same as vector_length_operand here.
+-;; We don't use vector_length_operand directly to predicate vsll.vx/vsrl.vx/vsra.vx
+-;; since it may be confusing.
++;; pmode_reg_or_uimm5_operand can be used by vsll.vx/vsrl.vx/vsra.vx instructions
++;; It is *not* equivalent to vector_length_operand due to the vector_length_operand
++;; needing to conditionalize some behavior on XTHEADVECTOR.
+ (define_special_predicate "pmode_reg_or_uimm5_operand"
+-  (match_operand 0 "vector_length_operand"))
++  (ior (match_operand 0 "pmode_register_operand")
++       (match_operand 0 "const_csr_operand")))
+ 
+ (define_special_predicate "pmode_reg_or_0_operand"
+   (ior (match_operand 0 "const_0_operand")
+diff --git a/gcc/testsuite/gcc.target/riscv/pr122051.c b/gcc/testsuite/gcc.target/riscv/pr122051.c
+new file mode 100644
+index 000000000000..c2f4b877d5ea
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/riscv/pr122051.c
+@@ -0,0 +1,24 @@
++/* { dg-do compile { target int128 } } */
++/* { dg-additional-options "-mrvv-vector-bits=zvl -mcpu=xt-c920 -w" } */
++
++typedef __attribute__((__vector_size__(4))) char B;
++typedef __attribute__((__vector_size__(16))) long V;
++typedef __attribute__((__vector_size__(32))) double W;
++typedef __attribute__((__vector_size__(32))) char U;
++unsigned u;
++B o;
++char *p;
++int q;
++V v;
++W w;
++
++void
++foo(__int128, __int128, __int128, __int128, B a, B b, B c, B d, B e, B f, B g, B h) {
++  do {
++    w -= q;
++    v ^= u;
++  } while (__builtin_memcmp(p, 1 + p, 7));
++  o = ((U)w)[0] + c + d + e + f + g + h + a + b;
++}
++
++
+-- 
+2.43.7
+
+

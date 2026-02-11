@@ -1,0 +1,102 @@
+From 30b077e1f4f2b7cb51c425e5900b1fd8b2bbfd3c Mon Sep 17 00:00:00 2001
+From: Kyrylo Tkachov <ktkachov@nvidia.com>
+Date: Thu, 15 Jan 2026 05:10:31 -0800
+Subject: [PATCH] aarch64: PR target/123584 - Fix expansion of SHA3 XAR with 0
+ amount
+
+In this PR the vxarq_u64 intrinisc gets passed a rotate amount of 0
+and the patterns don't handle it right.  Because we adjust RTL amount
+during expand to account for the canonical representation we end up
+emitting a V2DImode rotate of 64, which the output instruction is not
+prepared to handle.  What we should be doing is leaving it as 0 in
+that case, which is what this patch does.
+
+A XAR with a rotate of 0 is really just an EOR and we could have emitted
+it as such but I thought that, at least at -O0, it would be nicer to emit
+the XAR-0 form as it's still a legal instruction and the user did ask for
+it through the intrinsic.  At -O1 and above the optimisers kick in and simplify
+it to an EOR anyway.
+
+Note: the SVE2 XAR instruction doesn't suffer from this problem because a
+rotate amount of 0 is actually not allowed by the instruction itself and
+the early intrinsic validation rejects it anyway.
+
+Bootstrapped and tested on aarch64-none-linux-gnu.
+
+Signed-off-by: Kyrylo Tkachov <ktkachov@nvidia.com>
+
+gcc/
+
+	PR target/123584
+	* config/aarch64/aarch64-simd.md (aarch64_xarqv2di): Leave zero
+	rotate amounts as zero during expansion.
+	(*aarch64_xarqv2di_insn): Account for zero rotate amounts.  Print #
+	in rotate immediate.
+
+gcc/testsuite/
+
+	PR target/123584
+	* gcc.target/aarch64/torture/xar-zero.c: New test.
+
+(cherry picked from commit 47a48e74e479df8d7db2dfbb80198c3d9461a550)
+---
+ gcc/config/aarch64/aarch64-simd.md              | 17 ++++++++++++-----
+ .../gcc.target/aarch64/torture/xar-zero.c       |  9 +++++++++
+ 2 files changed, 21 insertions(+), 5 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.target/aarch64/torture/xar-zero.c
+
+diff --git a/gcc/config/aarch64/aarch64-simd.md b/gcc/config/aarch64/aarch64-simd.md
+index ad7e998ad77b..2cf731e2e89c 100644
+--- a/gcc/config/aarch64/aarch64-simd.md
++++ b/gcc/config/aarch64/aarch64-simd.md
+@@ -9166,9 +9166,13 @@
+ 	 (match_operand:V2DI 3 "aarch64_simd_lshift_imm" "Dl")))]
+   "TARGET_SHA3"
+   {
++    /* Translate the RTL left-rotate amount into the assembly right-rotate
++       amount.  Modulo by 64 to ensure that a left-rotate of 0 is emitted
++       as a right-rotate of 0 as accepted by the assembly instruction.  */
+     operands[3]
+-      = GEN_INT (64 - INTVAL (unwrap_const_vec_duplicate (operands[3])));
+-    return "xar\\t%0.2d, %1.2d, %2.2d, %3";
++      = GEN_INT ((64 - INTVAL (unwrap_const_vec_duplicate (operands[3])))
++		  % 64);
++    return "xar\\t%0.2d, %1.2d, %2.2d, #%3";
+   }
+   [(set_attr "type" "crypto_sha3")]
+ )
+@@ -9188,9 +9192,12 @@
+ 	 (match_operand:SI 3 "aarch64_simd_shift_imm_di")))]
+   "TARGET_SHA3"
+   {
+-    operands[3]
+-      = aarch64_simd_gen_const_vector_dup (V2DImode,
+-					   64 - INTVAL (operands[3]));
++      operands[3]
++        = aarch64_simd_gen_const_vector_dup (V2DImode,
++					     /* In the edge case of a 0 rotate
++						amount leave as is.  */
++					     operands[3] == CONST0_RTX (SImode)
++					       ? 0 : 64 - INTVAL (operands[3]));
+   }
+ )
+ 
+diff --git a/gcc/testsuite/gcc.target/aarch64/torture/xar-zero.c b/gcc/testsuite/gcc.target/aarch64/torture/xar-zero.c
+new file mode 100644
+index 000000000000..379c5b7cca94
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/aarch64/torture/xar-zero.c
+@@ -0,0 +1,9 @@
++/* PR target/123584.  */
++/* { dg-do compile } */
++/* { dg-options "-march=armv8.2-a+sha3" } */
++
++#include <arm_neon.h>
++uint64x2_t
++simde_vld1q_u64(uint64x2_t simde_vld1q_u64_a, uint64x2_t simde_vld1q_u64_b) {
++  return vxarq_u64(simde_vld1q_u64_a, simde_vld1q_u64_b, 0);
++}
+-- 
+2.43.7
+
+

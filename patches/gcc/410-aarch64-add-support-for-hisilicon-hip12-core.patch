@@ -1,0 +1,437 @@
+From 7d2a7711e459bdd5a7969507f81ecfff1983d4c1 Mon Sep 17 00:00:00 2001
+From: xiezhiheng <xiezhiheng@huawei.com>
+Date: Thu, 5 Feb 2026 08:32:10 +0000
+Subject: [PATCH] aarch64: Add support for Hisilicon's hip12 core (-mcpu=hip12)
+
+This patch adds initial support for Hisilicon's hip12 core
+(Kunpeng 950 processor).
+For more information, see:
+https://www.huawei.com/en/news/2025/9/hc-xu-keynote-speech
+
+Bootstrapped and tested on aarch64-linux-gnu, no regression.
+
+Signed-off-by: xiezhiheng <xiezhiheng@huawei.com>
+Co-authored-by: liyunfei <liyunfei33@huawei.com>
+
+gcc/ChangeLog:
+
+	* config/aarch64/aarch64-cores.def (AARCH64_CORE): Add hip12 core
+	* config/aarch64/aarch64-cost-tables.h: Add hip12_extra_costs
+	* config/aarch64/aarch64-tune.md: Regenerate
+	* config/aarch64/aarch64.cc: Include hip12 tuning model
+	* doc/invoke.texi: Document -mcpu=hip12
+	* config/aarch64/tuning_models/hip12.h: New file.
+
+(cherry picked from commit 3ca909c2976ce8177add33271a6661181f1ee66b)
+---
+ gcc/config/aarch64/aarch64-cores.def     |   1 +
+ gcc/config/aarch64/aarch64-cost-tables.h | 107 +++++++++++
+ gcc/config/aarch64/aarch64-tune.md       |   2 +-
+ gcc/config/aarch64/aarch64.cc            |   1 +
+ gcc/config/aarch64/tuning_models/hip12.h | 226 +++++++++++++++++++++++
+ gcc/doc/invoke.texi                      |   2 +-
+ 6 files changed, 337 insertions(+), 2 deletions(-)
+ create mode 100644 gcc/config/aarch64/tuning_models/hip12.h
+
+diff --git a/gcc/config/aarch64/aarch64-cores.def b/gcc/config/aarch64/aarch64-cores.def
+index 6f11cc0983a6..03637796c92b 100644
+--- a/gcc/config/aarch64/aarch64-cores.def
++++ b/gcc/config/aarch64/aarch64-cores.def
+@@ -135,6 +135,7 @@ AARCH64_CORE("a64fx", a64fx, a64fx, V8_2A,  (F16, SVE), a64fx, 0x46, 0x001, -1)
+ AARCH64_CORE("fujitsu-monaka", fujitsu_monaka, cortexa57, V9_3A, (F16, FAMINMAX, FP8FMA, FP8DOT2, FP8DOT4, LS64, LUT, RNG, CRYPTO, SVE2_AES, SVE2_BITPERM, SVE2_SHA3, SVE2_SM4), fujitsu_monaka, 0x46, 0x003, -1)
+ 
+ /* HiSilicon ('H') cores. */
++AARCH64_CORE("hip12", hip12, cortexa57, V8_7A, (F16, PROFILE, RNG, SVE2_BITPERM, SVE2_AES, SVE2_SM4, SVE2_SHA3, LS64, RCPC3), hip12, 0x48, 0xd06, -1)
+ AARCH64_CORE("tsv110",  tsv110, tsv110, V8_2A,  (CRYPTO, F16), tsv110,   0x48, 0xd01, -1)
+ 
+ /* ARMv8.3-A Architecture Processors.  */
+diff --git a/gcc/config/aarch64/aarch64-cost-tables.h b/gcc/config/aarch64/aarch64-cost-tables.h
+index c49ff7f62ef2..36fdb1f5b6b7 100644
+--- a/gcc/config/aarch64/aarch64-cost-tables.h
++++ b/gcc/config/aarch64/aarch64-cost-tables.h
+@@ -561,6 +561,113 @@ const struct cpu_cost_table tsv110_extra_costs =
+   }
+ };
+ 
++const struct cpu_cost_table hip12_extra_costs =
++{
++  /* ALU */
++  {
++    0,                 /* arith.  */
++    0,                 /* logical.  */
++    0,                 /* shift.  */
++    0,                 /* shift_reg.  */
++    COSTS_N_INSNS (1), /* arith_shift.  */
++    COSTS_N_INSNS (1), /* arith_shift_reg.  */
++    0,                 /* log_shift.  */
++    0,                 /* log_shift_reg.  */
++    0,                 /* extend.  */
++    COSTS_N_INSNS (1), /* extend_arith.  */
++    0,                 /* bfi.  */
++    0,                 /* bfx.  */
++    0,                 /* clz.  */
++    0,                 /* rev.  */
++    0,                 /* non_exec.  */
++    true               /* non_exec_costs_exec.  */
++  },
++  {
++    /* MULT SImode */
++    {
++      COSTS_N_INSNS (1),       /* simple.  */
++      COSTS_N_INSNS (1),       /* flag_setting.  */
++      COSTS_N_INSNS (1),       /* extend.  */
++      COSTS_N_INSNS (2),       /* add.  */
++      COSTS_N_INSNS (2),       /* extend_add.  */
++      COSTS_N_INSNS (5)        /* idiv.  */
++    },
++    /* MULT DImode */
++    {
++      COSTS_N_INSNS (2),       /* simple.  */
++      0,                       /* flag_setting (N/A).  */
++      COSTS_N_INSNS (2),       /* extend.  */
++      COSTS_N_INSNS (3),       /* add.  */
++      COSTS_N_INSNS (3),       /* extend_add.  */
++      COSTS_N_INSNS (7)        /* idiv.  */
++    }
++  },
++  /* LD/ST */
++  {
++    COSTS_N_INSNS (3),         /* load.  */
++    COSTS_N_INSNS (3),         /* load_sign_extend.  */
++    COSTS_N_INSNS (3),         /* ldrd.  */
++    0,                         /* ldm_1st.  */
++    0,                         /* ldm_regs_per_insn_1st.  */
++    0,                         /* ldm_regs_per_insn_subsequent.  */
++    COSTS_N_INSNS (5),         /* loadf.  */
++    COSTS_N_INSNS (5),         /* loadd.  */
++    COSTS_N_INSNS (4),         /* load_unaligned.  */
++    0,                         /* store.  */
++    0,                         /* strd.  */
++    0,                         /* stm_1st.  */
++    0,                         /* stm_regs_per_insn_1st.  */
++    0,                         /* stm_regs_per_insn_subsequent.  */
++    0,                         /* storef.  */
++    0,                         /* stored.  */
++    COSTS_N_INSNS (1),         /* store_unaligned.  */
++    COSTS_N_INSNS (5),         /* loadv.  */
++    COSTS_N_INSNS (1)          /* storev.  */
++  },
++  {
++    /* FP SFmode */
++    {
++      COSTS_N_INSNS (5),       /* div.  */
++      COSTS_N_INSNS (2),       /* mult.  */
++      COSTS_N_INSNS (4),       /* mult_addsub.  */
++      COSTS_N_INSNS (3),       /* fma.  */
++      COSTS_N_INSNS (1),       /* addsub.  */
++      COSTS_N_INSNS (1),       /* fpconst.  */
++      0,                       /* neg.  */
++      COSTS_N_INSNS (1),       /* compare.  */
++      COSTS_N_INSNS (2),       /* widen.  */
++      COSTS_N_INSNS (2),       /* narrow.  */
++      COSTS_N_INSNS (2),       /* toint.  */
++      COSTS_N_INSNS (3),       /* fromint.  */
++      COSTS_N_INSNS (2)        /* roundint.  */
++    },
++    /* FP DFmode */
++    {
++      COSTS_N_INSNS (7),       /* div.  */
++      COSTS_N_INSNS (2),       /* mult.  */
++      COSTS_N_INSNS (4),       /* mult_addsub.  */
++      COSTS_N_INSNS (3),       /* fma.  */
++      COSTS_N_INSNS (1),       /* addsub.  */
++      COSTS_N_INSNS (1),       /* fpconst.  */
++      0,                       /* neg.  */
++      COSTS_N_INSNS (1),       /* compare.  */
++      COSTS_N_INSNS (2),       /* widen.  */
++      COSTS_N_INSNS (2),       /* narrow.  */
++      COSTS_N_INSNS (2),       /* toint.  */
++      COSTS_N_INSNS (3),       /* fromint.  */
++      COSTS_N_INSNS (2)        /* roundint.  */
++    }
++  },
++  /* Vector */
++  {
++    COSTS_N_INSNS (1),  /* alu.  */
++    COSTS_N_INSNS (2),  /* mult.  */
++    COSTS_N_INSNS (1),  /* movi.  */
++    COSTS_N_INSNS (1),  /* dup.  */
++    COSTS_N_INSNS (1)   /* extract.  */
++  }
++};
++
+ const struct cpu_cost_table a64fx_extra_costs =
+ {
+   /* ALU */
+diff --git a/gcc/config/aarch64/aarch64-tune.md b/gcc/config/aarch64/aarch64-tune.md
+index 40ff147d6f83..326e05367133 100644
+--- a/gcc/config/aarch64/aarch64-tune.md
++++ b/gcc/config/aarch64/aarch64-tune.md
+@@ -1,5 +1,5 @@
+ ;; -*- buffer-read-only: t -*-
+ ;; Generated automatically by gentune.sh from aarch64-cores.def
+ (define_attr "tune"
+-	"cortexa34,cortexa35,cortexa53,cortexa57,cortexa72,cortexa73,thunderx,thunderxt88,thunderxt88p1,octeontx,octeontxt81,octeontxt83,thunderxt81,thunderxt83,ampere1,ampere1a,ampere1b,emag,xgene1,falkor,qdf24xx,exynosm1,phecda,thunderx2t99p1,vulcan,thunderx2t99,cortexa55,cortexa75,cortexa76,cortexa76ae,cortexa77,cortexa78,cortexa78ae,cortexa78c,cortexa65,cortexa65ae,cortexx1,cortexx1c,neoversen1,ares,neoversee1,octeontx2,octeontx2t98,octeontx2t96,octeontx2t93,octeontx2f95,octeontx2f95n,octeontx2f95mm,a64fx,fujitsu_monaka,tsv110,thunderx3t110,neoversev1,zeus,neoverse512tvb,saphira,oryon1,cortexa57cortexa53,cortexa72cortexa53,cortexa73cortexa35,cortexa73cortexa53,cortexa75cortexa55,cortexa76cortexa55,cortexr82,cortexr82ae,applea12,applem1_0,applem1_1,applem1_2,applem1_3,applem2_0,applem2_1,applem2_2,applem2_3,applem3_0,cortexa510,cortexa520,cortexa520ae,cortexa710,cortexa715,cortexa720,cortexa720ae,cortexa725,cortexx2,cortexx3,cortexx4,cortexx925,neoversen2,cobalt100,neoversen3,neoversev2,grace,neoversev3,neoversev3ae,demeter,olympus,gb10,generic,generic_armv8_a,generic_armv9_a"
++	"cortexa34,cortexa35,cortexa53,cortexa57,cortexa72,cortexa73,thunderx,thunderxt88,thunderxt88p1,octeontx,octeontxt81,octeontxt83,thunderxt81,thunderxt83,ampere1,ampere1a,ampere1b,emag,xgene1,falkor,qdf24xx,exynosm1,phecda,thunderx2t99p1,vulcan,thunderx2t99,cortexa55,cortexa75,cortexa76,cortexa76ae,cortexa77,cortexa78,cortexa78ae,cortexa78c,cortexa65,cortexa65ae,cortexx1,cortexx1c,neoversen1,ares,neoversee1,octeontx2,octeontx2t98,octeontx2t96,octeontx2t93,octeontx2f95,octeontx2f95n,octeontx2f95mm,a64fx,fujitsu_monaka,hip12,tsv110,thunderx3t110,neoversev1,zeus,neoverse512tvb,saphira,oryon1,cortexa57cortexa53,cortexa72cortexa53,cortexa73cortexa35,cortexa73cortexa53,cortexa75cortexa55,cortexa76cortexa55,cortexr82,cortexr82ae,applea12,applem1_0,applem1_1,applem1_2,applem1_3,applem2_0,applem2_1,applem2_2,applem2_3,applem3_0,cortexa510,cortexa520,cortexa520ae,cortexa710,cortexa715,cortexa720,cortexa720ae,cortexa725,cortexx2,cortexx3,cortexx4,cortexx925,neoversen2,cobalt100,neoversen3,neoversev2,grace,neoversev3,neoversev3ae,demeter,olympus,gb10,generic,generic_armv8_a,generic_armv9_a"
+ 	(const (symbol_ref "((enum attr_tune) aarch64_tune)")))
+diff --git a/gcc/config/aarch64/aarch64.cc b/gcc/config/aarch64/aarch64.cc
+index 7bd75470cac3..21be53d2ee80 100644
+--- a/gcc/config/aarch64/aarch64.cc
++++ b/gcc/config/aarch64/aarch64.cc
+@@ -407,6 +407,7 @@ static const struct aarch64_flag_desc aarch64_tuning_flags[] =
+ #include "tuning_models/thunderxt88.h"
+ #include "tuning_models/thunderx.h"
+ #include "tuning_models/tsv110.h"
++#include "tuning_models/hip12.h"
+ #include "tuning_models/xgene1.h"
+ #include "tuning_models/emag.h"
+ #include "tuning_models/qdf24xx.h"
+diff --git a/gcc/config/aarch64/tuning_models/hip12.h b/gcc/config/aarch64/tuning_models/hip12.h
+new file mode 100644
+index 000000000000..4f4647bc9c0d
+--- /dev/null
++++ b/gcc/config/aarch64/tuning_models/hip12.h
+@@ -0,0 +1,226 @@
++/* Tuning model description for AArch64 architecture.
++   Copyright (C) 2009-2026 Free Software Foundation, Inc.
++
++   This file is part of GCC.
++
++   GCC is free software; you can redistribute it and/or modify it
++   under the terms of the GNU General Public License as published by
++   the Free Software Foundation; either version 3, or (at your option)
++   any later version.
++
++   GCC is distributed in the hope that it will be useful, but
++   WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   General Public License for more details.
++
++   You should have received a copy of the GNU General Public License
++   along with GCC; see the file COPYING3.  If not see
++   <http://www.gnu.org/licenses/>.  */
++
++#ifndef GCC_AARCH64_H_HIP12
++#define GCC_AARCH64_H_HIP12
++
++#include "generic.h"
++
++static const struct cpu_addrcost_table hip12_addrcost_table =
++{
++    {
++      0, /* hi  */
++      0, /* si  */
++      0, /* di  */
++      2, /* ti  */
++    },
++  0, /* pre_modify  */
++  0, /* post_modify  */
++  2, /* post_modify_ld3_st3  */
++  2, /* post_modify_ld4_st4  */
++  0, /* register_offset  */
++  0, /* register_sextend  */
++  0, /* register_zextend  */
++  0, /* imm_offset  */
++};
++
++static const struct cpu_regmove_cost hip12_regmove_cost =
++{
++  1, /* GP2GP  */
++  /* Spilling to int<->fp instead of memory is recommended so set
++     realistic costs compared to memmov_cost.  */
++  5, /* GP2FP  */
++  2, /* FP2GP  */
++  2  /* FP2FP  */
++};
++
++static const advsimd_vec_cost hip12_advsimd_vector_cost =
++{
++  2, /* int_stmt_cost  */
++  2, /* fp_stmt_cost  */
++  2, /* ld2_st2_permute_cost  */
++  2, /* ld3_st3_permute_cost  */
++  3, /* ld4_st4_permute_cost  */
++  2, /* permute_cost  */
++  9, /* reduc_i8_cost  */
++  7, /* reduc_i16_cost  */
++  5, /* reduc_i32_cost  */
++  3, /* reduc_i64_cost  */
++  9, /* reduc_f16_cost  */
++  6, /* reduc_f32_cost  */
++  3, /* reduc_f64_cost  */
++  2, /* store_elt_extra_cost  */
++  2, /* vec_to_scalar_cost  */
++  4, /* scalar_to_vec_cost  */
++  6, /* align_load_cost  */
++  6, /* unalign_load_cost  */
++  1, /* unalign_store_cost  */
++  1  /* store_cost  */
++};
++
++static const sve_vec_cost hip12_sve_vector_cost =
++{
++  {
++    2, /* int_stmt_cost  */
++    2, /* fp_stmt_cost  */
++    2, /* ld2_st2_permute_cost  */
++    3, /* ld3_st3_permute_cost  */
++    3, /* ld4_st4_permute_cost  */
++    2, /* permute_cost  */
++    /* Theoretically, a reduction involving 31 scalar ADDs could
++       complete in ~6 cycles and would have a cost of 31.  [SU]ADDV
++       completes in 13 cycles, so give it a cost of 31 + 7.  */
++    38, /* reduc_i8_cost  */
++    /* Likewise for 15 scalar ADDs (~3 cycles) vs. 10: 15 + 7.  */
++    22, /* reduc_i16_cost  */
++    /* Likewise for 7 scalar ADDs (~2 cycles) vs. 7: 7 + 5.  */
++    12, /* reduc_i32_cost  */
++    /* Likewise for 3 scalar ADDs (~1 cycles) vs. 4: 3 + 3.  */
++    6, /* reduc_i64_cost  */
++    /* Theoretically, a reduction involving 15 scalar FADDs could
++       complete in ~8 cycles and would have a cost of 30.  FADDV
++       completes in 15 cycles, so give it a cost of 30 + 7.  */
++    37, /* reduc_f16_cost  */
++    /* Likewise for 7 scalar FADDs (~4 cycles) vs. 12: 14 + 8.  */
++    22, /* reduc_f32_cost  */
++    /* Likewise for 3 scalar FADDs (~2 cycles) vs. 9: 6 + 7.  */
++    13, /* reduc_f64_cost  */
++    2, /* store_elt_extra_cost  */
++    2, /* vec_to_scalar_cost  */
++    4, /* scalar_to_vec_cost  */
++    6, /* align_load_cost  */
++    6, /* unalign_load_cost  */
++    1, /* unalign_store_cost  */
++    1  /* store_cost  */
++  },
++  3, /* clast_cost  */
++  42, /* fadda_f16_cost  */
++  26, /* fadda_f32_cost  */
++  20, /* fadda_f64_cost  */
++  32, /* gather_load_x32_cost  */
++  16, /* gather_load_x64_cost  */
++  96, /* gather_load_x32_init_cost  */
++  32, /* gather_load_x64_init_cost  */
++  3 /* scatter_store_elt_cost  */
++};
++
++static const aarch64_scalar_vec_issue_info hip12_scalar_issue_info =
++{
++  5, /* loads_stores_per_cycle  */
++  2, /* stores_per_cycle  */
++  6, /* general_ops_per_cycle  */
++  0, /* fp_simd_load_general_ops  */
++  1 /* fp_simd_store_general_ops  */
++};
++
++static const aarch64_advsimd_vec_issue_info hip12_advsimd_issue_info =
++{
++  {
++    5, /* loads_stores_per_cycle  */
++    2, /* stores_per_cycle  */
++    4, /* general_ops_per_cycle  */
++    0, /* fp_simd_load_general_ops  */
++    1 /* fp_simd_store_general_ops  */
++  },
++  2, /* ld2_st2_general_ops  */
++  2, /* ld3_st3_general_ops  */
++  3 /* ld4_st4_general_ops  */
++};
++
++static const aarch64_sve_vec_issue_info hip12_sve_issue_info =
++{
++  {
++    {
++      5, /* loads_stores_per_cycle  */
++      2, /* stores_per_cycle  */
++      2, /* general_ops_per_cycle  */
++      0, /* fp_simd_load_general_ops  */
++      1 /* fp_simd_store_general_ops  */
++    },
++    2, /* ld2_st2_general_ops  */
++    2, /* ld3_st3_general_ops  */
++    3 /* ld4_st4_general_ops  */
++  },
++  2, /* pred_ops_per_cycle  */
++  2, /* while_pred_ops  */
++  2, /* int_cmp_pred_ops  */
++  1, /* fp_cmp_pred_ops  */
++  1, /* gather_scatter_pair_general_ops  */
++  1 /* gather_scatter_pair_pred_ops  */
++};
++
++static const aarch64_vec_issue_info hip12_vec_issue_info =
++{
++  &hip12_scalar_issue_info,
++  &hip12_advsimd_issue_info,
++  &hip12_sve_issue_info
++};
++
++static const struct cpu_vector_cost hip12_vector_cost =
++{
++  1, /* scalar_int_stmt_cost  */
++  2, /* scalar_fp_stmt_cost  */
++  4, /* scalar_load_cost  */
++  1, /* scalar_store_cost  */
++  1, /* cond_taken_branch_cost  */
++  1, /* cond_not_taken_branch_cost  */
++  &hip12_advsimd_vector_cost, /* advsimd  */
++  &hip12_sve_vector_cost, /* sve  */
++  &hip12_vec_issue_info /* issue_info  */
++};
++
++static const struct tune_params hip12_tunings =
++{
++  &hip12_extra_costs,
++  &hip12_addrcost_table,
++  &hip12_regmove_cost,
++  &hip12_vector_cost,
++  &generic_branch_cost,
++  &generic_approx_modes,
++  SVE_256, /* sve_width  */
++  { 4, /* load_int.  */
++    1, /* store_int.  */
++    6, /* load_fp.  */
++    1, /* store_fp.  */
++    8, /* load_pred.  */
++    4 /* store_pred.  */
++  }, /* memmov_cost.  */
++  8,    /* issue_rate  */
++  (AARCH64_FUSE_BASE
++   | AARCH64_FUSE_CMP_CSEL
++   | AARCH64_FUSE_CMP_CSET), /* fusible_ops  */
++  "16", /* function_align.  */
++  "4",  /* jump_align.  */
++  "8",  /* loop_align.  */
++  2,    /* int_reassoc_width.  */
++  4,    /* fp_reassoc_width.  */
++  2,    /* fma_reassoc_width.  */
++  2,    /* vec_reassoc_width.  */
++  2,    /* min_div_recip_mul_sf.  */
++  2,    /* min_div_recip_mul_df.  */
++  0,    /* max_case_values.  */
++  tune_params::AUTOPREFETCHER_WEAK,    /* autoprefetcher_model.  */
++  (AARCH64_EXTRA_TUNE_BASE
++   | AARCH64_EXTRA_TUNE_MATCHED_VECTOR_THROUGHPUT),    /* tune_flags.  */
++  &generic_armv8_a_prefetch_tune,
++  AARCH64_LDP_STP_POLICY_ALWAYS,    /* ldp_policy_model.  */
++  AARCH64_LDP_STP_POLICY_ALWAYS     /* stp_policy_model.  */
++};
++
++#endif /* GCC_AARCH64_H_HIP12.  */
+diff --git a/gcc/doc/invoke.texi b/gcc/doc/invoke.texi
+index cf4f2b2118ef..e7af79e09aeb 100644
+--- a/gcc/doc/invoke.texi
++++ b/gcc/doc/invoke.texi
+@@ -22016,7 +22016,7 @@ performance of the code.  Permissible values for this option are:
+ @samp{octeontx2f95mm},
+ @samp{a64fx}, @samp{fujitsu-monaka},
+ @samp{thunderx}, @samp{thunderxt88},
+-@samp{thunderxt88p1}, @samp{thunderxt81}, @samp{tsv110},
++@samp{thunderxt88p1}, @samp{thunderxt81}, @samp{tsv110}, @samp{hip12},
+ @samp{thunderxt83}, @samp{thunderx2t99}, @samp{thunderx3t110}, @samp{zeus},
+ @samp{cortex-a57.cortex-a53}, @samp{cortex-a72.cortex-a53},
+ @samp{cortex-a73.cortex-a35}, @samp{cortex-a73.cortex-a53},
+-- 
+2.43.7
+
+

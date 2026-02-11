@@ -1,0 +1,96 @@
+From 0b99615a8aef011cff76c6caa8c09434f46598b3 Mon Sep 17 00:00:00 2001
+From: Stefan Schulze Frielinghaus <stefansf@gcc.gnu.org>
+Date: Wed, 21 Jan 2026 16:00:59 +0100
+Subject: [PATCH] s390: Don't emulate vec_cmpgtuv1tiv1ti for VXE3 [PR122781]
+
+Starting with VXE3, 128-bit integer compares are natively supported.
+For older machines those compares are emulated via
+*vec_cmpeq<mode><mode>_nocc_emu and *vec_cmpgt<mode><mode>_nocc_emu and
+*vec_cmpgtu<mode><mode>_nocc_emu.  The latter was missing !TARGET_VXE3
+in the condition which resulted in emulating unsigned greater-than
+compares instead of making use of the new instructions enabled by
+r15-7051.
+
+	PR target/122781
+
+gcc/ChangeLog:
+
+	* config/s390/vector.md: Don't emulate vec_cmpgtu for 128-bit
+	integers for VXE3.
+
+gcc/testsuite/ChangeLog:
+
+	* gcc.target/s390/vxe3/vcmp-1.c: New test.
+
+(cherry picked from commit 2a20b792133c8f3b3c5fcf2d9f647b1634362637)
+---
+ gcc/config/s390/vector.md                   |  2 +-
+ gcc/testsuite/gcc.target/s390/vxe3/vcmp-1.c | 42 +++++++++++++++++++++
+ 2 files changed, 43 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/gcc.target/s390/vxe3/vcmp-1.c
+
+diff --git a/gcc/config/s390/vector.md b/gcc/config/s390/vector.md
+index e29255fe1116..6953c4a320a9 100644
+--- a/gcc/config/s390/vector.md
++++ b/gcc/config/s390/vector.md
+@@ -2181,7 +2181,7 @@
+   [(set (match_operand:VI_HW_T              0 "register_operand" "=v")
+ 	(gtu:VI_HW_T (match_operand:VI_HW_T 1 "register_operand"  "v")
+ 		     (match_operand:VI_HW_T 2 "register_operand"  "v")))]
+-  "TARGET_VX"
++  "TARGET_VX && !TARGET_VXE3"
+   "#"
+   "&& can_create_pseudo_p ()"
+   [(set (match_dup 3)
+diff --git a/gcc/testsuite/gcc.target/s390/vxe3/vcmp-1.c b/gcc/testsuite/gcc.target/s390/vxe3/vcmp-1.c
+new file mode 100644
+index 000000000000..8fbc0ec05359
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/s390/vxe3/vcmp-1.c
+@@ -0,0 +1,42 @@
++/* { dg-do compile } */
++/* { dg-require-effective-target int128 } */
++/* { dg-final { check-function-bodies "**" "" "" } } */
++
++typedef __int128 __attribute__ ((vector_size (16))) V1TI;
++typedef unsigned __int128 __attribute__ ((vector_size (16))) UV1TI;
++
++/*
++** cmpeq:
++**	vceqq	%v24,%v24,%v26
++**	br	%r14
++*/
++
++V1TI
++cmpeq (V1TI x, V1TI y)
++{
++  return x == y;
++}
++
++/*
++** cmpgt:
++**	vchq	%v24,%v24,%v26
++**	br	%r14
++*/
++
++V1TI
++cmpgt (V1TI x, V1TI y)
++{
++  return x > y;
++}
++
++/*
++** cmpgtu:
++**	vchlq	%v24,%v24,%v26
++**	br	%r14
++*/
++
++V1TI
++cmpgtu (UV1TI x, UV1TI y)
++{
++  return x > y;
++}
+-- 
+2.43.7
+
+

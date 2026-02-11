@@ -1,0 +1,74 @@
+From f5e6e82a5ffb929d25e4f3288ef9b233dcff7b46 Mon Sep 17 00:00:00 2001
+From: Eric Botcazou <ebotcazou@adacore.com>
+Date: Mon, 9 Feb 2026 00:55:45 +0100
+Subject: [PATCH] Ada: Fix bogus "potentially unsynchronized barrier" warning
+
+This is a regression present on the mainline and 15 branch: the compiler
+gives a bogus "potentially unsynchronized barrier" when the condition of
+an entry barrier requires the creation of a controlled temporary, because
+it comes with a transient scope that fools the test on scopes done in the
+Is_Global_Entity procedure.
+
+gcc/ada/
+	PR ada/124025
+	* exp_ch9.adb (Expand_Entry_Barrier.Is_Global_Entity): Use
+	Scope_Within_Or_Same to test whether the object is local.
+
+gcc/testsuite/
+	* gnat.dg/protected_type1.adb: New test.
+
+Co-authored-by: Liam Powell <liam@liampwll.com>
+---
+ gcc/ada/exp_ch9.adb                       |  2 +-
+ gcc/testsuite/gnat.dg/protected_type1.adb | 25 +++++++++++++++++++++++
+ 2 files changed, 26 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/gnat.dg/protected_type1.adb
+
+diff --git a/gcc/ada/exp_ch9.adb b/gcc/ada/exp_ch9.adb
+index d75fd3a68256..5fbf7fb9b9a2 100644
+--- a/gcc/ada/exp_ch9.adb
++++ b/gcc/ada/exp_ch9.adb
+@@ -5824,7 +5824,7 @@ package body Exp_Ch9 is
+                --  during expansion, it is ok. If expansion is not performed,
+                --  then Func is Empty so this test cannot succeed.
+ 
+-               if Scope (E) = Func_Id then
++               if Scope_Within_Or_Same (S, Func_Id) then
+                   null;
+ 
+                --  A protected call from a barrier to another object is ok
+diff --git a/gcc/testsuite/gnat.dg/protected_type1.adb b/gcc/testsuite/gnat.dg/protected_type1.adb
+new file mode 100644
+index 000000000000..44ae6745193c
+--- /dev/null
++++ b/gcc/testsuite/gnat.dg/protected_type1.adb
+@@ -0,0 +1,25 @@
++--  { dg-do compile }
++
++with Ada.Finalization;
++
++procedure Protected_Type1 is
++
++  type T is new Ada.Finalization.Controlled with null record;
++
++  protected type Queue is
++    entry Get_Next_Line (Line : out String);
++  private
++    A : T;
++  end Queue;
++
++  protected body Queue is
++    entry Get_Next_Line (Line : out String)
++      when A /= (Ada.Finalization.Controlled with null record) is
++    begin
++      null;
++    end Get_Next_Line;
++  end Queue;
++
++begin
++  null;
++end;
+-- 
+2.43.7
+
+

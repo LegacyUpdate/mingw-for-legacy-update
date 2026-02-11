@@ -1,0 +1,64 @@
+From ba20af7470398266052d5690d4b8aa18b0f11b72 Mon Sep 17 00:00:00 2001
+From: Avinash Jayakar <avinashd@linux.ibm.com>
+Date: Wed, 19 Nov 2025 10:40:45 +0530
+Subject: [PATCH] rs6000: Do not reorder operands for vec_pack_to_short_fp32
+ based on endianness
+
+The patterns for altivec_vpku<VI_char>um take care of the order of
+operands for the vpkuwum instruction, and therefore it is not needed in
+the define_expand pattern "convert_4f32_8f16".
+
+2025-11-18  Avinash Jayakar  <avinashd@linux.ibm.com>
+
+gcc/ChangeLog:
+	PR target/119130
+	* config/rs6000/altivec.md (convert_4f32_8f16): Use same operand
+	order for both endian format.
+
+gcc/testsuite/ChangeLog:
+	PR target/119130
+	* gcc.target/powerpc/builtins-1-p9-runnable.c: Use same expected
+	results for both endian format.
+---
+ gcc/config/rs6000/altivec.md                              | 5 +----
+ gcc/testsuite/gcc.target/powerpc/builtins-1-p9-runnable.c | 5 -----
+ 2 files changed, 1 insertion(+), 9 deletions(-)
+
+diff --git a/gcc/config/rs6000/altivec.md b/gcc/config/rs6000/altivec.md
+index 7edc288a6565..fc3c062e5ede 100644
+--- a/gcc/config/rs6000/altivec.md
++++ b/gcc/config/rs6000/altivec.md
+@@ -3625,10 +3625,7 @@
+ 
+   emit_insn (gen_vsx_xvcvsphp (rtx_tmp_hi, operands[1]));
+   emit_insn (gen_vsx_xvcvsphp (rtx_tmp_lo, operands[2]));
+-  if (!BYTES_BIG_ENDIAN)
+-    emit_insn (gen_altivec_vpkuwum (operands[0], rtx_tmp_hi, rtx_tmp_lo));
+-  else
+-    emit_insn (gen_altivec_vpkuwum (operands[0], rtx_tmp_lo, rtx_tmp_hi));
++  emit_insn (gen_altivec_vpkuwum (operands[0], rtx_tmp_hi, rtx_tmp_lo));
+   DONE;
+ })
+ 
+diff --git a/gcc/testsuite/gcc.target/powerpc/builtins-1-p9-runnable.c b/gcc/testsuite/gcc.target/powerpc/builtins-1-p9-runnable.c
+index 976654155b1a..500db87d7e01 100644
+--- a/gcc/testsuite/gcc.target/powerpc/builtins-1-p9-runnable.c
++++ b/gcc/testsuite/gcc.target/powerpc/builtins-1-p9-runnable.c
+@@ -16,13 +16,8 @@ int main() {
+   vfb = (vector float){10.0, -2.0, 70.0, 999.0 };
+ 
+   /* Expected results.  */
+-#ifdef __BIG_ENDIAN__
+-  vexpected = (vector unsigned short) { 0x4900, 0xc000, 0x5460, 0x63ce,
+-					0x3666, 0x3e66, 0x4d00, 0x563e };
+-#else
+   vexpected = (vector unsigned short) { 0x3666, 0x3e66, 0x4d00, 0x563e,
+ 					0x4900, 0xc000, 0x5460, 0x63ce };
+-#endif
+ 
+ /*
+      vresult = vec_pack_to_short_fp32 (vfa, vfb);
+-- 
+2.43.7
+
+

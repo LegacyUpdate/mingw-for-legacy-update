@@ -1,0 +1,128 @@
+From ed65c1df1dd1ffb668b48d8185d0d5d64ea6255f Mon Sep 17 00:00:00 2001
+From: Iain Buclaw <ibuclaw@gdcproject.org>
+Date: Thu, 29 Jan 2026 14:06:14 +0100
+Subject: [PATCH] d: Fix ICE in gimplify_expr with const ref noreturn
+ parameters [PR123046]
+
+The ICE was caused by references to const/immutable qualified `noreturn'
+declarations that were being leaked to the code generation when they
+should have been omitted or replaced with `assert(0)'.
+
+	PR d/123046
+
+gcc/d/ChangeLog:
+
+	* d-codegen.cc (build_address): Return `null' when generating the
+	address of a `noreturn' declaration.
+	(d_build_call): Compare TYPE_MAIN_VARIANT of type with `noreturn'.
+	* decl.cc (get_fndecl_arguments): Likewise.
+	* types.cc (finish_aggregate_mode): Likewise.
+	(TypeVisitor::visit (TypeFunction *)): Likewise.
+
+gcc/testsuite/ChangeLog:
+
+	* gdc.dg/pr123046.d: New test.
+
+(cherry picked from commit b4ee1a549eac8d165740616376beeab73c5c6512)
+---
+ gcc/d/d-codegen.cc              | 14 ++++++++++++--
+ gcc/d/decl.cc                   |  2 +-
+ gcc/d/types.cc                  |  4 ++--
+ gcc/testsuite/gdc.dg/pr123046.d | 10 ++++++++++
+ 4 files changed, 25 insertions(+), 5 deletions(-)
+ create mode 100644 gcc/testsuite/gdc.dg/pr123046.d
+
+diff --git a/gcc/d/d-codegen.cc b/gcc/d/d-codegen.cc
+index 4b72a2bd08f7..8434ba95dfc7 100644
+--- a/gcc/d/d-codegen.cc
++++ b/gcc/d/d-codegen.cc
+@@ -705,6 +705,11 @@ build_address (tree exp)
+   if (TREE_CODE (exp) == CONST_DECL)
+     exp = DECL_INITIAL (exp);
+ 
++  /* Type `noreturn' has no storage, return `null' for the expression.  */
++  if (DECL_P (exp) && TREE_CODE (exp) != FIELD_DECL
++      && TYPE_MAIN_VARIANT (TREE_TYPE (exp)) == noreturn_type_node)
++    return compound_expr (init, null_pointer_node);
++
+   /* Some expression lowering may request an address of a compile-time constant,
+      or other non-lvalue expression.  Make sure it is assigned to a location we
+      can reference.  */
+@@ -2358,7 +2363,7 @@ d_build_call (TypeFunction *tf, tree callable, tree object,
+ 
+ 	  /* Type `noreturn` is a terminator, as no other arguments can possibly
+ 	     be evaluated after it.  */
+-	  if (TREE_TYPE (targ) == noreturn_type_node)
++	  if (TYPE_MAIN_VARIANT (TREE_TYPE (targ)) == noreturn_type_node)
+ 	    noreturn_call = true;
+ 
+ 	  vec_safe_push (args, targ);
+@@ -2378,7 +2383,12 @@ d_build_call (TypeFunction *tf, tree callable, tree object,
+       unsigned int ix;
+ 
+       FOR_EACH_VEC_SAFE_ELT (args, ix, arg)
+-	saved_args = compound_expr (saved_args, arg);
++	{
++	  saved_args = compound_expr (saved_args, arg);
++
++	  if (TYPE_MAIN_VARIANT (TREE_TYPE (arg)) == noreturn_type_node)
++	    break;
++	}
+ 
+       /* Add a stub result type for the expression.  */
+       tree result = build_zero_cst (TREE_TYPE (ctype));
+diff --git a/gcc/d/decl.cc b/gcc/d/decl.cc
+index 9ddf7cf1540c..11a05959a4ea 100644
+--- a/gcc/d/decl.cc
++++ b/gcc/d/decl.cc
+@@ -184,7 +184,7 @@ get_fndecl_arguments (FuncDeclaration *decl)
+ 
+ 	  /* Type `noreturn` is a terminator, as no other arguments can possibly
+ 	     be evaluated after it.  */
+-	  if (TREE_TYPE (parm_decl) == noreturn_type_node)
++	  if (TYPE_MAIN_VARIANT (TREE_TYPE (parm_decl)) == noreturn_type_node)
+ 	    break;
+ 
+ 	  /* Chain them in the correct order.  */
+diff --git a/gcc/d/types.cc b/gcc/d/types.cc
+index 52324df0a1ed..0b8583842ea9 100644
+--- a/gcc/d/types.cc
++++ b/gcc/d/types.cc
+@@ -963,7 +963,7 @@ public:
+ 
+ 	/* Type `noreturn` is a terminator, as no other arguments can possibly
+ 	   be evaluated after it.  */
+-	if (type == noreturn_type_node)
++	if (TYPE_MAIN_VARIANT (type) == noreturn_type_node)
+ 	  break;
+ 
+ 	fnparams = chainon (fnparams, build_tree_list (0, type));
+@@ -989,7 +989,7 @@ public:
+     d_keep (t->ctype);
+ 
+     /* Qualify function types that have the type `noreturn` as volatile.  */
+-    if (fntype == noreturn_type_node)
++    if (TYPE_MAIN_VARIANT (fntype) == noreturn_type_node)
+       t->ctype = build_qualified_type (t->ctype, TYPE_QUAL_VOLATILE);
+ 
+     /* Handle any special support for calling conventions.  */
+diff --git a/gcc/testsuite/gdc.dg/pr123046.d b/gcc/testsuite/gdc.dg/pr123046.d
+new file mode 100644
+index 000000000000..1a3cb2372cc8
+--- /dev/null
++++ b/gcc/testsuite/gdc.dg/pr123046.d
+@@ -0,0 +1,10 @@
++// { dg-do compile }
++ulong pure_hashOf(const ref typeof(*null) key)
++{
++    return hashOf(key);
++}
++
++ulong hashOf(const typeof(*null) val)
++{
++    return 0;
++}
+-- 
+2.43.7
+
+

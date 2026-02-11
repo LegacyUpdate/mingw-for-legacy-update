@@ -1,0 +1,83 @@
+From 76e79a371424ac6fecff33bf535d232140ba2a3c Mon Sep 17 00:00:00 2001
+From: Richard Biener <rguenther@suse.de>
+Date: Tue, 27 Jan 2026 13:01:19 +0100
+Subject: [PATCH] ipa/116296 - avoid overflow in modref_access_node::contains
+
+The following aovids overflow when scaling the param offset
+difference by BITS_PER_UNIT by using poly_offset_int instead of
+poly_int64 for the computations.
+
+	PR ipa/116296
+	* ipa-modref-tree.cc (modref_access_node::contains): Use
+	poly_offset_int for the param offset difference and the
+	overlap computation.
+
+	* gcc.dg/torture/pr116296.c: New testcase.
+
+(cherry picked from commit ef652d7bd4faf389c7963a8cb4e720df0dc73140)
+---
+ gcc/ipa-modref-tree.cc                  | 15 ++++++++++-----
+ gcc/testsuite/gcc.dg/torture/pr116296.c |  9 +++++++++
+ 2 files changed, 19 insertions(+), 5 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.dg/torture/pr116296.c
+
+diff --git a/gcc/ipa-modref-tree.cc b/gcc/ipa-modref-tree.cc
+index 1a7e204d71e2..c3f9b259176a 100644
+--- a/gcc/ipa-modref-tree.cc
++++ b/gcc/ipa-modref-tree.cc
+@@ -59,7 +59,7 @@ modref_access_node::operator == (modref_access_node &a) const
+ bool
+ modref_access_node::contains (const modref_access_node &a) const
+ {
+-  poly_int64 aoffset_adj = 0;
++  poly_offset_int aoffset_adj = 0;
+   if (parm_index != MODREF_UNKNOWN_PARM)
+     {
+       if (parm_index != a.parm_index)
+@@ -80,7 +80,8 @@ modref_access_node::contains (const modref_access_node &a) const
+ 	      a.offset may result in non-negative offset again.
+ 	      Ubsan fails on val << LOG_BITS_PER_UNIT where val
+ 	      is negative.  */
+-	   aoffset_adj = (a.parm_offset - parm_offset)
++	   aoffset_adj = (poly_offset_int::from (a.parm_offset, SIGNED)
++			  - poly_offset_int::from (parm_offset, SIGNED))
+ 			 * BITS_PER_UNIT;
+ 	}
+     }
+@@ -96,10 +97,14 @@ modref_access_node::contains (const modref_access_node &a) const
+ 	      || !known_le (size, a.size)))
+ 	return false;
+       if (known_size_p (max_size))
+-	return known_subrange_p (a.offset + aoffset_adj,
+-				 a.max_size, offset, max_size);
++	return known_subrange_p (poly_offset_int::from (a.offset, SIGNED)
++				 + aoffset_adj, a.max_size,
++				 poly_offset_int::from (offset, SIGNED),
++				 max_size);
+       else
+-	return known_le (offset, a.offset + aoffset_adj);
++	return known_le (poly_offset_int::from (offset, SIGNED),
++			 poly_offset_int::from (a.offset, SIGNED)
++			 + aoffset_adj);
+     }
+   return true;
+ }
+diff --git a/gcc/testsuite/gcc.dg/torture/pr116296.c b/gcc/testsuite/gcc.dg/torture/pr116296.c
+new file mode 100644
+index 000000000000..4170a1011dc3
+--- /dev/null
++++ b/gcc/testsuite/gcc.dg/torture/pr116296.c
+@@ -0,0 +1,9 @@
++/* { dg-do compile } */
++/* { dg-require-effective-target int32plus } */
++
++short g(unsigned long h, int i[11][11], short c)
++{
++  for (unsigned long j = 0; j < h; j -= 0x105f000000000000ull)
++    c = c > i[j][j];
++  return c;
++}
+-- 
+2.43.7
+
+

@@ -1,0 +1,62 @@
+From 4fa36577fc003048c6fd86784f3ae64d36c72808 Mon Sep 17 00:00:00 2001
+From: =?utf8?q?Torbj=C3=B6rn=20SVENSSON?= <torbjorn.svensson@foss.st.com>
+Date: Wed, 28 Jan 2026 14:43:07 +0100
+Subject: [PATCH] testsuite: lto: transform gcc-ar to include prefix
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf8
+Content-Transfer-Encoding: 8bit
+
+When the the gcc binary is named arm-none-eabi-gcc, the gcc-ar binary
+will be named arm-none-eabi-gcc-ar.  The current approach works fine as
+long as the binary does not contain any prefix, but if it does, the
+gcc-ar binary will not be found.
+
+gcc/testsuite/ChangeLog
+
+	* lib/lto.exp (lto-build-archive): Transform gcc-ar binary name.
+
+Signed-off-by: TorbjÃ¶rn SVENSSON <torbjorn.svensson@foss.st.com>
+(cherry picked from commit c9addbc79ac0f9089e69965fec6b386833b3de32)
+---
+ gcc/testsuite/lib/lto.exp | 17 ++++++++++++++---
+ 1 file changed, 14 insertions(+), 3 deletions(-)
+
+diff --git a/gcc/testsuite/lib/lto.exp b/gcc/testsuite/lib/lto.exp
+index a35a3fc3a748..8c8b3aaafd14 100644
+--- a/gcc/testsuite/lib/lto.exp
++++ b/gcc/testsuite/lib/lto.exp
+@@ -313,6 +313,7 @@ proc lto-build-archive { testname objlist dest } {
+     global testcase
+     global tool
+     global GCC_UNDER_TEST
++    global GCC_AR_UNDER_TEST
+ 
+     upvar dg-messages-by-file dg-messages-by-file
+ 
+@@ -327,9 +328,19 @@ proc lto-build-archive { testname objlist dest } {
+ 	}
+     }
+ 
+-    # Hack up the gcc-ar command from $GCC_UNDER_TEST.
+-    set ar_cmd [file dirname [lindex $GCC_UNDER_TEST 0]]
+-    set ar_cmd "$ar_cmd/gcc-ar [lrange $GCC_UNDER_TEST 1 end]"
++    # For now find gcc-ar in the same directory as $GCC_UNDER_TEST, unless
++    # GCC_AR_UNDER_TEST is defined.
++
++    if ![info exists GCC_AR_UNDER_TEST] {
++	if { ![is_remote host] && [string match "*/*" [lindex $GCC_UNDER_TEST 0]] } {
++	    set ar_cmd [file dirname [lindex $GCC_UNDER_TEST 0]]/[gcc-transform-out-of-tree gcc-ar]
++	} else {
++	    set ar_cmd [gcc-transform-out-of-tree gcc-ar]
++	}
++    } else {
++        set ar_cmd $GCC_AR_UNDER_TEST
++    }
++
+     set ar_output [remote_exec host "$ar_cmd rcs $dest $objlist"]
+     set retval [lindex $ar_output 0]
+     set retmsg [lindex $ar_output 1]
+-- 
+2.43.7
+
+

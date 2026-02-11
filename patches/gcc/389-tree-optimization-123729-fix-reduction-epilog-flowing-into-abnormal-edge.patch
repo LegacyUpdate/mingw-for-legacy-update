@@ -1,0 +1,119 @@
+From bdb57f786277a07054bb6be3ba8054b003c3877d Mon Sep 17 00:00:00 2001
+From: Richard Biener <rguenther@suse.de>
+Date: Tue, 20 Jan 2026 10:24:20 +0100
+Subject: [PATCH] tree-optimization/123729 - fix reduction epilog flowing into
+ abnormal edge
+
+When we vectorize a reduction and the reduction value flows across
+an abnormal edge we have to make sure to mark the final SSA properly.
+The following serves as a recipie how to avoid blindly copying
+SSA_NAME_OCCURS_IN_ABNORMAL_PHI but instead set it when needed during
+use replacement.
+
+	PR tree-optimization/123729
+	* tree-vect-loop.cc (vect_create_epilog_for_reduction): Set
+	SSA_NAME_OCCURS_IN_ABNORMAL_PHI if the reduction flows
+	across an abnomal edge.
+
+	* g++.dg/torture/pr123729.C: New testcase.
+
+(cherry picked from commit 06765f2e0fc4991e08adda7f72902edfb7e70fbb)
+---
+ gcc/testsuite/g++.dg/torture/pr123729.C | 60 +++++++++++++++++++++++++
+ gcc/tree-vect-loop.cc                   | 11 ++++-
+ 2 files changed, 70 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/g++.dg/torture/pr123729.C
+
+diff --git a/gcc/testsuite/g++.dg/torture/pr123729.C b/gcc/testsuite/g++.dg/torture/pr123729.C
+new file mode 100644
+index 000000000000..1e12c680f299
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/torture/pr123729.C
+@@ -0,0 +1,60 @@
++// { dg-do compile }
++// { dg-additional-options "-std=gnu++20" }
++
++#include <csetjmp>
++#include <iostream>
++
++template <typename T> struct A { using type = int; };
++template <typename F, typename... G> struct B {};
++template <typename F> struct B<F> { using type = F; };
++struct {
++  template <typename... F,
++            typename Overload = typename B<typename A<F>::type...>::type>
++  int operator()(F...) {
++    int iArrFld_0_0;
++    for (int i = 7; i < 28; ++i)
++      ;
++    int i1 = 3;
++    try {
++      for (int i = 7; i < 28; ++i) {
++        for (int j = 0; j < 7; ++j)
++          if (iArrFld_0_0 == 0) {
++            for (int k = 0; k < 20000; ++k)
++              std::cout << "Hello, world!" << std::endl;
++          }
++        jmp_buf env2;
++        for (int i2 = 16; i2 < 350; ++i2)
++          for (int j2 = 1; j2 < 75; ++j2)
++            for (int k2 = 0; k2 < 16; ++k2) {
++              int temp2 = i2 + j2 + k2;
++              int mod2 = temp2 % 8;
++              {
++                setjmp(env2) == 0;
++                ;
++              }
++            }
++      }
++    } catch (const std::exception &e) {
++    }
++    auto lambda = [](int x) {
++      return [x](int y) {
++        int z = 0;
++        if (y > 0)
++          z = 1;
++        return z + x;
++      };
++    };
++    for (int i = 0; i < 1000; ++i) {
++      int m = 0;
++      auto f = lambda(i);
++      for (int j = 0; j < 100; ++j)
++        m += f(j);
++      i1 += m;
++    }
++    std::cout << "Final value of i1: " << i1 << std::endl;
++    return 0;
++  }
++} a;
++int main() {
++  auto f = a([] {});
++}
+diff --git a/gcc/tree-vect-loop.cc b/gcc/tree-vect-loop.cc
+index 5ccd64adbf22..cf46432c2aed 100644
+--- a/gcc/tree-vect-loop.cc
++++ b/gcc/tree-vect-loop.cc
+@@ -7030,8 +7030,17 @@ vect_create_epilog_for_reduction (loop_vec_info loop_vinfo,
+           scalar_result = scalar_results[k];
+           FOR_EACH_IMM_USE_STMT (use_stmt, imm_iter, orig_name)
+ 	    {
++	      gphi *use_phi = dyn_cast <gphi *> (use_stmt);
+ 	      FOR_EACH_IMM_USE_ON_STMT (use_p, imm_iter)
+-		SET_USE (use_p, scalar_result);
++		{
++		  if (use_phi
++		      && (phi_arg_edge_from_use (use_p)->flags & EDGE_ABNORMAL))
++		    {
++		      gcc_assert (SSA_NAME_OCCURS_IN_ABNORMAL_PHI (orig_name));
++		      SSA_NAME_OCCURS_IN_ABNORMAL_PHI (scalar_result) = 1;
++		    }
++		  SET_USE (use_p, scalar_result);
++		}
+ 	      update_stmt (use_stmt);
+ 	    }
+         }
+-- 
+2.43.7
+
+

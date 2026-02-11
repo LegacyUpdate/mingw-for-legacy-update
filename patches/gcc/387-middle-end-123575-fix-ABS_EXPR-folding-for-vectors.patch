@@ -1,0 +1,57 @@
+From d8f71bdb9d693655dc4d3566e4b62ea962ff5918 Mon Sep 17 00:00:00 2001
+From: Richard Biener <rguenther@suse.de>
+Date: Wed, 28 Jan 2026 13:39:14 +0100
+Subject: [PATCH] middle-end/123575 - fix ABS_EXPR folding for vectors
+
+Folding away a conversion requires an optab check for vectors.
+
+	PR middle-end/123575
+	* match.pd (abs ((T)x) -> absu (x)): For vector type
+	arguments require the resulting operation is supported.
+
+	* g++.dg/pr123575.C: New testcase.
+
+(cherry picked from commit 26723879292eda8a9b606b3c2b968941ec4fd9ef)
+---
+ gcc/match.pd                    |  4 +++-
+ gcc/testsuite/g++.dg/pr123575.C | 12 ++++++++++++
+ 2 files changed, 15 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/g++.dg/pr123575.C
+
+diff --git a/gcc/match.pd b/gcc/match.pd
+index e64fca5e887a..248a32a23d28 100644
+--- a/gcc/match.pd
++++ b/gcc/match.pd
+@@ -214,7 +214,9 @@ DEFINE_INT_AND_FLOAT_ROUND_FN (RINT)
+ (simplify (abs (convert @0))
+  (if (ANY_INTEGRAL_TYPE_P (TREE_TYPE (@0))
+       && !TYPE_UNSIGNED (TREE_TYPE (@0))
+-      && element_precision (type) > element_precision (TREE_TYPE (@0)))
++      && element_precision (type) > element_precision (TREE_TYPE (@0))
++      && (!VECTOR_TYPE_P (type)
++	  || target_supports_op_p (TREE_TYPE (@0), ABSU_EXPR, optab_vector)))
+   (with { tree utype = unsigned_type_for (TREE_TYPE (@0)); }
+    (convert (absu:utype @0)))))
+ 
+diff --git a/gcc/testsuite/g++.dg/pr123575.C b/gcc/testsuite/g++.dg/pr123575.C
+new file mode 100644
+index 000000000000..9a062885106f
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/pr123575.C
+@@ -0,0 +1,12 @@
++// { dg-do compile }
++// { dg-options "-O -Wno-psabi" }
++
++typedef int __attribute__((vector_size(sizeof(int)*2))) v2i;
++typedef long __attribute__((vector_size(sizeof(long)*2))) v2l;
++
++v2l f(v2i a)
++{
++  v2l  t = __builtin_convertvector(a, v2l);
++  t = t > 0 ? t : -t;
++  return t;
++}
+-- 
+2.43.7
+
+

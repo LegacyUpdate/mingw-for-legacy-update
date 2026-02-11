@@ -1,0 +1,50 @@
+From 490531cc072aa9bb132275855f027ccaabde122a Mon Sep 17 00:00:00 2001
+From: Richard Biener <rguenther@suse.de>
+Date: Thu, 29 Jan 2026 15:43:01 +0100
+Subject: [PATCH] tree-optimization/109410 - ICE with noreturn and -g
+
+This fixes the -g variant of the original testcase.
+
+	PR tree-optimization/109410
+	* tree-ssa-reassoc.cc (build_and_add_sum): Use
+	gsi_start_nondebug_after_labels_bb to look for a possible
+	returns-twice call.
+
+	* gcc.dg/pr109410-2.c: New testcase.
+
+(cherry picked from commit 4fe48225fa4e263b8d77d7a1465e1214d9cc742c)
+---
+ gcc/testsuite/gcc.dg/pr109410-2.c | 5 +++++
+ gcc/tree-ssa-reassoc.cc           | 3 ++-
+ 2 files changed, 7 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/gcc.dg/pr109410-2.c
+
+diff --git a/gcc/testsuite/gcc.dg/pr109410-2.c b/gcc/testsuite/gcc.dg/pr109410-2.c
+new file mode 100644
+index 000000000000..9dd8d0943c56
+--- /dev/null
++++ b/gcc/testsuite/gcc.dg/pr109410-2.c
+@@ -0,0 +1,5 @@
++/* PR tree-optimization/109410 */
++/* { dg-do compile } */
++/* { dg-options "-O2 -g" } */
++
++#include "pr109410.c"
+diff --git a/gcc/tree-ssa-reassoc.cc b/gcc/tree-ssa-reassoc.cc
+index 4017eea34135..2239b83352b6 100644
+--- a/gcc/tree-ssa-reassoc.cc
++++ b/gcc/tree-ssa-reassoc.cc
+@@ -1568,7 +1568,8 @@ build_and_add_sum (tree type, tree op1, tree op2, enum tree_code opcode)
+   if ((!op1def || gimple_nop_p (op1def))
+       && (!op2def || gimple_nop_p (op2def)))
+     {
+-      gsi = gsi_after_labels (single_succ (ENTRY_BLOCK_PTR_FOR_FN (cfun)));
++      gsi = gsi_start_nondebug_after_labels_bb
++		(single_succ (ENTRY_BLOCK_PTR_FOR_FN (cfun)));
+       if (!gsi_end_p (gsi)
+ 	  && is_gimple_call (gsi_stmt (gsi))
+ 	  && (gimple_call_flags (gsi_stmt (gsi)) & ECF_RETURNS_TWICE))
+-- 
+2.43.7
+
+

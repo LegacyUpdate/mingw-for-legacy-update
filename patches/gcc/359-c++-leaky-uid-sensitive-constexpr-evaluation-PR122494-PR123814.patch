@@ -1,0 +1,148 @@
+From 1a4b58635ab1df834a4d0deb2dfcd4fae311b475 Mon Sep 17 00:00:00 2001
+From: Patrick Palka <ppalka@redhat.com>
+Date: Mon, 26 Jan 2026 21:59:48 -0500
+Subject: [PATCH] c++: leaky uid-sensitive constexpr evaluation [PR122494,
+ PR123814]
+
+In the PR122494 testcase we constant evaluate 'B<int>::v == 0' first
+during warning-dependent folding, which is restricted to avoid unnecessary
+template instantiation.  During this restricted evaluation we do
+decl_constant_value on v which in turn manifestly constant evaluates v's
+initializer.  But this nested evaluation is incorrectly still restricted
+since the restriction mechanism is controlled by a global flag.  This
+causes constraint checking for A<int> to spuriously fail.
+
+We could narrowly fix this by guarding the decl_constant_value code path
+with uid_sensitive_constexpr_evaluation_p but that would overly
+pessimize warning-dependent folding of constexpr variables with simple
+initializers.  The problem is ultimately that the restriction mechanism
+is misdesigned, and it shouldn't be a global toggle, instead it should
+be local to the constexpr evaluation context and propagated accordingly.
+
+The PR123814 testcase is similar except that the nested manifestly
+constant evaluation happens through __fold_builtin_source_location
+(which performs arbitrary tsubst).
+
+Until we remove or reimplement the mechanism, this patch disables the
+mechanism during nested manifestly constant evaluation.  We don't ever
+want such evaluation to be restricted since it has semantic consequences.
+
+	PR c++/122494
+	PR c++/123814
+
+gcc/cp/ChangeLog:
+
+	* constexpr.cc (cxx_eval_outermost_constant_expr): Clear
+	uid_sensitive_constexpr_evaluation_value when mce_true.
+
+gcc/testsuite/ChangeLog:
+
+	* g++.dg/cpp2a/concepts-pr122494.C: New test.
+	* g++.dg/cpp2a/concepts-pr123814.C: New test.
+
+Reviewed-by: Jason Merrill <jason@redhat.com>
+(cherry picked from commit 9cb5c879e722bb63d5ff5621cd77f402cb94a316)
+---
+ gcc/cp/constexpr.cc                           | 11 ++++++
+ .../g++.dg/cpp2a/concepts-pr122494.C          | 24 +++++++++++++
+ .../g++.dg/cpp2a/concepts-pr123814.C          | 34 +++++++++++++++++++
+ 3 files changed, 69 insertions(+)
+ create mode 100644 gcc/testsuite/g++.dg/cpp2a/concepts-pr122494.C
+ create mode 100644 gcc/testsuite/g++.dg/cpp2a/concepts-pr123814.C
+
+diff --git a/gcc/cp/constexpr.cc b/gcc/cp/constexpr.cc
+index 30885484a39b..0d30e5c7d9cc 100644
+--- a/gcc/cp/constexpr.cc
++++ b/gcc/cp/constexpr.cc
+@@ -9239,6 +9239,17 @@ cxx_eval_outermost_constant_expr (tree t, bool allow_non_constant,
+ 	r = TARGET_EXPR_INITIAL (r);
+     }
+ 
++  /* uid_sensitive_constexpr_evaluation_value restricts warning-dependent
++     constexpr evaluation to avoid unnecessary template instantiation, and is
++     always done with mce_unknown.  But due to gaps in the restriction logic
++     we may still end up taking an evaluation path that in turn requires
++     manifestly constant evaluation, and such evaluation must not be
++     restricted since it likely has semantic consequences.
++     TODO: Remove/replace the mechanism in GCC 17.  */
++  auto uids = make_temp_override (uid_sensitive_constexpr_evaluation_value);
++  if (ctx.manifestly_const_eval == mce_true)
++    uid_sensitive_constexpr_evaluation_value = false;
++
+   auto_vec<tree, 16> cleanups;
+   global_ctx.cleanups = &cleanups;
+ 
+diff --git a/gcc/testsuite/g++.dg/cpp2a/concepts-pr122494.C b/gcc/testsuite/g++.dg/cpp2a/concepts-pr122494.C
+new file mode 100644
+index 000000000000..eef150d4f0d4
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/cpp2a/concepts-pr122494.C
+@@ -0,0 +1,24 @@
++// PR c++/122494
++// { dg-do compile { target c++20 } }
++
++template<class T>
++concept C = false;
++
++template<class T> requires (!C<T>)
++struct A {
++  static constexpr unsigned v = 0;
++};
++
++template<class T>
++struct B {
++  static constexpr unsigned v = A<T>::v;
++
++  constexpr static bool f() {
++    return [](auto) {
++      if (v == 0) { }
++      return true;
++    }(0);
++  }
++};
++
++static_assert(B<int>::f());
+diff --git a/gcc/testsuite/g++.dg/cpp2a/concepts-pr123814.C b/gcc/testsuite/g++.dg/cpp2a/concepts-pr123814.C
+new file mode 100644
+index 000000000000..41d3df35905c
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/cpp2a/concepts-pr123814.C
+@@ -0,0 +1,34 @@
++// PR c++/123814
++// { dg-do compile { target c++20 } }
++// { dg-additional-options "-Wall --param ggc-min-expand=0 --param ggc-min-heapsize=0" }
++
++namespace std {
++  struct source_location {
++    struct __impl {
++      const char *_M_file_name;
++      const char *_M_function_name;
++      unsigned _M_line;
++      unsigned _M_column;
++    };
++    static void current(const __impl* = __builtin_source_location());
++  };
++} // namespace std
++
++template <typename> concept same_as = true;
++
++template <typename... Us>
++concept one_of = (same_as<Us> || ...);
++
++template <one_of<> T> constexpr int buffer_size_for_int = 0;
++template <> constexpr int buffer_size_for_int<int> = 1;
++
++template <int> using Basic_Characters = int;
++
++template <typename T>
++Basic_Characters<buffer_size_for_int<T>> to_characters() {
++  std::source_location::current();
++} // { dg-warning "return statement" }
++
++void go() {
++  to_characters<int>();
++}
+-- 
+2.43.7
+
+

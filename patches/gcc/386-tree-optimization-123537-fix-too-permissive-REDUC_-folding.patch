@@ -1,0 +1,72 @@
+From 42ad4563507ee01b3b01ab0107dabe4470d4ae07 Mon Sep 17 00:00:00 2001
+From: Richard Biener <rguenther@suse.de>
+Date: Wed, 28 Jan 2026 10:04:45 +0100
+Subject: [PATCH] tree-optimization/123537 - fix too permissive .REDUC_*
+ folding
+
+The following restricts the allowed conversions to those maintaining
+the element type size.
+
+	PR tree-optimization/123537
+	* match.pd (REDUC (@0 & @1) -> @0[I] & @1[I]): Restrict
+	allowed conversions.
+
+	* gcc.dg/pr123537.c: New testcase.
+
+(cherry picked from commit 6868526bb79051895864a006c757ee5aee8e9574)
+---
+ gcc/match.pd                    |  9 +++++----
+ gcc/testsuite/gcc.dg/pr123537.c | 20 ++++++++++++++++++++
+ 2 files changed, 25 insertions(+), 4 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.dg/pr123537.c
+
+diff --git a/gcc/match.pd b/gcc/match.pd
+index 5fbf147c63bd..e64fca5e887a 100644
+--- a/gcc/match.pd
++++ b/gcc/match.pd
+@@ -10822,10 +10822,11 @@ and,
+ 	    unsigned int elt_bits = tree_to_uhwi (TYPE_SIZE (elt_type));
+ 	    tree size = bitsize_int (elt_bits);
+ 	    tree pos = bitsize_int (elt_bits * i); }
+-     (view_convert
+-      (bit_and:elt_type
+-       (BIT_FIELD_REF:elt_type @0 { size; } { pos; })
+-       { elt; })))))))
++     (if (compare_tree_int (TYPE_SIZE (type), elt_bits) == 0)
++      (view_convert
++       (bit_and:elt_type
++        (BIT_FIELD_REF:elt_type @0 { size; } { pos; })
++        { elt; }))))))))
+ 
+ /* Fold reduction of a single nonzero element constructor.  */
+ (for reduc (IFN_REDUC_PLUS IFN_REDUC_IOR IFN_REDUC_XOR)
+diff --git a/gcc/testsuite/gcc.dg/pr123537.c b/gcc/testsuite/gcc.dg/pr123537.c
+new file mode 100644
+index 000000000000..ff178358179e
+--- /dev/null
++++ b/gcc/testsuite/gcc.dg/pr123537.c
+@@ -0,0 +1,20 @@
++/* { dg-do compile } */
++/* { dg-require-effective-target int128 } */
++/* { dg-options "-O2" } */
++
++typedef __attribute__((__vector_size__(16))) __int128 V;
++
++union {
++  _Complex long c;
++  V v;
++} u;
++
++__int128 j;
++int i;
++
++void
++foo()
++{
++  u.v &= 4;
++  i %= u.c ? 3 : j;
++}
+-- 
+2.43.7
+
+

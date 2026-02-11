@@ -1,0 +1,57 @@
+From 0734fefe21c7d738959808fc924a75b83d813833 Mon Sep 17 00:00:00 2001
+From: Iain Buclaw <ibuclaw@gdcproject.org>
+Date: Tue, 27 Jan 2026 14:10:52 +0100
+Subject: [PATCH] d: Fix root modules have no file location set [PR122817]
+
+	PR d/122817
+
+gcc/d/ChangeLog:
+
+	* d-lang.cc (d_parse_file): Set module filename location after
+	creation.
+
+gcc/testsuite/ChangeLog:
+
+	* gdc.dg/pr122817.d: New test.
+
+(cherry picked from commit a321508c1b91bc9ef5f6029379e579fcdc10cb70)
+---
+ gcc/d/d-lang.cc                 | 2 ++
+ gcc/testsuite/gdc.dg/pr122817.d | 4 ++++
+ 2 files changed, 6 insertions(+)
+ create mode 100644 gcc/testsuite/gdc.dg/pr122817.d
+
+diff --git a/gcc/d/d-lang.cc b/gcc/d/d-lang.cc
+index ec2ea59938c4..d9963b675783 100644
+--- a/gcc/d/d-lang.cc
++++ b/gcc/d/d-lang.cc
+@@ -1128,6 +1128,7 @@ d_parse_file (void)
+ 				      Identifier::idPool ("__stdin"),
+ 				      global.params.ddoc.doOutput,
+ 				      global.params.dihdr.doOutput);
++	  m->loc = Loc::singleFilename (in_fnames[i]);
+ 	  modules.push (m);
+ 
+ 	  /* Zero the padding past the end of the buffer so the D lexer has a
+@@ -1148,6 +1149,7 @@ d_parse_file (void)
+ 	  Module *m = Module::create (in_fnames[i], Identifier::idPool (name),
+ 				      global.params.ddoc.doOutput,
+ 				      global.params.dihdr.doOutput);
++	  m->loc = Loc::singleFilename (in_fnames[i]);
+ 	  modules.push (m);
+ 	  FileName::free (name);
+ 	}
+diff --git a/gcc/testsuite/gdc.dg/pr122817.d b/gcc/testsuite/gdc.dg/pr122817.d
+new file mode 100644
+index 000000000000..a06a011f5ad3
+--- /dev/null
++++ b/gcc/testsuite/gdc.dg/pr122817.d
+@@ -0,0 +1,4 @@
++// { dg-do compile }
++module pr122817;
++
++struct object {} // { dg-error "conflicts with import 'pr122817.object' at .*pr122817.d" }
+-- 
+2.43.7
+
+

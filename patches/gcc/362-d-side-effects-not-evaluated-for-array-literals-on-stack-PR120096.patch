@@ -1,0 +1,68 @@
+From 74eb175c2a6af89f0908c295388b146dd9f11aa8 Mon Sep 17 00:00:00 2001
+From: Iain Buclaw <ibuclaw@gdcproject.org>
+Date: Tue, 27 Jan 2026 21:51:40 +0100
+Subject: [PATCH] d: Side effects not evaluated for array literals on stack
+ [PR120096]
+
+	PR d/120096
+
+gcc/d/ChangeLog:
+
+	* expr.cc (ExprVisitor::visit (ArrayLiteralExp *)): Include saved side
+	effects in expression result.
+
+gcc/testsuite/ChangeLog:
+
+	* gdc.dg/torture/pr120096.d: New test.
+
+(cherry picked from commit 8e869a0d0eff6dd26ba3c2cfade4b673a3c9db42)
+---
+ gcc/d/expr.cc                           |  5 +++--
+ gcc/testsuite/gdc.dg/torture/pr120096.d | 18 ++++++++++++++++++
+ 2 files changed, 21 insertions(+), 2 deletions(-)
+ create mode 100644 gcc/testsuite/gdc.dg/torture/pr120096.d
+
+diff --git a/gcc/d/expr.cc b/gcc/d/expr.cc
+index 1c1ecf2c6db3..2b466a68cffb 100644
+--- a/gcc/d/expr.cc
++++ b/gcc/d/expr.cc
+@@ -2708,8 +2708,9 @@ public:
+ 	/* Array literal for a `scope' dynamic array.  */
+ 	gcc_assert (tb->ty == TY::Tarray);
+ 	ctor = force_target_expr (ctor);
+-	this->result_ = d_array_value (type, size_int (e->elements->length),
+-				       build_address (ctor));
++	ctor = d_array_value (type, size_int (e->elements->length),
++			      build_address (force_target_expr (ctor)));
++	this->result_ = compound_expr (saved_elems, ctor);
+       }
+     else
+       {
+diff --git a/gcc/testsuite/gdc.dg/torture/pr120096.d b/gcc/testsuite/gdc.dg/torture/pr120096.d
+new file mode 100644
+index 000000000000..7aaae2dbc76e
+--- /dev/null
++++ b/gcc/testsuite/gdc.dg/torture/pr120096.d
+@@ -0,0 +1,18 @@
++// { dg-do run }
++// { dg-additional-options "-fpreview=dip1000" }
++// { dg-skip-if "needs gcc/config.d" { ! d_runtime } }
++struct S
++{
++    this(int p) nothrow @nogc @safe
++    { f = p; }
++    int f;
++}
++
++int main() nothrow @nogc @safe
++{
++    scope S[] sa = [S(1), S(2)];
++
++    assert(sa[0].f == 1);
++    assert(sa[1].f == 2);
++    return 0;
++}
+-- 
+2.43.7
+
+

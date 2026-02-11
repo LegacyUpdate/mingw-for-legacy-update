@@ -1,0 +1,43 @@
+From c714df80a2ea62a7263044fd97d2601136e79ddf Mon Sep 17 00:00:00 2001
+From: Jonathan Wakely <jwakely@redhat.com>
+Date: Mon, 9 Feb 2026 20:41:46 +0000
+Subject: [PATCH] libstdc++: Fix doxygen comment for std::out_ptr [PR124024]
+
+libstdc++-v3/ChangeLog:
+
+	PR libstdc++/124024
+	* include/bits/out_ptr.h (out_ptr): Fix doxygen comment to refer
+	to the right function.
+	(inout_ptr): Improve markup in doxygen comment.
+
+(cherry picked from commit a53eaa269058c0e382178505bb2b414132d04ded)
+---
+ libstdc++-v3/include/bits/out_ptr.h | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/libstdc++-v3/include/bits/out_ptr.h b/libstdc++-v3/include/bits/out_ptr.h
+index 00ba09d0f18d..48fe3475b2f7 100644
+--- a/libstdc++-v3/include/bits/out_ptr.h
++++ b/libstdc++-v3/include/bits/out_ptr.h
+@@ -397,7 +397,7 @@ namespace __detail
+    * @tparam _Pointer The type of pointer to convert to.
+    * @param __s The pointer that should take ownership of the result.
+    * @param __args... Arguments to use when resetting the smart pointer.
+-   * @return A std::inout_ptr_t referring to `__s`.
++   * @return A `std::out_ptr_t` referring to `__s`.
+    * @since C++23
+    * @headerfile <memory>
+    */
+@@ -418,7 +418,7 @@ namespace __detail
+    * @tparam _Pointer The type of pointer to convert to.
+    * @param __s The pointer that should take ownership of the result.
+    * @param __args... Arguments to use when resetting the smart pointer.
+-   * @return A std::inout_ptr_t referring to `__s`.
++   * @return A `std::inout_ptr_t` referring to `__s`.
+    * @since C++23
+    * @headerfile <memory>
+    */
+-- 
+2.43.7
+
+

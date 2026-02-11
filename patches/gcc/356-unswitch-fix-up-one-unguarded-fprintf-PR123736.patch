@@ -1,0 +1,41 @@
+From 9e109a0b81788b14ebc96ffa49f770fd7fe74f2e Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Thu, 22 Jan 2026 10:11:34 +0100
+Subject: [PATCH] unswitch: Fix up one unguarded fprintf (dump_file, ...)
+ [PR123736]
+
+This dump message is not guarded on dump_file being non-NULL, so crashes
+inside of libc if dump_file is NULL.
+
+I think a message like that is usually guarded not just on dump_file
+being non-NULL, but also on TDF_DETAILS set in dump_flags.
+
+2026-01-22  Jakub Jelinek  <jakub@redhat.com>
+
+	PR tree-optimization/123736
+	* tree-ssa-loop-unswitch.cc (hoist_guard): Guard dump message
+	on dump_file && (dump_flags & TDF_DETAILS) condition.
+
+(cherry picked from commit 613fef9239aa723ea65b1118262bb63d023169c4)
+---
+ gcc/tree-ssa-loop-unswitch.cc | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/gcc/tree-ssa-loop-unswitch.cc b/gcc/tree-ssa-loop-unswitch.cc
+index c5ca4ff89452..2632c10c800d 100644
+--- a/gcc/tree-ssa-loop-unswitch.cc
++++ b/gcc/tree-ssa-loop-unswitch.cc
+@@ -1458,7 +1458,8 @@ hoist_guard (class loop *loop, edge guard)
+ 
+   if (skip_count > e->count ())
+     {
+-      fprintf (dump_file, "  Capping count; expect profile inconsistency\n");
++      if (dump_file && (dump_flags & TDF_DETAILS))
++	fprintf (dump_file, "  Capping count; expect profile inconsistency\n");
+       skip_count = e->count ();
+     }
+   if (dump_enabled_p ())
+-- 
+2.43.7
+
+

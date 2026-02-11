@@ -1,0 +1,36 @@
+From 68b601e153bad50393797c92594678a2333ba65f Mon Sep 17 00:00:00 2001
+From: =?utf8?q?Torbj=C3=B6rn=20SVENSSON?= <torbjorn.svensson@foss.st.com>
+Date: Fri, 6 Feb 2026 13:40:57 +0100
+Subject: [PATCH] testsuite: forward extra arguments from $GCC_UNDER_TEST to
+ gcc-ar
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf8
+Content-Transfer-Encoding: 8bit
+
+gcc/testsuite/ChangeLog:
+
+	* lib/lto.exp (lto-build-archive): Forward extra command line
+	arguments from $GCC_UNDER_TEST to gcc-ar.
+
+Signed-off-by: TorbjÃ¶rn SVENSSON <torbjorn.svensson@foss.st.com>
+(cherry picked from commit c73831b61b506728d5fd3ac529a2012f2b1ceaeb)
+---
+ gcc/testsuite/lib/lto.exp | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/gcc/testsuite/lib/lto.exp b/gcc/testsuite/lib/lto.exp
+index 8c8b3aaafd14..fc8a0673cd0e 100644
+--- a/gcc/testsuite/lib/lto.exp
++++ b/gcc/testsuite/lib/lto.exp
+@@ -337,6 +337,7 @@ proc lto-build-archive { testname objlist dest } {
+ 	} else {
+ 	    set ar_cmd [gcc-transform-out-of-tree gcc-ar]
+ 	}
++	set ar_cmd "$ar_cmd [lrange $GCC_UNDER_TEST 1 end]"
+     } else {
+         set ar_cmd $GCC_AR_UNDER_TEST
+     }
+-- 
+2.43.7
+
+

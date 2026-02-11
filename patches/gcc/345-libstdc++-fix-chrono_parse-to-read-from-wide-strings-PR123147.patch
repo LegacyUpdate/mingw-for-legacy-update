@@ -1,0 +1,88 @@
+From 340b1d384177d3f28a42534f23575c831114571f Mon Sep 17 00:00:00 2001
+From: Jonathan Wakely <jwakely@redhat.com>
+Date: Thu, 18 Dec 2025 16:39:46 +0000
+Subject: [PATCH] libstdc++: Fix chrono::parse to read from wide strings
+ [PR123147]
+
+When we extract wide characters and insert them into a stringstream to
+be parsed as a floating-point value, we should use a stringstream of
+char, not wchar_t.
+
+libstdc++-v3/ChangeLog:
+
+	PR libstdc++/123147
+	* include/bits/chrono_io.h (_Parser::operator()) <%S>: Use a
+	buffer of narrow characters to be parsed by std::from_chars.
+	* testsuite/std/time/parse/parse.cc: Check wchar_t parsing.
+
+(cherry picked from commit 18c306b1f42e3edab6c6fd1a2173d7405a0a9def)
+---
+ libstdc++-v3/include/bits/chrono_io.h          |  8 ++++----
+ libstdc++-v3/testsuite/std/time/parse/parse.cc | 14 ++++++++++++++
+ 2 files changed, 18 insertions(+), 4 deletions(-)
+
+diff --git a/libstdc++-v3/include/bits/chrono_io.h b/libstdc++-v3/include/bits/chrono_io.h
+index b83edc44ea96..557ae6c9c09e 100644
+--- a/libstdc++-v3/include/bits/chrono_io.h
++++ b/libstdc++-v3/include/bits/chrono_io.h
+@@ -3797,14 +3797,14 @@ namespace __detail
+ 		    }
+ 		  else // Read fractional seconds
+ 		    {
+-		      basic_stringstream<_CharT> __buf;
++		      stringstream __buf;
+ 		      auto __digit = _S_try_read_digit(__is, __err);
+ 		      if (__digit != -1)
+ 			{
+-			  __buf.put(_CharT('0') + __digit);
++			  __buf.put('0' + __digit);
+ 			  __digit = _S_try_read_digit(__is, __err);
+ 			  if (__digit != -1)
+-			    __buf.put(_CharT('0') + __digit);
++			    __buf.put('0' + __digit);
+ 			}
+ 
+ 		      auto __i = __is.peek();
+@@ -3829,7 +3829,7 @@ namespace __detail
+ 				{
+ 				  __digit = _S_try_read_digit(__is, __err);
+ 				  if (__digit != -1)
+-				    __buf.put(_CharT('0') + __digit);
++				    __buf.put('0' + __digit);
+ 				  else
+ 				    break;
+ 				}
+diff --git a/libstdc++-v3/testsuite/std/time/parse/parse.cc b/libstdc++-v3/testsuite/std/time/parse/parse.cc
+index 8bb0fd0bebab..27a4da5a5079 100644
+--- a/libstdc++-v3/testsuite/std/time/parse/parse.cc
++++ b/libstdc++-v3/testsuite/std/time/parse/parse.cc
+@@ -317,6 +317,19 @@ test_modifiers()
+   VERIFY( s == 12s );
+ }
+ 
++void
++test_wchar()
++{
++  std::wistringstream is;
++  std::chrono::duration<double, std::milli> ms;
++
++  is.clear();
++  is.str(L"0.125");
++  is >> parse(L"%S", ms);
++  VERIFY( is.good() );
++  VERIFY( ms.count() == 125 );
++}
++
+ int main()
+ {
+   test_recommended_practice();
+@@ -324,4 +337,5 @@ int main()
+   test_whitespace();
+   test_errors();
+   test_modifiers();
++  test_wchar();
+ }
+-- 
+2.43.7
+
+

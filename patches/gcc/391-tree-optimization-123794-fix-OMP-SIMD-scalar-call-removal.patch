@@ -1,0 +1,60 @@
+From e5aa8dc286ce040eb135f7db90a664cd241430f8 Mon Sep 17 00:00:00 2001
+From: Richard Biener <rguenther@suse.de>
+Date: Mon, 26 Jan 2026 08:05:34 +0100
+Subject: [PATCH] tree-optimization/123794 - fix OMP SIMD scalar call removal
+
+The following makes sure to purge VDEFs for all calls.
+
+	PR tree-optimization/123794
+	* tree-vect-slp.cc (vect_remove_slp_scalar_calls): Unlink
+	VOPs for all calls.
+
+	* gcc.dg/vect/vect-simd-clone-pr123794.c: New testcase.
+
+(cherry picked from commit 3e0430bca4b546c07067df00644d251e55fecbad)
+---
+ .../gcc.dg/vect/vect-simd-clone-pr123794.c          | 13 +++++++++++++
+ gcc/tree-vect-slp.cc                                |  6 ++----
+ 2 files changed, 15 insertions(+), 4 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.dg/vect/vect-simd-clone-pr123794.c
+
+diff --git a/gcc/testsuite/gcc.dg/vect/vect-simd-clone-pr123794.c b/gcc/testsuite/gcc.dg/vect/vect-simd-clone-pr123794.c
+new file mode 100644
+index 000000000000..2674b1e2961d
+--- /dev/null
++++ b/gcc/testsuite/gcc.dg/vect/vect-simd-clone-pr123794.c
+@@ -0,0 +1,13 @@
++/* { dg-do compile } */
++/* { dg-require-effective-target vect_simd_clones } */
++/* { dg-additional-options "-fopenmp-simd" } */
++
++extern long a[];
++#pragma omp declare simd
++long my_fun(long);
++long foo_i;
++void foo() {
++#pragma omp simd
++  for (foo_i = 0; foo_i < 3; foo_i += 1)
++    a[foo_i] = my_fun(foo_i);
++}
+diff --git a/gcc/tree-vect-slp.cc b/gcc/tree-vect-slp.cc
+index 5799ef83a460..43e865045cf6 100644
+--- a/gcc/tree-vect-slp.cc
++++ b/gcc/tree-vect-slp.cc
+@@ -11454,10 +11454,8 @@ vect_remove_slp_scalar_calls (vec_info *vinfo,
+       if (lhs)
+ 	new_stmt = gimple_build_assign (lhs, build_zero_cst (TREE_TYPE (lhs)));
+       else
+-	{
+-	  new_stmt = gimple_build_nop ();
+-	  unlink_stmt_vdef (stmt_info->stmt);
+-	}
++	new_stmt = gimple_build_nop ();
++      unlink_stmt_vdef (stmt_info->stmt);
+       gsi = gsi_for_stmt (stmt);
+       vinfo->replace_stmt (&gsi, stmt_info, new_stmt);
+       if (lhs)
+-- 
+2.43.7
+
+

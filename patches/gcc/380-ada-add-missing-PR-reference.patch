@@ -1,0 +1,25 @@
+From f41a53300c4c24b202f438f417cbb7d7afd24cf1 Mon Sep 17 00:00:00 2001
+From: Eric Botcazou <ebotcazou@adacore.com>
+Date: Sun, 1 Feb 2026 23:01:59 +0100
+Subject: [PATCH] Add missing PR reference
+
+---
+ gcc/ada/ChangeLog | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/gcc/ada/ChangeLog b/gcc/ada/ChangeLog
+index 87e9d0bd5eb0..dc764711259c 100644
+--- a/gcc/ada/ChangeLog
++++ b/gcc/ada/ChangeLog
+@@ -39,6 +39,7 @@
+ 
+ 2026-01-21  Eric Botcazou  <ebotcazou@adacore.com>
+ 
++	PR ada/123580
+ 	* sem_ch13.adb (Analyze_Aspects_At_Freeze_Point): Replace call to
+ 	Scope_Within_Or_Same (Current_Scope, S) with In_Open_Scopes (S) to
+ 	test whether S is open in the current scope.
+-- 
+2.43.7
+
+

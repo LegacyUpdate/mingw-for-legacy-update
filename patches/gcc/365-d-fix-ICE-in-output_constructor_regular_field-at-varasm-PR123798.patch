@@ -1,0 +1,77 @@
+From 1b0d964f3cbead665119eea0cdb55c62737f7838 Mon Sep 17 00:00:00 2001
+From: Iain Buclaw <ibuclaw@gdcproject.org>
+Date: Wed, 28 Jan 2026 22:09:37 +0100
+Subject: [PATCH] d: Fix ICE: in output_constructor_regular_field, at
+ varasm.cc:5500 [PR123798]
+
+	PR d/123798
+
+gcc/d/ChangeLog:
+
+	* types.cc (insert_aggregate_bitfield): Set DECL_NONADDRESSABLE_P and
+	DECL_PADDING_P on bit-field decls.
+	(finish_aggregate_type): Pass the aligned bit offset to layout_decl.
+
+gcc/testsuite/ChangeLog:
+
+	* gdc.dg/pr123798.d: New test.
+
+(cherry picked from commit a1adc5aa30caae043cbd45dbbf9a738bebba34cc)
+---
+ gcc/d/types.cc                  | 10 +++++++++-
+ gcc/testsuite/gdc.dg/pr123798.d | 14 ++++++++++++++
+ 2 files changed, 23 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/gdc.dg/pr123798.d
+
+diff --git a/gcc/d/types.cc b/gcc/d/types.cc
+index 1c74840605b4..52324df0a1ed 100644
+--- a/gcc/d/types.cc
++++ b/gcc/d/types.cc
+@@ -324,6 +324,10 @@ insert_aggregate_bitfield (tree type, tree bitfield, size_t width,
+   DECL_BIT_FIELD (bitfield) = 1;
+   DECL_BIT_FIELD_TYPE (bitfield) = TREE_TYPE (bitfield);
+ 
++  DECL_NONADDRESSABLE_P (bitfield) = 1;
++  if (DECL_NAME (bitfield) == NULL_TREE)
++    DECL_PADDING_P (bitfield) = 1;
++
+   TYPE_FIELDS (type) = chainon (TYPE_FIELDS (type), bitfield);
+ }
+ 
+@@ -671,7 +675,11 @@ finish_aggregate_type (unsigned structsize, unsigned alignsize, tree type)
+ 	  continue;
+ 	}
+ 
+-      layout_decl (field, 0);
++      /* Layout the field decl using its known alignment.  */
++      unsigned int known_align =
++	least_bit_hwi (tree_to_uhwi (DECL_FIELD_BIT_OFFSET (field)));
++
++      layout_decl (field, known_align);
+ 
+       /* Give bit-field its proper type after layout_decl.  */
+       if (DECL_BIT_FIELD (field))
+diff --git a/gcc/testsuite/gdc.dg/pr123798.d b/gcc/testsuite/gdc.dg/pr123798.d
+new file mode 100644
+index 000000000000..92f8c2daec1e
+--- /dev/null
++++ b/gcc/testsuite/gdc.dg/pr123798.d
+@@ -0,0 +1,14 @@
++// { dg-do compile }
++// { dg-additional-options "-fpreview=bitfields" }
++class C123798
++{
++    int a : 4;
++    long b : 8;
++}
++
++struct S123798
++{
++    int a = 1;
++    int b : 4;
++    long c : 8;
++}
+-- 
+2.43.7
+
+

@@ -1,0 +1,100 @@
+From 3b47de21a080b1ec336232066ea695a079687423 Mon Sep 17 00:00:00 2001
+From: Iain Buclaw <ibuclaw@gdcproject.org>
+Date: Sun, 8 Feb 2026 20:36:11 +0100
+Subject: [PATCH] d: Fix ICE in output_constant, at varasm.cc:5662 [PR124026]
+
+	PR d/124026
+
+gcc/d/ChangeLog:
+
+	* expr.cc (ExprVisitor::visit (FuncExp *)): Always convert function
+	literal to a delegate if the expression expects one.
+
+gcc/testsuite/ChangeLog:
+
+	* gdc.dg/pr124026.d: New test.
+
+(cherry picked from commit 9aa5bdf9a50fce6e3bf42f38eb9cf57abb8eecbe)
+---
+ gcc/d/expr.cc                   | 24 ++++++++++++++----------
+ gcc/testsuite/gdc.dg/pr124026.d | 21 +++++++++++++++++++++
+ 2 files changed, 35 insertions(+), 10 deletions(-)
+ create mode 100644 gcc/testsuite/gdc.dg/pr124026.d
+
+diff --git a/gcc/d/expr.cc b/gcc/d/expr.cc
+index 3677f31eb92b..8721401540b1 100644
+--- a/gcc/d/expr.cc
++++ b/gcc/d/expr.cc
+@@ -2034,27 +2034,31 @@ public:
+     /* Compile the declaration.  */
+     build_lambda_tree (e->fd, e->type->toBasetype ());
+ 
+-    /* If nested, this will be a trampoline.  */
+-    if (e->fd->isNested ())
+-      {
+-	tree func = build_address (get_symbol_decl (e->fd));
+-	tree object;
++    tree func = build_address (get_symbol_decl (e->fd));
++    Type *tb = e->type->toBasetype ();
+ 
+-	if (this->constp_)
++    /* If a delegate is expected, the literal will be inferred as a delegate
++       even if it accesses no variables from an enclosing function.  */
++    if (tb->ty == TY::Tdelegate)
++      {
++	/* Static delegate variables have no context pointer.  */
++	if (this->constp_ || !e->fd->isNested ())
+ 	  {
+-	    /* Static delegate variables have no context pointer.  */
+-	    object = null_pointer_node;
+-	    this->result_ = build_method_call (func, object, e->fd->type);
++	    this->result_ = build_method_call (func, null_pointer_node,
++					       e->fd->type);
+ 	    TREE_CONSTANT (this->result_) = 1;
+ 	  }
+ 	else
+ 	  {
+-	    object = get_frame_for_symbol (e->fd);
++	    gcc_assert (e->fd->isNested ());
++	    tree object = get_frame_for_symbol (e->fd);
+ 	    this->result_ = build_method_call (func, object, e->fd->type);
+ 	  }
+       }
+     else
+       {
++	/* The function literal is a function pointer.  */
++	gcc_assert (tb->ty == TY::Tpointer);
+ 	this->result_ = build_nop (build_ctype (e->type),
+ 				   build_address (get_symbol_decl (e->fd)));
+       }
+diff --git a/gcc/testsuite/gdc.dg/pr124026.d b/gcc/testsuite/gdc.dg/pr124026.d
+new file mode 100644
+index 000000000000..48a3e13eded3
+--- /dev/null
++++ b/gcc/testsuite/gdc.dg/pr124026.d
+@@ -0,0 +1,21 @@
++// { dg-do compile }
++struct UDA
++{
++    int delegate() foo;
++}
++
++static UDA getUDA(alias S)()
++{
++    return __traits(getAttributes, S)[0];
++}
++
++struct S124026
++{
++    @UDA({ return 42; }) int a;
++}
++
++void f124026()
++{
++    S124026 m;
++    enum uda = getUDA!(m.a);
++}
+-- 
+2.43.7
+
+

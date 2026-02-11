@@ -1,0 +1,62 @@
+From a60ad47c00e393127034b2056d90d0c8d2222da3 Mon Sep 17 00:00:00 2001
+From: Jeff Law <jlaw@ventanamicro.com>
+Date: Wed, 9 Jul 2025 05:23:34 -0600
+Subject: [PATCH] [RISC-V][PR target/120642] Avoid propagating constant AVL for
+ theadvector
+
+AVL propagation currently assumes that it can propagate a constant AVL into any
+vector insn and trips an assert if the insn fails to recognize after such a
+propagation.
+
+However, for xtheadvector that is not a correct assumption; xtheadvector does
+not allow the vector length to be a constant integer (other than zero which
+allowed via x0).
+
+After consulting with Jin Ma (thanks!) we agree the right fix is to avoid
+creating the immediate AVL for xtheadvector.
+
+This has been tested in my tester, just waiting for the pre-commit tester to
+spin it.
+
+	PR target/120642
+gcc/
+	* config/riscv/riscv-avlprop.cc (pass_avlprop::execute): Do not do
+	constant AVL propagation for xtheadvector.
+
+gcc/testsuite/
+	* gcc.target/riscv/rvv/xtheadvector/pr120642.c: New test.
+
+(cherry picked from commit f2e3886a30c771b104bc2714992e072b21a52e76)
+---
+ gcc/config/riscv/riscv-avlprop.cc                          | 2 +-
+ gcc/testsuite/gcc.target/riscv/rvv/xtheadvector/pr120642.c | 4 ++++
+ 2 files changed, 5 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/gcc.target/riscv/rvv/xtheadvector/pr120642.c
+
+diff --git a/gcc/config/riscv/riscv-avlprop.cc b/gcc/config/riscv/riscv-avlprop.cc
+index b8b61fc847ba..e31fdebb7a22 100644
+--- a/gcc/config/riscv/riscv-avlprop.cc
++++ b/gcc/config/riscv/riscv-avlprop.cc
+@@ -512,7 +512,7 @@ pass_avlprop::execute (function *fn)
+       simplify_replace_vlmax_avl (rinsn, prop.second);
+     }
+ 
+-  if (rvv_vector_bits == RVV_VECTOR_BITS_ZVL)
++  if (rvv_vector_bits == RVV_VECTOR_BITS_ZVL && !TARGET_XTHEADVECTOR)
+     {
+       /* Simplify VLMAX AVL into immediate AVL.
+ 	 E.g. Simplify this following case:
+diff --git a/gcc/testsuite/gcc.target/riscv/rvv/xtheadvector/pr120642.c b/gcc/testsuite/gcc.target/riscv/rvv/xtheadvector/pr120642.c
+new file mode 100644
+index 000000000000..1a72580ad605
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/riscv/rvv/xtheadvector/pr120642.c
+@@ -0,0 +1,4 @@
++/* { dg-do compile } */
++/* { dg-options "-O -mcpu=xt-c920 -mrvv-vector-bits=zvl" } */
++int __attribute__((__vector_size__(4 * sizeof(int)))) v;
++void foo() { v /= 3; }
+-- 
+2.43.7
+
+

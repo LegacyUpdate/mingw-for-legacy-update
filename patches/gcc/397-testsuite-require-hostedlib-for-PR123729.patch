@@ -1,0 +1,32 @@
+From 01aa184c6028e72f0bfec5985829db32d96fbdd9 Mon Sep 17 00:00:00 2001
+From: Alexandre Oliva <oliva@adacore.com>
+Date: Wed, 4 Feb 2026 23:06:21 -0300
+Subject: [PATCH] testsuite: require hostedlib for pr123729.C
+
+This testcase uses features not available when libstdc++ doesn't have
+the hostedlib bits enabled.
+
+
+for  gcc/testsuite/ChangeLog
+
+	PR tree-optimization/123729
+	* g++.dg/torture/pr123729.C: Require hostedlib.
+---
+ gcc/testsuite/g++.dg/torture/pr123729.C | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/gcc/testsuite/g++.dg/torture/pr123729.C b/gcc/testsuite/g++.dg/torture/pr123729.C
+index 1e12c680f299..6b964c8380af 100644
+--- a/gcc/testsuite/g++.dg/torture/pr123729.C
++++ b/gcc/testsuite/g++.dg/torture/pr123729.C
+@@ -1,5 +1,6 @@
+ // { dg-do compile }
+ // { dg-additional-options "-std=gnu++20" }
++// { dg-skip-if "requires hosted libstdc++ for csetjmp and iostream" { ! hostedlib } }
+ 
+ #include <csetjmp>
+ #include <iostream>
+-- 
+2.43.7
+
+

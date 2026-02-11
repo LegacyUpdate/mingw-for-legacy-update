@@ -1,0 +1,115 @@
+From be1c07209156d1e0e1b7b977d291d8b68a250fa7 Mon Sep 17 00:00:00 2001
+From: Richard Earnshaw <rearnsha@arm.com>
+Date: Thu, 22 Jan 2026 14:16:28 +0000
+Subject: [PATCH] arm: fix unrecognized HFmode min/max insns on neon [PR123742]
+
+When expansion support for smin/smax was enabled (presumably for MVE)
+the corresponding Neon instructions were not updated to recognize the
+generated RTL.  This patch makes the necessary changes to recognize
+these variants.
+
+gcc/ChangeLog:
+
+	PR target/123742
+	* config/arm/neon.md (*smin<mode>3_neon): Renamed to ...
+	(*smin<VDQWH:mode>3_neon): ... this.  Add HFmode support.
+	(*smax<mode>3_neon): Renamed to ...
+	(*smax<VDQWH:mode>3_neon): ... this.  Add HFmode support.
+
+gcc/testsuite/ChangeLog:
+
+	PR target/123742
+	* gcc.target/arm/neon-smax16.c: New test.
+	* gcc.target/arm/neon-smin16.c: New test.
+
+(cherry picked from commit 412667e50077e4678e6d164bca91b6408749471f)
+---
+ gcc/config/arm/neon.md                     | 20 ++++++++++----------
+ gcc/testsuite/gcc.target/arm/neon-smax16.c | 14 ++++++++++++++
+ gcc/testsuite/gcc.target/arm/neon-smin16.c | 14 ++++++++++++++
+ 3 files changed, 38 insertions(+), 10 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.target/arm/neon-smax16.c
+ create mode 100644 gcc/testsuite/gcc.target/arm/neon-smin16.c
+
+diff --git a/gcc/config/arm/neon.md b/gcc/config/arm/neon.md
+index 8446dd7f964b..a1fb6dfd9565 100644
+--- a/gcc/config/arm/neon.md
++++ b/gcc/config/arm/neon.md
+@@ -872,11 +872,11 @@
+   [(set_attr "type" "neon_minmax<q>")]
+ )
+ 
+-(define_insn "*smin<mode>3_neon"
+-  [(set (match_operand:VDQW 0 "s_register_operand" "=w")
+-	(smin:VDQW (match_operand:VDQW 1 "s_register_operand" "w")
+-		   (match_operand:VDQW 2 "s_register_operand" "w")))]
+-  "TARGET_NEON"
++(define_insn "*smin<VDQWH:mode>3_neon"
++  [(set (match_operand:VDQWH 0 "s_register_operand" "=w")
++	(smin:VDQWH (match_operand:VDQWH 1 "s_register_operand" "w")
++		    (match_operand:VDQWH 2 "s_register_operand" "w")))]
++  "ARM_HAVE_NEON_<MODE>_ARITH"
+   "vmin.<V_s_elem>\t%<V_reg>0, %<V_reg>1, %<V_reg>2"
+   [(set (attr "type")
+       (if_then_else (match_test "<Is_float_mode>")
+@@ -884,11 +884,11 @@
+                     (const_string "neon_minmax<q>")))]
+ )
+ 
+-(define_insn "*smax<mode>3_neon"
+-  [(set (match_operand:VDQW 0 "s_register_operand" "=w")
+-	(smax:VDQW (match_operand:VDQW 1 "s_register_operand" "w")
+-		   (match_operand:VDQW 2 "s_register_operand" "w")))]
+-  "TARGET_NEON"
++(define_insn "*smax<VDQWH:mode>3_neon"
++  [(set (match_operand:VDQWH 0 "s_register_operand" "=w")
++	(smax:VDQWH (match_operand:VDQWH 1 "s_register_operand" "w")
++		    (match_operand:VDQWH 2 "s_register_operand" "w")))]
++  "ARM_HAVE_NEON_<MODE>_ARITH"
+   "vmax.<V_s_elem>\t%<V_reg>0, %<V_reg>1, %<V_reg>2"
+   [(set (attr "type")
+       (if_then_else (match_test "<Is_float_mode>")
+diff --git a/gcc/testsuite/gcc.target/arm/neon-smax16.c b/gcc/testsuite/gcc.target/arm/neon-smax16.c
+new file mode 100644
+index 000000000000..4fd36bb6648c
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/arm/neon-smax16.c
+@@ -0,0 +1,14 @@
++/* { dg-do compile } */
++/* { dg-require-effective-target arm_v8_2a_fp16_neon_ok } */
++/* { dg-add-options arm_v8_2a_fp16_neon } */
++/* { dg-additional-options "-std=c23 -Ofast" } */
++void foo(void);
++extern _Float16 main_in[];
++void bar() {
++  _Float16 out = 0.0;
++  for (int i = 0; i < 100; i++)
++    if (out < main_in[i])
++      out = main_in[i];
++  if (out)
++    foo();
++}
+diff --git a/gcc/testsuite/gcc.target/arm/neon-smin16.c b/gcc/testsuite/gcc.target/arm/neon-smin16.c
+new file mode 100644
+index 000000000000..284f70239825
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/arm/neon-smin16.c
+@@ -0,0 +1,14 @@
++/* { dg-do compile } */
++/* { dg-require-effective-target arm_v8_2a_fp16_neon_ok } */
++/* { dg-add-options arm_v8_2a_fp16_neon } */
++/* { dg-additional-options "-std=c23 -Ofast" } */
++void foo(void);
++extern _Float16 main_in[];
++void bar() {
++  _Float16 out = 0.0;
++  for (int i = 0; i < 100; i++)
++    if (out > main_in[i])
++      out = main_in[i];
++  if (out)
++    foo();
++}
+-- 
+2.43.7
+
+

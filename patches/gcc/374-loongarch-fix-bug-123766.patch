@@ -1,0 +1,258 @@
+From 3534d9af5dce3775351595d3f7012ab7d4d34b89 Mon Sep 17 00:00:00 2001
+From: Lulu Cheng <chenglulu@loongson.cn>
+Date: Tue, 27 Jan 2026 10:31:36 +0800
+Subject: [PATCH] LoongArch: Fix bug123766.
+
+The pointer parameter type for the original store class builtin
+functions is CVPOINTER (const volatile void *).
+Taking the following test as an example:
+
+	```
+	v4i64 v = {0, 0, 0, 0};
+	void try_store() {
+  	  long r[4];
+  	  __lasx_xvst(v, r, 0);
+	}
+	```
+At this point, the type of r is CVPOINTER, which means data in memory
+can only be read through r.  Therefore, if the array r is not
+initialized, an uninitialized warning will be issued.
+This patch changes the pointer type of store-class builtin functions
+from CVPOINTER to VPOINTER (volatile void *).
+
+	PR target/123766
+
+gcc/ChangeLog:
+
+	* config/loongarch/loongarch-builtins.cc
+	(loongarch_build_vpointer_type): New function.  Return a type
+	for 'volatile void *'.
+	(LARCH_ATYPE_VPOINTER): New macro.
+	* config/loongarch/loongarch-ftypes.def: Change the pointer
+	type of the store class function from CVPOINTER to VPOINTER.
+
+gcc/testsuite/ChangeLog:
+
+	* gcc.target/loongarch/vector/lasx/pr123766.c: New test.
+	* gcc.target/loongarch/vector/lsx/pr123766.c: New test.
+
+(cherry picked from commit fde8a3008586b2b469b42813613e582d4724afa0)
+---
+ gcc/config/loongarch/loongarch-builtins.cc    | 38 +++++++++++++------
+ gcc/config/loongarch/loongarch-ftypes.def     | 24 ++++++------
+ .../loongarch/vector/lasx/pr123766.c          | 28 ++++++++++++++
+ .../loongarch/vector/lsx/pr123766.c           | 28 ++++++++++++++
+ 4 files changed, 94 insertions(+), 24 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.target/loongarch/vector/lasx/pr123766.c
+ create mode 100644 gcc/testsuite/gcc.target/loongarch/vector/lsx/pr123766.c
+
+diff --git a/gcc/config/loongarch/loongarch-builtins.cc b/gcc/config/loongarch/loongarch-builtins.cc
+index 9493dedcab78..b37a7ac70319 100644
+--- a/gcc/config/loongarch/loongarch-builtins.cc
++++ b/gcc/config/loongarch/loongarch-builtins.cc
+@@ -1468,10 +1468,10 @@ static const struct loongarch_builtin_description loongarch_builtins[] = {
+   LSX_BUILTIN (vfrintrp_d, LARCH_V2DF_FTYPE_V2DF),
+   LSX_BUILTIN (vfrintrm_s, LARCH_V4SF_FTYPE_V4SF),
+   LSX_BUILTIN (vfrintrm_d, LARCH_V2DF_FTYPE_V2DF),
+-  LSX_NO_TARGET_BUILTIN (vstelm_b, LARCH_VOID_FTYPE_V16QI_CVPOINTER_SI_UQI),
+-  LSX_NO_TARGET_BUILTIN (vstelm_h, LARCH_VOID_FTYPE_V8HI_CVPOINTER_SI_UQI),
+-  LSX_NO_TARGET_BUILTIN (vstelm_w, LARCH_VOID_FTYPE_V4SI_CVPOINTER_SI_UQI),
+-  LSX_NO_TARGET_BUILTIN (vstelm_d, LARCH_VOID_FTYPE_V2DI_CVPOINTER_SI_UQI),
++  LSX_NO_TARGET_BUILTIN (vstelm_b, LARCH_VOID_FTYPE_V16QI_VPOINTER_SI_UQI),
++  LSX_NO_TARGET_BUILTIN (vstelm_h, LARCH_VOID_FTYPE_V8HI_VPOINTER_SI_UQI),
++  LSX_NO_TARGET_BUILTIN (vstelm_w, LARCH_VOID_FTYPE_V4SI_VPOINTER_SI_UQI),
++  LSX_NO_TARGET_BUILTIN (vstelm_d, LARCH_VOID_FTYPE_V2DI_VPOINTER_SI_UQI),
+   LSX_BUILTIN (vaddwev_d_w, LARCH_V2DI_FTYPE_V4SI_V4SI),
+   LSX_BUILTIN (vaddwev_w_h, LARCH_V4SI_FTYPE_V8HI_V8HI),
+   LSX_BUILTIN (vaddwev_h_b, LARCH_V8HI_FTYPE_V16QI_V16QI),
+@@ -1641,7 +1641,7 @@ static const struct loongarch_builtin_description loongarch_builtins[] = {
+   LSX_BUILTIN (vssrarni_du_q, LARCH_UV2DI_FTYPE_UV2DI_V2DI_USI),
+   LSX_BUILTIN (vpermi_w, LARCH_V4SI_FTYPE_V4SI_V4SI_USI),
+   LSX_BUILTIN (vld, LARCH_V16QI_FTYPE_CVPOINTER_SI),
+-  LSX_NO_TARGET_BUILTIN (vst, LARCH_VOID_FTYPE_V16QI_CVPOINTER_SI),
++  LSX_NO_TARGET_BUILTIN (vst, LARCH_VOID_FTYPE_V16QI_VPOINTER_SI),
+   LSX_BUILTIN (vssrlrn_b_h, LARCH_V16QI_FTYPE_V8HI_V8HI),
+   LSX_BUILTIN (vssrlrn_h_w, LARCH_V8HI_FTYPE_V4SI_V4SI),
+   LSX_BUILTIN (vssrlrn_w_d, LARCH_V4SI_FTYPE_V2DI_V2DI),
+@@ -1652,7 +1652,7 @@ static const struct loongarch_builtin_description loongarch_builtins[] = {
+   LSX_BUILTIN (vldi, LARCH_V2DI_FTYPE_HI),
+   LSX_BUILTIN (vshuf_b, LARCH_V16QI_FTYPE_V16QI_V16QI_V16QI),
+   LSX_BUILTIN (vldx, LARCH_V16QI_FTYPE_CVPOINTER_DI),
+-  LSX_NO_TARGET_BUILTIN (vstx, LARCH_VOID_FTYPE_V16QI_CVPOINTER_DI),
++  LSX_NO_TARGET_BUILTIN (vstx, LARCH_VOID_FTYPE_V16QI_VPOINTER_DI),
+   LSX_BUILTIN (vextl_qu_du, LARCH_UV2DI_FTYPE_UV2DI),
+ 
+   /* Built-in functions for LASX */
+@@ -2181,11 +2181,11 @@ static const struct loongarch_builtin_description loongarch_builtins[] = {
+   LASX_BUILTIN (xvfrintrm_s, LARCH_V8SF_FTYPE_V8SF),
+   LASX_BUILTIN (xvfrintrm_d, LARCH_V4DF_FTYPE_V4DF),
+   LASX_BUILTIN (xvld, LARCH_V32QI_FTYPE_CVPOINTER_SI),
+-  LASX_NO_TARGET_BUILTIN (xvst, LARCH_VOID_FTYPE_V32QI_CVPOINTER_SI),
+-  LASX_NO_TARGET_BUILTIN (xvstelm_b, LARCH_VOID_FTYPE_V32QI_CVPOINTER_SI_UQI),
+-  LASX_NO_TARGET_BUILTIN (xvstelm_h, LARCH_VOID_FTYPE_V16HI_CVPOINTER_SI_UQI),
+-  LASX_NO_TARGET_BUILTIN (xvstelm_w, LARCH_VOID_FTYPE_V8SI_CVPOINTER_SI_UQI),
+-  LASX_NO_TARGET_BUILTIN (xvstelm_d, LARCH_VOID_FTYPE_V4DI_CVPOINTER_SI_UQI),
++  LASX_NO_TARGET_BUILTIN (xvst, LARCH_VOID_FTYPE_V32QI_VPOINTER_SI),
++  LASX_NO_TARGET_BUILTIN (xvstelm_b, LARCH_VOID_FTYPE_V32QI_VPOINTER_SI_UQI),
++  LASX_NO_TARGET_BUILTIN (xvstelm_h, LARCH_VOID_FTYPE_V16HI_VPOINTER_SI_UQI),
++  LASX_NO_TARGET_BUILTIN (xvstelm_w, LARCH_VOID_FTYPE_V8SI_VPOINTER_SI_UQI),
++  LASX_NO_TARGET_BUILTIN (xvstelm_d, LARCH_VOID_FTYPE_V4DI_VPOINTER_SI_UQI),
+   LASX_BUILTIN (xvinsve0_w, LARCH_V8SI_FTYPE_V8SI_V8SI_UQI),
+   LASX_BUILTIN (xvinsve0_d, LARCH_V4DI_FTYPE_V4DI_V4DI_UQI),
+   LASX_BUILTIN (xvpickve_w, LARCH_V8SI_FTYPE_V8SI_UQI),
+@@ -2201,7 +2201,7 @@ static const struct loongarch_builtin_description loongarch_builtins[] = {
+   LASX_BUILTIN (xvorn_v, LARCH_UV32QI_FTYPE_UV32QI_UV32QI),
+   LASX_BUILTIN (xvldi, LARCH_V4DI_FTYPE_HI),
+   LASX_BUILTIN (xvldx, LARCH_V32QI_FTYPE_CVPOINTER_DI),
+-  LASX_NO_TARGET_BUILTIN (xvstx, LARCH_VOID_FTYPE_V32QI_CVPOINTER_DI),
++  LASX_NO_TARGET_BUILTIN (xvstx, LARCH_VOID_FTYPE_V32QI_VPOINTER_DI),
+   LASX_BUILTIN (xvextl_qu_du, LARCH_UV4DI_FTYPE_UV4DI),
+ 
+   /* LASX */
+@@ -2451,11 +2451,25 @@ loongarch_build_cvpointer_type (void)
+   return cache;
+ }
+ 
++/* Return a type for 'volatile void *'.  */
++
++static tree
++loongarch_build_vpointer_type (void)
++{
++  static tree cache;
++
++  if (cache == NULL_TREE)
++    cache = build_pointer_type (build_qualified_type (void_type_node,
++						      TYPE_QUAL_VOLATILE));
++  return cache;
++}
++
+ /* Source-level argument types.  */
+ #define LARCH_ATYPE_VOID void_type_node
+ #define LARCH_ATYPE_INT integer_type_node
+ #define LARCH_ATYPE_POINTER ptr_type_node
+ #define LARCH_ATYPE_CVPOINTER loongarch_build_cvpointer_type ()
++#define LARCH_ATYPE_VPOINTER loongarch_build_vpointer_type ()
+ #define LARCH_ATYPE_BOOLEAN boolean_type_node
+ /* Standard mode-based argument types.  */
+ #define LARCH_ATYPE_QI intQI_type_node
+diff --git a/gcc/config/loongarch/loongarch-ftypes.def b/gcc/config/loongarch/loongarch-ftypes.def
+index 337f2c2c2293..3dad8073bc76 100644
+--- a/gcc/config/loongarch/loongarch-ftypes.def
++++ b/gcc/config/loongarch/loongarch-ftypes.def
+@@ -497,10 +497,10 @@ DEF_LARCH_FTYPE (2, (VOID, SI, SI))
+ DEF_LARCH_FTYPE (2, (VOID, UQI, SI))
+ DEF_LARCH_FTYPE (2, (VOID, USI, UQI))
+ DEF_LARCH_FTYPE (1, (VOID, UHI))
+-DEF_LARCH_FTYPE (3, (VOID, V16QI, CVPOINTER, SI))
+-DEF_LARCH_FTYPE (3, (VOID, V16QI, CVPOINTER, DI))
+-DEF_LARCH_FTYPE (3, (VOID, V32QI, CVPOINTER, SI))
+-DEF_LARCH_FTYPE (3, (VOID, V32QI, CVPOINTER, DI))
++DEF_LARCH_FTYPE (3, (VOID, V16QI, VPOINTER, SI))
++DEF_LARCH_FTYPE (3, (VOID, V16QI, VPOINTER, DI))
++DEF_LARCH_FTYPE (3, (VOID, V32QI, VPOINTER, SI))
++DEF_LARCH_FTYPE (3, (VOID, V32QI, VPOINTER, DI))
+ DEF_LARCH_FTYPE (3, (VOID, V4DF, POINTER, SI))
+ DEF_LARCH_FTYPE (3, (VOID, V2DF, POINTER, SI))
+ DEF_LARCH_FTYPE (3, (VOID, V2DI, CVPOINTER, SI))
+@@ -682,10 +682,10 @@ DEF_LARCH_FTYPE(3,(V4DI,V4DI,UV16HI,V16HI))
+ DEF_LARCH_FTYPE(2,(UV8SI,UV32QI,UV32QI))
+ DEF_LARCH_FTYPE(2,(V8SI,UV32QI,V32QI))
+ 
+-DEF_LARCH_FTYPE(4,(VOID,V16QI,CVPOINTER,SI,UQI))
+-DEF_LARCH_FTYPE(4,(VOID,V8HI,CVPOINTER,SI,UQI))
+-DEF_LARCH_FTYPE(4,(VOID,V4SI,CVPOINTER,SI,UQI))
+-DEF_LARCH_FTYPE(4,(VOID,V2DI,CVPOINTER,SI,UQI))
++DEF_LARCH_FTYPE(4,(VOID,V16QI,VPOINTER,SI,UQI))
++DEF_LARCH_FTYPE(4,(VOID,V8HI,VPOINTER,SI,UQI))
++DEF_LARCH_FTYPE(4,(VOID,V4SI,VPOINTER,SI,UQI))
++DEF_LARCH_FTYPE(4,(VOID,V2DI,VPOINTER,SI,UQI))
+ 
+ DEF_LARCH_FTYPE (2, (DI, V16QI, UQI))
+ DEF_LARCH_FTYPE (2, (DI, V8HI, UQI))
+@@ -707,10 +707,10 @@ DEF_LARCH_FTYPE (3, (UV16HI, UV16HI, V16HI, USI))
+ DEF_LARCH_FTYPE (3, (UV8SI, UV8SI, V8SI, USI))
+ DEF_LARCH_FTYPE (3, (UV4DI, UV4DI, V4DI, USI))
+ 
+-DEF_LARCH_FTYPE(4,(VOID,V32QI,CVPOINTER,SI,UQI))
+-DEF_LARCH_FTYPE(4,(VOID,V16HI,CVPOINTER,SI,UQI))
+-DEF_LARCH_FTYPE(4,(VOID,V8SI,CVPOINTER,SI,UQI))
+-DEF_LARCH_FTYPE(4,(VOID,V4DI,CVPOINTER,SI,UQI))
++DEF_LARCH_FTYPE(4,(VOID,V32QI,VPOINTER,SI,UQI))
++DEF_LARCH_FTYPE(4,(VOID,V16HI,VPOINTER,SI,UQI))
++DEF_LARCH_FTYPE(4,(VOID,V8SI,VPOINTER,SI,UQI))
++DEF_LARCH_FTYPE(4,(VOID,V4DI,VPOINTER,SI,UQI))
+ 
+ DEF_LARCH_FTYPE (1, (BOOLEAN,V16QI))
+ DEF_LARCH_FTYPE(2,(V16QI,CVPOINTER,CVPOINTER))
+diff --git a/gcc/testsuite/gcc.target/loongarch/vector/lasx/pr123766.c b/gcc/testsuite/gcc.target/loongarch/vector/lasx/pr123766.c
+new file mode 100644
+index 000000000000..88170cd6aef4
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/loongarch/vector/lasx/pr123766.c
+@@ -0,0 +1,28 @@
++/* { dg-do compile } */
++/* { dg-options "-O2 -mlasx  -Werror -Wextra" } */
++
++#include <lasxintrin.h>
++
++__m256i v = {0, 0, 0, 0};
++
++#define TEST(NAME)			  \
++  void test_##NAME (void)		  \
++  {					  \
++    long long r[4];			  \
++    __lasx_##NAME (v, r, 0);		  \
++  }
++
++TEST (xvst);
++TEST (xvstx);
++
++#define TEST1(NAME, TYPE, NUM)		  \
++  void test_##NAME (void)		  \
++  {					  \
++    TYPE r[NUM];			  \
++    __lasx_##NAME (v, r, 0, 0);		  \
++  }
++
++TEST1 (xvstelm_b, char, 32);
++TEST1 (xvstelm_h, short, 16);
++TEST1 (xvstelm_w, int, 8);
++TEST1 (xvstelm_d, long long, 4);
+diff --git a/gcc/testsuite/gcc.target/loongarch/vector/lsx/pr123766.c b/gcc/testsuite/gcc.target/loongarch/vector/lsx/pr123766.c
+new file mode 100644
+index 000000000000..54f57e611137
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/loongarch/vector/lsx/pr123766.c
+@@ -0,0 +1,28 @@
++/* { dg-do compile } */
++/* { dg-options "-O2 -mlsx  -Werror -Wextra" } */
++
++#include <lsxintrin.h>
++
++__m128i v = {0, 0};
++
++#define TEST(NAME)			  \
++  void test_##NAME (void)		  \
++  {					  \
++    long long r[2];			  \
++    __lsx_##NAME (v, r, 0);		  \
++  }
++
++TEST (vst);
++TEST (vstx);
++
++#define TEST1(NAME, TYPE, NUM)		  \
++  void test_##NAME (void)		  \
++  {					  \
++    TYPE r[NUM];			  \
++    __lsx_##NAME (v, r, 0, 0);		  \
++  }
++
++TEST1 (vstelm_b, char, 16);
++TEST1 (vstelm_h, short, 8);
++TEST1 (vstelm_w, int, 4);
++TEST1 (vstelm_d, long long, 2);
+-- 
+2.43.7
+
+

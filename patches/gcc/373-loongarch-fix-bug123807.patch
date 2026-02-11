@@ -1,0 +1,71 @@
+From 7d8907054af9d767226d3cb40d6c58c73a47d0a2 Mon Sep 17 00:00:00 2001
+From: Lulu Cheng <chenglulu@loongson.cn>
+Date: Mon, 26 Jan 2026 11:38:59 +0800
+Subject: [PATCH] LoongArch: Fix bug123807.
+
+In the function loongarch_expand_vector_init_same, if same is MEM and
+the mode of same does not match imode, it will cause an ICE
+in force_reg (imode, same).
+
+	PR target/123807
+
+gcc/ChangeLog:
+
+	* config/loongarch/loongarch.cc
+	(loongarch_expand_vector_init_same): When same is MEM and
+	GET_MODE(same) != imode, first load the data from memory
+	and then process it further.
+
+gcc/testsuite/ChangeLog:
+
+	* gcc.target/loongarch/vector/lsx/pr123807.c: New test.
+
+(cherry picked from commit 4df77a254263e96af1ab4d1288a35cff10c515a4)
+---
+ gcc/config/loongarch/loongarch.cc                     | 11 ++++++++++-
+ .../gcc.target/loongarch/vector/lsx/pr123807.c        | 10 ++++++++++
+ 2 files changed, 20 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/gcc.target/loongarch/vector/lsx/pr123807.c
+
+diff --git a/gcc/config/loongarch/loongarch.cc b/gcc/config/loongarch/loongarch.cc
+index a806ff79cde2..fcf26cf3a528 100644
+--- a/gcc/config/loongarch/loongarch.cc
++++ b/gcc/config/loongarch/loongarch.cc
+@@ -10207,7 +10207,16 @@ loongarch_expand_vector_init_same (rtx target, rtx vals, unsigned nvar)
+ 	}
+     }
+ 
+-  temp = force_reg (imode, same);
++  if (GET_CODE (same) == MEM && GET_MODE (same) != imode)
++    {
++      rtx reg_tmp = gen_reg_rtx (GET_MODE (same));
++      loongarch_emit_move (reg_tmp, same);
++      temp = lowpart_subreg (imode, reg_tmp, GET_MODE (reg_tmp));
++    }
++  else
++    temp = same;
++
++  temp = force_reg (imode, temp);
+ 
+   switch (vmode)
+     {
+diff --git a/gcc/testsuite/gcc.target/loongarch/vector/lsx/pr123807.c b/gcc/testsuite/gcc.target/loongarch/vector/lsx/pr123807.c
+new file mode 100644
+index 000000000000..7ec514ae41aa
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/loongarch/vector/lsx/pr123807.c
+@@ -0,0 +1,10 @@
++/* { dg-do compile } */
++/* { dg-options "-O0 -msimd=lsx" } */
++
++typedef long long v2i64 __attribute__ ((__vector_size__ (16)));
++v2i64 a, b;
++void
++test (int imm8)
++{
++  b = a << imm8;
++}
+-- 
+2.43.7
+
+
