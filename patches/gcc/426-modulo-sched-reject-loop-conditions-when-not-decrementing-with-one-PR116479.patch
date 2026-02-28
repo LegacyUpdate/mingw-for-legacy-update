@@ -1,0 +1,82 @@
+From eec0e950c6ba80217c73fe720a1b6cdba982f796 Mon Sep 17 00:00:00 2001
+From: Andre Vieira <andre.simoesdiasvieira@arm.com>
+Date: Fri, 25 Apr 2025 14:02:43 +0100
+Subject: [PATCH] modulo-sched: reject loop conditions when not decrementing
+ with one [PR 116479]
+
+In the commit titled 'doloop: Add support for predicated vectorized loops' the
+doloop_condition_get function was changed to accept loops with decrements
+larger than 1.  This patch rejects such loops for modulo-sched.
+
+gcc/ChangeLog:
+
+	PR rtl-optimization/116479
+	* modulo-sched.cc (doloop_register_get): Reject conditions with
+	decrements that are not 1.
+
+gcc/testsuite/ChangeLog:
+
+	* gcc.dg/pr116479.c: New test.
+
+(cherry picked from commit 8073fa147248aa67c11227f922d91d784659077e)
+---
+ gcc/modulo-sched.cc             |  8 +++++++-
+ gcc/testsuite/gcc.dg/pr116479.c | 26 ++++++++++++++++++++++++++
+ 2 files changed, 33 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/gcc.dg/pr116479.c
+
+diff --git a/gcc/modulo-sched.cc b/gcc/modulo-sched.cc
+index 08af5a929e14..002346778f44 100644
+--- a/gcc/modulo-sched.cc
++++ b/gcc/modulo-sched.cc
+@@ -356,7 +356,13 @@ doloop_register_get (rtx_insn *head, rtx_insn *tail)
+     reg = XEXP (condition, 0);
+   else if (GET_CODE (XEXP (condition, 0)) == PLUS
+ 	   && REG_P (XEXP (XEXP (condition, 0), 0)))
+-    reg = XEXP (XEXP (condition, 0), 0);
++    {
++      if (CONST_INT_P (XEXP (condition, 1))
++	  && INTVAL (XEXP (condition, 1)) == -1)
++	reg = XEXP (XEXP (condition, 0), 0);
++      else
++	return NULL_RTX;
++    }
+   else
+     gcc_unreachable ();
+ 
+diff --git a/gcc/testsuite/gcc.dg/pr116479.c b/gcc/testsuite/gcc.dg/pr116479.c
+new file mode 100644
+index 000000000000..dbbcb9aaf575
+--- /dev/null
++++ b/gcc/testsuite/gcc.dg/pr116479.c
+@@ -0,0 +1,26 @@
++/* PR 116479 */
++/* { dg-do run { target { bitint } } } */
++/* { dg-additional-options "-O -funroll-loops -finline-stringops -fmodulo-sched --param=max-iterations-computation-cost=637924687 -std=c23" } */
++
++#if __BITINT_MAXWIDTH__ >= 13577
++_BitInt (13577) b;
++
++void
++foo (char *ret)
++{
++  __builtin_memset (&b, 4, 697);
++  *ret = 0;
++}
++#endif
++
++int
++main ()
++{
++#if __BITINT_MAXWIDTH__ >= 13577
++  char x;
++  foo (&x);
++  for (unsigned i = 0; i < sizeof (x); i++)
++    if (x != 0)
++      __builtin_abort ();
++#endif
++}
+-- 
+2.43.7
+
+

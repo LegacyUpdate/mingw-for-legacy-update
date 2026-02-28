@@ -1,0 +1,114 @@
+From 0cba8001546d080b80fa757dfd280e9e2c84e6a9 Mon Sep 17 00:00:00 2001
+From: Eric Botcazou <ebotcazou@adacore.com>
+Date: Wed, 25 Feb 2026 14:00:21 +0100
+Subject: [PATCH] Ada: Fix missing implicit dereference for access-to-protected
+ used as prefix
+
+... of access-related attribute.  This is a regression present on all active
+branches caused by a local resolution of the N_Selected_Component node.
+
+gcc/ada/
+	PR ada/124226
+	* sem_res.adb (Resolve_Implicit_Dereference): Move declaration to...
+	* sem_res.ads (Resolve_Implicit_Dereference): ...here.
+	* sem_attr.adb (Resolve_Attribute) <Attribute_Access>: Also call
+	Resolve_Implicit_Dereference when resolving a protected operation.
+
+gcc/testsuite/
+	* gnat.dg/protected_deref1.adb: New test.
+---
+ gcc/ada/sem_attr.adb                       |  1 +
+ gcc/ada/sem_res.adb                        |  6 ----
+ gcc/ada/sem_res.ads                        |  6 ++++
+ gcc/testsuite/gnat.dg/protected_deref1.adb | 32 ++++++++++++++++++++++
+ 4 files changed, 39 insertions(+), 6 deletions(-)
+ create mode 100644 gcc/testsuite/gnat.dg/protected_deref1.adb
+
+diff --git a/gcc/ada/sem_attr.adb b/gcc/ada/sem_attr.adb
+index ca9d7c13b91f..96f82ad1b5f7 100644
+--- a/gcc/ada/sem_attr.adb
++++ b/gcc/ada/sem_attr.adb
+@@ -11620,6 +11620,7 @@ package body Sem_Attr is
+                end if;
+ 
+                Resolve (Prefix (P));
++               Resolve_Implicit_Dereference (Prefix (P));
+ 
+                if not Is_Overloaded (P) then
+                   Generate_Reference (Entity (Selector_Name (P)), P);
+diff --git a/gcc/ada/sem_res.adb b/gcc/ada/sem_res.adb
+index f13dba7fc5bf..2778f4bc2d80 100644
+--- a/gcc/ada/sem_res.adb
++++ b/gcc/ada/sem_res.adb
+@@ -278,12 +278,6 @@ package body Sem_Res is
+    --  is the context type, which is used when the operation is a protected
+    --  function with no arguments, and the return value is indexed.
+ 
+-   procedure Resolve_Implicit_Dereference (P : Node_Id);
+-   --  Called when P is the prefix of an indexed component, or of a selected
+-   --  component, or of a slice. If P is of an access type, we unconditionally
+-   --  rewrite it as an explicit dereference. This ensures that the expander
+-   --  and the code generator have a fully explicit tree to work with.
+-
+    procedure Resolve_Intrinsic_Operator (N : Node_Id; Typ : Entity_Id);
+    --  A call to a user-defined intrinsic operator is rewritten as a call to
+    --  the corresponding predefined operator, with suitable conversions. Note
+diff --git a/gcc/ada/sem_res.ads b/gcc/ada/sem_res.ads
+index 821937ec1725..8eb518ed3a18 100644
+--- a/gcc/ada/sem_res.ads
++++ b/gcc/ada/sem_res.ads
+@@ -133,6 +133,12 @@ package Sem_Res is
+    --  own type. For now we assume that the prefix cannot be overloaded and
+    --  the name of the entry plays no role in the resolution.
+ 
++   procedure Resolve_Implicit_Dereference (P : Node_Id);
++   --  Called when P is the prefix of an indexed component, or of a selected
++   --  component, or of a slice. If P is of an access type, we unconditionally
++   --  rewrite it as an explicit dereference. This ensures that the expander
++   --  and the code generator have a fully explicit tree to work with.
++
+    procedure Resolve_Membership_Equality (N : Node_Id; Typ : Entity_Id);
+    --  Resolve the equality operator in an individual membership test
+ 
+diff --git a/gcc/testsuite/gnat.dg/protected_deref1.adb b/gcc/testsuite/gnat.dg/protected_deref1.adb
+new file mode 100644
+index 000000000000..361be93c8314
+--- /dev/null
++++ b/gcc/testsuite/gnat.dg/protected_deref1.adb
+@@ -0,0 +1,32 @@
++-- { dg-do run }
++
++with Ada.Text_IO;
++
++procedure Protected_Deref1 is
++
++   protected type Fallback_Hit_Counter_Type is
++      procedure Handler;
++   end Fallback_Hit_Counter_Type;
++
++   protected body Fallback_Hit_Counter_Type is
++      procedure Handler is
++      begin
++         Ada.Text_IO.Put_Line ("Test");
++      end Handler;
++   end Fallback_Hit_Counter_Type;
++
++   Fallback_Hit_Counter : access Fallback_Hit_Counter_Type :=
++     new Fallback_Hit_Counter_Type;
++
++   type X is access protected procedure;
++
++   A : X := Fallback_Hit_Counter.all.Handler'Access;
++   B : X := Fallback_Hit_Counter.Handler'Access;
++
++begin
++   A.all;
++   B.all;
++   if A /= B then
++      raise Program_Error;
++   end if;
++end;
+-- 
+2.43.7
+
+

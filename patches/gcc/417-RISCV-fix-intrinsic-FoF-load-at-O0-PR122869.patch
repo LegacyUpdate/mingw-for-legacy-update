@@ -1,0 +1,312 @@
+From 35320d5f8758eeb8939e970ce3ef92593b8f7cab Mon Sep 17 00:00:00 2001
+From: Robin Dapp <rdapp@oss.qualcomm.com>
+Date: Fri, 2 Jan 2026 16:57:21 +0100
+Subject: [PATCH] RISC-V: Fix intrinsic FoF load at -O0 [PR122869].
+
+In the PR we try to compile a loop at -O0 with fault-only-first loads.
+We use the VL adjusted by the FoF loads to count the number of
+processed elements.  Currently, this is implemented as "folding" the FoF
+load into a FoF load and a riscv_read_vl directly after.
+We cannot guarantee the value of VL between two calls, though.  It is
+possible that we need a vector store in between which would clobber VL.
+
+This patch makes the VL -> pseudo semantics of the FoF insn explicit and
+adjusts the intrinsics expander accordingly.
+
+There is a problem with this approach, though:  Technically, the VL
+adjustment of the FoF loads is modelled as a store and the VL variable
+is made TREE_ADDRESSABLE.  At the gimple level we managed to elide the
+store very early but at RTL level we don't.  Also, we don't manage to
+re-use the same register for VL at -O2 and -O3 while it still works for
+-O1.
+
+What might help with the second issue above is to add value tracking
+to the vsetvl pass.  I suppose the first issue would require a larger
+intervention.
+
+	PR target/122869
+
+gcc/ChangeLog:
+
+	* config/riscv/riscv-vector-builtins-bases.cc (fold_fault_load):
+	Remove
+	* config/riscv/riscv-vector-builtins.cc (function_expander::use_contiguous_load_insn):
+	Use new helper.
+	(function_expander::prepare_contiguous_load_insn): New helper.
+	(function_expander::use_fof_load_insn): New function to emit FoF
+	loads.
+	* config/riscv/riscv-vector-builtins.h: Declare new functions.
+
+gcc/testsuite/ChangeLog:
+
+	* gcc.target/riscv/rvv/base/pr122656-1.c: Remove dg-error.
+	* gcc.target/riscv/rvv/vsetvl/ffload-3.c: XFAIL for -O2 and -O3.
+	* gcc.target/riscv/rvv/base/pr122869.c: New test.
+
+(cherry picked from commit ca5a68ac28013530782f8a1ba021c18de561fa7c)
+---
+ .../riscv/riscv-vector-builtins-bases.cc      | 64 +------------------
+ gcc/config/riscv/riscv-vector-builtins.cc     | 64 +++++++++++++++++--
+ gcc/config/riscv/riscv-vector-builtins.h      |  2 +
+ .../gcc.target/riscv/rvv/base/pr122656-1.c    |  2 +-
+ .../gcc.target/riscv/rvv/base/pr122869.c      | 22 +++++++
+ .../gcc.target/riscv/rvv/vsetvl/ffload-3.c    |  3 +-
+ 6 files changed, 89 insertions(+), 68 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.target/riscv/rvv/base/pr122869.c
+
+diff --git a/gcc/config/riscv/riscv-vector-builtins-bases.cc b/gcc/config/riscv/riscv-vector-builtins-bases.cc
+index 28950bad6b73..72916ea1b93d 100644
+--- a/gcc/config/riscv/riscv-vector-builtins-bases.cc
++++ b/gcc/config/riscv/riscv-vector-builtins-bases.cc
+@@ -58,54 +58,6 @@ enum lst_type
+   LST_INDEXED,
+ };
+ 
+-/* Helper function to fold vleff and vlsegff.  */
+-static gimple *
+-fold_fault_load (gimple_folder &f)
+-{
+-  /* fold fault_load (const *base, size_t *new_vl, size_t vl)
+-
+-     ====> fault_load (const *base, size_t vl)
+-	   new_vl = MEM_REF[read_vl ()].  */
+-
+-  auto_vec<tree> vargs (gimple_call_num_args (f.call) - 1);
+-
+-  for (unsigned i = 0; i < gimple_call_num_args (f.call); i++)
+-    {
+-      /* Exclude size_t *new_vl argument.  */
+-      if (i == gimple_call_num_args (f.call) - 2)
+-	continue;
+-
+-      vargs.quick_push (gimple_call_arg (f.call, i));
+-    }
+-
+-  gimple *repl = gimple_build_call_vec (gimple_call_fn (f.call), vargs);
+-  gimple_call_set_lhs (repl, f.lhs);
+-
+-  /* Handle size_t *new_vl by read_vl.  */
+-  tree new_vl = gimple_call_arg (f.call, gimple_call_num_args (f.call) - 2);
+-  if (integer_zerop (new_vl))
+-    {
+-      /* This case happens when user passes the nullptr to new_vl argument.
+-	 In this case, we just need to ignore the new_vl argument and return
+-	 fault_load instruction directly. */
+-      return repl;
+-    }
+-
+-  tree tmp_var = create_tmp_var (size_type_node, "new_vl");
+-  tree decl = get_read_vl_decl ();
+-  gimple *g = gimple_build_call (decl, 0);
+-  gimple_call_set_lhs (g, tmp_var);
+-  tree indirect
+-    = fold_build2 (MEM_REF, size_type_node,
+-		   gimple_call_arg (f.call, gimple_call_num_args (f.call) - 2),
+-		   build_int_cst (build_pointer_type (size_type_node), 0));
+-  gassign *assign = gimple_build_assign (indirect, tmp_var);
+-
+-  gsi_insert_after (f.gsi, assign, GSI_SAME_STMT);
+-  gsi_insert_after (f.gsi, g, GSI_SAME_STMT);
+-  return repl;
+-}
+-
+ /* Implements vsetvl<mode> && vsetvlmax<mode>.  */
+ template<bool VLMAX_P>
+ class vsetvl : public function_base
+@@ -1946,15 +1898,9 @@ public:
+     return pred != PRED_TYPE_none;
+   }
+ 
+-  gimple *fold (gimple_folder &f) const override
+-  {
+-    return fold_fault_load (f);
+-  }
+-
+   rtx expand (function_expander &e) const override
+   {
+-    return e.use_contiguous_load_insn (
+-      code_for_pred_fault_load (e.vector_mode ()));
++    return e.use_fof_load_insn ();
+   }
+ };
+ 
+@@ -2122,15 +2068,9 @@ public:
+     return pred != PRED_TYPE_none;
+   }
+ 
+-  gimple *fold (gimple_folder &f) const override
+-  {
+-    return fold_fault_load (f);
+-  }
+-
+   rtx expand (function_expander &e) const override
+   {
+-    return e.use_contiguous_load_insn
+-      (code_for_pred_fault_load (e.vector_mode ()));
++    return e.use_fof_load_insn ();
+   }
+ };
+ 
+diff --git a/gcc/config/riscv/riscv-vector-builtins.cc b/gcc/config/riscv/riscv-vector-builtins.cc
+index 9b491abe01d0..43102d422d4b 100644
+--- a/gcc/config/riscv/riscv-vector-builtins.cc
++++ b/gcc/config/riscv/riscv-vector-builtins.cc
+@@ -4244,9 +4244,8 @@ function_expander::use_exact_insn (insn_code icode)
+   return generate_insn (icode);
+ }
+ 
+-/* Use contiguous load INSN.  */
+-rtx
+-function_expander::use_contiguous_load_insn (insn_code icode)
++int
++function_expander::prepare_contiguous_load_insn ()
+ {
+   gcc_assert (call_expr_nargs (exp) > 0);
+   machine_mode mode = TYPE_MODE (TREE_TYPE (exp));
+@@ -4265,10 +4264,19 @@ function_expander::use_contiguous_load_insn (insn_code icode)
+     add_vundef_operand (mode);
+ 
+   add_mem_operand (mode, arg_offset++);
++  return arg_offset;
++}
++
++/* Use contiguous load INSN.  */
++rtx
++function_expander::use_contiguous_load_insn (insn_code icode)
++{
++  int arg_offset = prepare_contiguous_load_insn ();
+ 
+   for (int argno = arg_offset; argno < call_expr_nargs (exp); argno++)
+     add_input_operand (argno);
+ 
++  machine_mode mode = TYPE_MODE (TREE_TYPE (exp));
+   if (GET_MODE_CLASS (mode) != MODE_VECTOR_BOOL)
+     {
+       add_input_operand (Pmode, get_tail_policy_for_pred (pred));
+@@ -4277,10 +4285,58 @@ function_expander::use_contiguous_load_insn (insn_code icode)
+ 
+   if (opno != insn_data[icode].n_generator_args)
+     add_input_operand (Pmode, get_avl_type_rtx (avl_type::NONVLMAX));
+-
+   return generate_insn (icode);
+ }
+ 
++/* Similar to use_contiguous_load_insn but skips the vector-length destination
++   operand that a fault-only-first load intrinsic has.  Then we add tail and
++   mask policy as well as AVL operand.  Last, add the vector-length destination
++   operand that we skipped initially.  */
++rtx
++function_expander::use_fof_load_insn ()
++{
++  int arg_offset = prepare_contiguous_load_insn ();
++
++  int vl_dest_arg = call_expr_nargs (exp) - 2;
++  for (int argno = arg_offset; argno < call_expr_nargs (exp); argno++)
++    {
++      /* Skip argument for VL destination in memory but add the others.  */
++      if (argno != vl_dest_arg)
++	add_input_operand (argno);
++    }
++
++  machine_mode mode = TYPE_MODE (TREE_TYPE (exp));
++  if (GET_MODE_CLASS (mode) != MODE_VECTOR_BOOL)
++    {
++      add_input_operand (Pmode, get_tail_policy_for_pred (pred));
++      add_input_operand (Pmode, get_mask_policy_for_pred (pred));
++    }
++
++  add_input_operand (Pmode, get_avl_type_rtx (avl_type::NONVLMAX));
++
++  tree arg = CALL_EXPR_ARG (exp, vl_dest_arg);
++
++  /* Use a regular FoF load if the user does not want to store VL.  */
++  insn_code icode = code_for_pred_fault_load (mode);
++  rtx result = generate_insn (icode);
++
++  /* If user wants VL stored, emit a read_vl and store to memory.  */
++  if (!integer_zerop (arg))
++    {
++      rtx vl_reg = gen_reg_rtx (Pmode);
++      if (Pmode == SImode)
++	emit_insn (gen_read_vlsi (vl_reg));
++      else
++	emit_insn (gen_read_vldi_zero_extend (vl_reg));
++
++      rtx addr = expand_normal (arg);
++      rtx mem = gen_rtx_MEM (Pmode, memory_address (Pmode, addr));
++      emit_move_insn (mem, vl_reg);
++    }
++
++  return result;
++}
++
+ /* Use contiguous store INSN.  */
+ rtx
+ function_expander::use_contiguous_store_insn (insn_code icode)
+diff --git a/gcc/config/riscv/riscv-vector-builtins.h b/gcc/config/riscv/riscv-vector-builtins.h
+index 10140ff68cd1..b8c8933bec97 100644
+--- a/gcc/config/riscv/riscv-vector-builtins.h
++++ b/gcc/config/riscv/riscv-vector-builtins.h
+@@ -513,7 +513,9 @@ public:
+   machine_mode ret_mode (void) const;
+ 
+   rtx use_exact_insn (insn_code);
++  int prepare_contiguous_load_insn ();
+   rtx use_contiguous_load_insn (insn_code);
++  rtx use_fof_load_insn ();
+   rtx use_contiguous_store_insn (insn_code);
+   rtx use_compare_insn (rtx_code, insn_code);
+   rtx use_ternop_insn (bool, insn_code);
+diff --git a/gcc/testsuite/gcc.target/riscv/rvv/base/pr122656-1.c b/gcc/testsuite/gcc.target/riscv/rvv/base/pr122656-1.c
+index 76adbed3f61a..1757989856ca 100644
+--- a/gcc/testsuite/gcc.target/riscv/rvv/base/pr122656-1.c
++++ b/gcc/testsuite/gcc.target/riscv/rvv/base/pr122656-1.c
+@@ -4,4 +4,4 @@
+ #include "riscv_vector.h"
+ int a;
+ long b, c;
+-void d() { __riscv_vlseg2e32ff_v_i32mf2x2(&a, &c, b); } /* { dg-error "invalid argument to built-in function" } */
++void d() { __riscv_vlseg2e32ff_v_i32mf2x2(&a, &c, b); }
+diff --git a/gcc/testsuite/gcc.target/riscv/rvv/base/pr122869.c b/gcc/testsuite/gcc.target/riscv/rvv/base/pr122869.c
+new file mode 100644
+index 000000000000..e00ac04bebbe
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/riscv/rvv/base/pr122869.c
+@@ -0,0 +1,22 @@
++/* { dg-do run } */
++/* { dg-additional-options "-O0 -std=gnu99" } */
++/* We used to generate a separate riscv_read_vl () after the FoF load.
++   In case of -O0 (or otherwise) it could happen that "g" wouldn't
++   get a hard reg and we'd need to store it, clobbering VL.
++   This leads to an infinite loop or a segfault.  */
++
++#include <riscv_vector.h>
++
++uint8_t a[1];
++int16_t b[1];
++
++int main ()
++{
++  for (size_t c = 0, avl = 1; avl > 0;)
++    {
++      size_t d = avl;
++      vint16mf2_t g = __riscv_vle16ff_v_i16mf2 (&b[c], &d, d);
++      avl -= d;
++      c += d; // Segmentation fault
++    }
++}
+diff --git a/gcc/testsuite/gcc.target/riscv/rvv/vsetvl/ffload-3.c b/gcc/testsuite/gcc.target/riscv/rvv/vsetvl/ffload-3.c
+index b4f7cc4431e2..732c70ecdf2e 100644
+--- a/gcc/testsuite/gcc.target/riscv/rvv/vsetvl/ffload-3.c
++++ b/gcc/testsuite/gcc.target/riscv/rvv/vsetvl/ffload-3.c
+@@ -25,4 +25,5 @@ void f (int8_t * restrict in, int8_t * restrict out, int n, int m, int cond)
+     }
+ }
+ 
+-/* { dg-final { scan-assembler-times {vsetvli\s+zero,\s*[a-x0-9]+,\s*e8,\s*mf8,\s*t[au],\s*m[au]} 2 { target { no-opts "-O0" no-opts "-g" no-opts "-funroll-loops" } } } } */
++/* -O2 and -O3 fail now, see PR target/122869.  */
++/* { dg-final { scan-assembler-times {vsetvli\s+zero,\s*[a-x0-9]+,\s*e8,\s*mf8,\s*t[au],\s*m[au]} 2 { target { no-opts "-O0" no-opts "-g" no-opts "-funroll-loops" } xfail { any-opts "-O2" "-O3" } } } } */
+-- 
+2.43.7
+
+

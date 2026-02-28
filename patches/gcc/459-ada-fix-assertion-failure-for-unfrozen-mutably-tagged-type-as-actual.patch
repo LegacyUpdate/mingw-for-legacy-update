@@ -1,0 +1,161 @@
+From 304a75b1b2a748e8bb94fd80a31a6e20da7fe6e8 Mon Sep 17 00:00:00 2001
+From: Eric Botcazou <ebotcazou@adacore.com>
+Date: Fri, 27 Feb 2026 19:54:33 +0100
+Subject: [PATCH] Ada: Fix assertion failure for unfrozen mutably tagged type
+ as actual
+
+This is a follow-up to the fix done last December at:
+  https://gcc.gnu.org/pipermail/gcc-patches/2025-December/704521.html
+
+The fix is not sufficient when nested layers of generics are involved,
+so this changes the implementation of mutably tagged types to have the
+declaration of their CW-equivalent type immediately analyzed.  But this
+in turn requires making sure that the root type is frozen before the
+CW-equivalent type in all cases.
+
+gcc/ada/
+	PR ada/123306
+	* freeze.adb (Freeze_Entity): For a class-wide equivalent type of
+	a non-interface root type, freeze the root type before it.
+	* sem_ch3.adb (Derived_Type_Declaration): Minor tweak.
+	* sem_ch12.adb (Analyze_One_Association): Revert latest change.
+	* sem_ch13.adb (Analyze_Attribute_Definition_Clause) <Size>: When
+	the prefix is a class-wide type, insert the declaration of the CW-
+	equivalent type immediately after that of the root type, and the
+	size check for the root type into its own freezing actions.
+
+gcc/testsuite/
+	* gnat.dg/specs/mutably_tagged2.ads: New test.
+---
+ gcc/ada/freeze.adb                            |  9 +++++++++
+ gcc/ada/sem_ch12.adb                          | 11 -----------
+ gcc/ada/sem_ch13.adb                          | 16 ++++++++--------
+ gcc/ada/sem_ch3.adb                           |  8 +++-----
+ .../gnat.dg/specs/mutably_tagged2.ads         | 19 +++++++++++++++++++
+ 5 files changed, 39 insertions(+), 24 deletions(-)
+ create mode 100644 gcc/testsuite/gnat.dg/specs/mutably_tagged2.ads
+
+diff --git a/gcc/ada/freeze.adb b/gcc/ada/freeze.adb
+index 0b501f194d69..383b393a7896 100644
+--- a/gcc/ada/freeze.adb
++++ b/gcc/ada/freeze.adb
+@@ -7355,6 +7355,15 @@ package body Freeze is
+ 
+          elsif Ekind (E) in E_Record_Type | E_Record_Subtype then
+             if not In_Generic_Scope (E) then
++               --  If this is a class-wide equivalent type for a non-interface
++               --  root type, freeze the root type.
++
++               if Is_Class_Wide_Equivalent_Type (E)
++                 and then Present (Parent_Subtype (E))
++               then
++                  Freeze_And_Append (Parent_Subtype (E), N, Result);
++               end if;
++
+                Freeze_Record_Type (E);
+             end if;
+ 
+diff --git a/gcc/ada/sem_ch12.adb b/gcc/ada/sem_ch12.adb
+index 7d525a9d54c9..bde56723e4e6 100644
+--- a/gcc/ada/sem_ch12.adb
++++ b/gcc/ada/sem_ch12.adb
+@@ -2596,20 +2596,9 @@ package body Sem_Ch12 is
+                if Ekind (Etype (Match)) /= E_Void
+                  and then Is_Mutably_Tagged_Type (Etype (Match))
+                then
+-                  --  The declaration of the CW-equivalent type of a mutably
+-                  --  tagged type is analyzed when the tagged type is frozen.
+-
+-                  if Nkind (I_Node) /= N_Formal_Package_Declaration
+-                    and then Ekind (Defining_Identifier (Assoc.An_Formal)) /=
+-                                                              E_Incomplete_Type
+-                  then
+-                     Freeze_Before (I_Node, Root_Type (Etype (Match)));
+-                  end if;
+-
+                   Rewrite (Match, New_Occurrence_Of
+                     (Class_Wide_Equivalent_Type
+                       (Etype (Match)), Sloc (Match)));
+-
+                   Analyze (Match);
+                end if;
+ 
+diff --git a/gcc/ada/sem_ch13.adb b/gcc/ada/sem_ch13.adb
+index 547bcaf886da..da25e3015676 100644
+--- a/gcc/ada/sem_ch13.adb
++++ b/gcc/ada/sem_ch13.adb
+@@ -7121,17 +7121,17 @@ package body Sem_Ch13 is
+                            Set_Class_Wide_Equivalent_Type (Etyp,
+                              Make_CW_Equivalent_Type (Etyp, Empty, Actions));
+ 
+-                           --  Add a Compile_Time_Error sizing check as a hint
+-                           --  to the backend.
++                           --  Insert its declaration immediately after that of
++                           --  the root type.
+ 
+-                           Append_To (Actions,
+-                             Make_CW_Size_Compile_Check
+-                               (Etype (Etyp), U_Ent));
++                           Insert_Actions_After
++                             (Declaration_Node (Etype (Etyp)), Actions);
+ 
+-                           --  Set the expansion to occur during freezing when
+-                           --  everything is analyzed
++                           --  Add a Compile_Time_Error size check for the root
++                           --  type at the freeze point.
+ 
+-                           Append_Freeze_Actions (Etyp, Actions);
++                           Append_Freeze_Action (Etype (Etyp),
++                             Make_CW_Size_Compile_Check (Etype (Etyp), U_Ent));
+ 
+                            Set_Is_Mutably_Tagged_Type (Etyp);
+                         end;
+diff --git a/gcc/ada/sem_ch3.adb b/gcc/ada/sem_ch3.adb
+index 225bff097bf1..bab4c22374d4 100644
+--- a/gcc/ada/sem_ch3.adb
++++ b/gcc/ada/sem_ch3.adb
+@@ -17998,12 +17998,10 @@ package body Sem_Ch3 is
+ 
+                   Insert_List_After_And_Analyze (N, Actions);
+ 
+-                  --  Add a Compile_Time_Error sizing check as a hint
+-                  --  to the backend since we don't know the true size of
+-                  --  anything at this point.
++                  --  Add a Compile_Time_Error size check at the freeze point
+ 
+-                  Append_Freeze_Actions (T,
+-                    New_List (Make_CW_Size_Compile_Check (T, Root_Class_Typ)));
++                  Append_Freeze_Action (T,
++                    Make_CW_Size_Compile_Check (T, Root_Class_Typ));
+                end if;
+             end if;
+          end;
+diff --git a/gcc/testsuite/gnat.dg/specs/mutably_tagged2.ads b/gcc/testsuite/gnat.dg/specs/mutably_tagged2.ads
+new file mode 100644
+index 000000000000..69a3c6a23d51
+--- /dev/null
++++ b/gcc/testsuite/gnat.dg/specs/mutably_tagged2.ads
+@@ -0,0 +1,19 @@
++-- { dg-do compile }
++-- { dg-options "-gnatX0" }
++
++generic
++package Mutably_Tagged2 is
++   generic
++   package Config is
++      type Mutably_Tagged is tagged null record with Size'Class => 128;
++   end Config;
++
++   package My_Config is new Config;
++
++   generic
++      type T is private;
++   package G is
++   end G;
++
++   package My_G is new G (My_Config.Mutably_Tagged'Class);
++end Mutably_Tagged2;
+-- 
+2.43.7
+
+

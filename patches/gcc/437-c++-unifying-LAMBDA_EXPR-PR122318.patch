@@ -1,0 +1,89 @@
+From bd7a7af6c708e1196ba0f5d44b2670041961dfaa Mon Sep 17 00:00:00 2001
+From: Patrick Palka <ppalka@redhat.com>
+Date: Tue, 17 Feb 2026 11:21:42 -0500
+Subject: [PATCH] c++: unifying LAMBDA_EXPR [PR122318]
+
+This patch makes the default case of unify accept LAMBDA_EXPR P/A pairs,
+which we can legitimately hit during alias CTAD guide overload resolution.
+We can also less legimitately hit this during partial specialization
+matching (likely IFNDR).
+
+I'm not totally sure if we want to handle them like any other non-deducible
+expression vs handling them separately (returning success iff they're ==).
+I couldn't come up with a testcase for which it mattered so I went the
+simpler route.
+
+	PR c++/122318
+	PR c++/101670
+
+gcc/cp/ChangeLog:
+
+	* pt.cc (unify) <default>: Accept LAMBDA_EXPR.
+
+gcc/testsuite/ChangeLog:
+
+	* g++.dg/cpp2a/lambda-targ20.C: New test.
+	* g++.dg/cpp2a/lambda-targ21.C: New test.
+
+Reviewed-by: Jason Merrill <jason@redhat.com>
+(cherry picked from commit 9fe46ba8eb3f2cf41744cf8490b025f0876b9c86)
+---
+ gcc/cp/pt.cc                               |  1 +
+ gcc/testsuite/g++.dg/cpp2a/lambda-targ20.C | 14 ++++++++++++++
+ gcc/testsuite/g++.dg/cpp2a/lambda-targ21.C | 10 ++++++++++
+ 3 files changed, 25 insertions(+)
+ create mode 100644 gcc/testsuite/g++.dg/cpp2a/lambda-targ20.C
+ create mode 100644 gcc/testsuite/g++.dg/cpp2a/lambda-targ21.C
+
+diff --git a/gcc/cp/pt.cc b/gcc/cp/pt.cc
+index 883f7bbac7c5..dbb7e170e50b 100644
+--- a/gcc/cp/pt.cc
++++ b/gcc/cp/pt.cc
+@@ -26039,6 +26039,7 @@ unify (tree tparms, tree targs, tree parm, tree arg, int strict,
+ 	return unify_success (explain_p);
+       gcc_assert (EXPR_P (parm)
+ 		  || TREE_CODE (parm) == CONSTRUCTOR
++		  || TREE_CODE (parm) == LAMBDA_EXPR
+ 		  || TREE_CODE (parm) == TRAIT_EXPR);
+     expr:
+       /* We must be looking at an expression.  This can happen with
+diff --git a/gcc/testsuite/g++.dg/cpp2a/lambda-targ20.C b/gcc/testsuite/g++.dg/cpp2a/lambda-targ20.C
+new file mode 100644
+index 000000000000..4d444bbe1121
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/cpp2a/lambda-targ20.C
+@@ -0,0 +1,14 @@
++// PR c++/122318
++// { dg-do compile { target c++20 } }
++
++template<class T, auto V>
++struct A {
++  A() { }
++  A(T) { }
++};
++
++template<class T>
++using AT = A<T, []{}>;
++
++AT<int> a;
++AT b = a;
+diff --git a/gcc/testsuite/g++.dg/cpp2a/lambda-targ21.C b/gcc/testsuite/g++.dg/cpp2a/lambda-targ21.C
+new file mode 100644
+index 000000000000..d417d6cc3e85
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/cpp2a/lambda-targ21.C
+@@ -0,0 +1,10 @@
++// PR c++/101670
++// { dg-do compile { target c++20 } }
++
++template<int N, auto = []{}>
++struct A;
++
++template<int N>
++struct A<N> { }; // Partial specialization unusable due to lambda uniqueness
++
++A<0> a; // { dg-error "incomplete" }
+-- 
+2.43.7
+
+

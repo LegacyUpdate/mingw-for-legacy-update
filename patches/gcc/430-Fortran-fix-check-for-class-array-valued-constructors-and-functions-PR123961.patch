@@ -1,0 +1,120 @@
+From 26e4f8ad7220f692cd8010f9cf7620d690f1b094 Mon Sep 17 00:00:00 2001
+From: Harald Anlauf <anlauf@gmx.de>
+Date: Sat, 7 Feb 2026 20:23:04 +0100
+Subject: [PATCH] Fortran: fix check for class array valued constructors and
+ functions [PR123961]
+
+	PR fortran/123961
+
+gcc/fortran/ChangeLog:
+
+	* check.cc (array_check): Extend check to class array functions.
+	* class.cc (gfc_add_class_array_ref): Fix NULL pointer dereference.
+
+gcc/testsuite/ChangeLog:
+
+	* gfortran.dg/class_array_24.f90: New test.
+
+(cherry picked from commit f48b55c50d254c73da00a151c563997d04364301)
+---
+ gcc/fortran/check.cc                         |  3 +
+ gcc/fortran/class.cc                         |  2 +-
+ gcc/testsuite/gfortran.dg/class_array_24.f90 | 58 ++++++++++++++++++++
+ 3 files changed, 62 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/gfortran.dg/class_array_24.f90
+
+diff --git a/gcc/fortran/check.cc b/gcc/fortran/check.cc
+index ce9da31ceb32..ec0ff472cf45 100644
+--- a/gcc/fortran/check.cc
++++ b/gcc/fortran/check.cc
+@@ -832,6 +832,9 @@ array_check (gfc_expr *e, int n)
+   if (e->rank != 0 && e->ts.type != BT_PROCEDURE)
+     return true;
+ 
++  if (gfc_is_class_array_function (e))
++    return true;
++
+   gfc_error ("%qs argument of %qs intrinsic at %L must be an array",
+ 	     gfc_current_intrinsic_arg[n]->name, gfc_current_intrinsic,
+ 	     &e->where);
+diff --git a/gcc/fortran/class.cc b/gcc/fortran/class.cc
+index a1c6fafa75ef..28a401083e00 100644
+--- a/gcc/fortran/class.cc
++++ b/gcc/fortran/class.cc
+@@ -273,7 +273,7 @@ gfc_add_class_array_ref (gfc_expr *e)
+   for (ref = e->ref; ref; ref = ref->next)
+     if (!ref->next)
+       break;
+-  if (ref->type != REF_ARRAY)
++  if (ref && ref->type != REF_ARRAY)
+     {
+       ref->next = gfc_get_ref ();
+       ref = ref->next;
+diff --git a/gcc/testsuite/gfortran.dg/class_array_24.f90 b/gcc/testsuite/gfortran.dg/class_array_24.f90
+new file mode 100644
+index 000000000000..c6b1ec1aa9eb
+--- /dev/null
++++ b/gcc/testsuite/gfortran.dg/class_array_24.f90
+@@ -0,0 +1,58 @@
++! { dg-do run }
++! { dg-additional-options "-O2 -fdump-tree-optimized" }
++!
++! PR fortran/123961 - SIZE and class array valued constructors and functions
++
++module test_overload_m
++  implicit none
++
++  type :: foo_t
++  end type foo_t
++
++  interface foo_t
++     module procedure foo_t_0_
++     module procedure foo_t_1_
++     module procedure foo_c_0_
++     module procedure foo_c_1_
++  end interface foo_t
++
++contains
++
++  function foo_t_0_(i) result(foo)
++    integer, intent(in)      :: i
++    type(foo_t), allocatable :: foo
++    allocate (foo)
++  end function foo_t_0_
++
++  function foo_t_1_(i) result(foo)
++    integer, intent(in)      :: i(:)
++    type(foo_t), allocatable :: foo(:)
++
++    allocate (foo(size (i)))
++  end function foo_t_1_
++
++  function foo_c_0_(r) result(foo)
++    real, intent(in)          :: r
++    class(foo_t), allocatable :: foo
++    allocate (foo)
++  end function foo_c_0_
++
++  function foo_c_1_(r) result(foo)
++    real, intent(in)          :: r(:)
++    class(foo_t), allocatable :: foo(:)
++
++    allocate (foo(size (r)))
++  end function foo_c_1_
++
++end module test_overload_m
++
++program test_overload
++   use test_overload_m
++   implicit none
++
++   if (size (foo_t([1,2,3])) /= 3) stop 1   ! Optimized
++   if (size (foo_t([1.,2.])) /= 2) stop 2   ! Optimized
++
++end program test_overload
++
++! { dg-final { scan-tree-dump-not "_gfortran_error_stop_numeric" "optimized" } }
+-- 
+2.43.7
+
+

@@ -1,0 +1,79 @@
+From a54d4dafe55697e8b1fb9ee340ab0932280be7da Mon Sep 17 00:00:00 2001
+From: Nathaniel Shead <nathanieloshead@gmail.com>
+Date: Sat, 21 Feb 2026 22:32:25 +1100
+Subject: [PATCH] libcpp: Fix ICE with directives-only and
+ cpp_maybe_module_directive [PR124153]
+
+When doing directives-only processing (-E -fdirectives-only, or -M) we
+crash if we hit an unexpected CPP_PRAGMA_EOL because we 'know' we're in
+a module directive but the in_deferred_pragma flag is no longer set.
+
+Fixed by undoing the "finished a module directive" behaviour within
+cpp_maybe_module_directive if we're bailing due to an ill-formed peeked
+token.
+
+	PR c++/124153
+
+libcpp/ChangeLog:
+
+	* lex.cc (cpp_maybe_module_directive): Set in_deferred_pragma
+	and eol when we see an unexpected CPP_PRAGMA_EOL.
+
+gcc/testsuite/ChangeLog:
+
+	* g++.dg/modules/cpp-22.C: New test.
+
+Signed-off-by: Nathaniel Shead <nathanieloshead@gmail.com>
+Reviewed-by: Jason Merrill <jason@redhat.com>
+(cherry picked from commit deba30681df43bab1a62e0cddd280e382b7c3381)
+---
+ gcc/testsuite/g++.dg/modules/cpp-22.C |  6 ++++++
+ libcpp/lex.cc                         | 11 ++++++++++-
+ 2 files changed, 16 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/g++.dg/modules/cpp-22.C
+
+diff --git a/gcc/testsuite/g++.dg/modules/cpp-22.C b/gcc/testsuite/g++.dg/modules/cpp-22.C
+new file mode 100644
+index 000000000000..9c80ab0657bb
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/modules/cpp-22.C
+@@ -0,0 +1,6 @@
++// PR c++/124153
++// { dg-additional-options "-fmodules -fdirectives-only -E" }
++
++// directives-only mode currently does not do error checking.
++export module hello  // { dg-error "expected ';'" "" { xfail *-*-* } }
++import world;
+diff --git a/libcpp/lex.cc b/libcpp/lex.cc
+index 37c301dcd20e..a3ba74de3e30 100644
+--- a/libcpp/lex.cc
++++ b/libcpp/lex.cc
+@@ -3670,6 +3670,15 @@ cpp_maybe_module_directive (cpp_reader *pfile, cpp_token *result)
+ 		      peek->flags |= NO_DOT_COLON;
+ 		      break;
+ 		    }
++		  else if (peek->type == CPP_PRAGMA_EOL)
++		    {
++		      /* This is a broken module-directive; undo the clearing
++			 of in_deferred_pragma from _cpp_lex_direct so callers
++			 don't crash, and make sure we process the EOL again.  */
++		      pfile->state.in_deferred_pragma = true;
++		      eol = true;
++		      break;
++		    }
+ 		  else
+ 		    break;
+ 		}
+@@ -3699,7 +3708,7 @@ cpp_maybe_module_directive (cpp_reader *pfile, cpp_token *result)
+     {
+       /* Put the peeked tokens back.  */
+       _cpp_backup_tokens_direct (pfile, backup);
+-      /* But if the last one was an EOL in the not_module case, forget it.  */
++      /* But if the last one was an EOL, forget it.  */
+       if (eol)
+ 	pfile->lookaheads--;
+     }
+-- 
+2.43.7
+
+

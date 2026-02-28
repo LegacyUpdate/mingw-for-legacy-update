@@ -1,0 +1,237 @@
+From f02d043179365cf06bea3648868cf0303c7b6d16 Mon Sep 17 00:00:00 2001
+From: Alex Coplan <alex.coplan@arm.com>
+Date: Fri, 19 Dec 2025 13:51:04 +0000
+Subject: [PATCH] aarch64: Fix gating of fp8 intrinsics [PR123206]
+
+As it stands, there are several intrinsics in
+aarch64-simd-pragma-builtins.def which have the following form:
+
+  #define REQUIRED_EXTENSIONS nonstreaming_only (TARGET_SIMD)
+  [...]
+  #undef REQUIRED_EXTENSIONS
+
+the problem being that nonstreaming_only expects an instance of
+aarch64_feature_flags which (statically) describes the required
+extensions for the intrinsics.  Instead, we were passing TARGET_SIMD,
+which computes a boolean telling us dynamically whether the simd feature
+is currently available.
+
+This patch fixes the issue by simply doing
+s/TARGET_SIMD/AARCH64_FL_SIMD/ in that file.  We also add a simple test
+which checks that we now diagnose the missing extension instead of
+ICEing when compiling with +nosimd.
+
+As an additional conservative hardening step (to prevent a similar issue
+from re-occurring), this patch adjusts the aarch64_pragma_builtins table
+to make it constexpr.  This makes the bug a compile-time error.
+
+The next patch in the series adjusts the ctor of bbitmap to make it
+explicit (and deals with the fallout), this patch however is
+deliberately a minimal fix which is suitable for backporting.
+
+gcc/ChangeLog:
+
+	PR target/123206
+	* config/aarch64/aarch64-builtins.cc (struct aarch64_pragma_builtins_data):
+	Declare array as CONSTEXPR.
+	* config/aarch64/aarch64-simd-pragma-builtins.def: Update
+	incorrect uses of TARGET_SIMD to use AARCH64_FL_SIMD instead.
+
+gcc/testsuite/ChangeLog:
+
+	PR target/123206
+	* gcc.target/aarch64/pr123206.c: New test.
+
+(cherry picked from commit 0779f1312569b8da837fb744d62c35a3435e5aa3)
+---
+ gcc/config/aarch64/aarch64-builtins.cc        |  2 +-
+ .../aarch64/aarch64-simd-pragma-builtins.def  | 36 +++++++++----------
+ gcc/testsuite/gcc.target/aarch64/pr123206.c   |  7 ++++
+ 3 files changed, 26 insertions(+), 19 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.target/aarch64/pr123206.c
+
+diff --git a/gcc/config/aarch64/aarch64-builtins.cc b/gcc/config/aarch64/aarch64-builtins.cc
+index 93f939a9c834..01f9b8bfdee2 100644
+--- a/gcc/config/aarch64/aarch64-builtins.cc
++++ b/gcc/config/aarch64/aarch64-builtins.cc
+@@ -1719,7 +1719,7 @@ struct aarch64_pragma_builtins_data
+   unsigned int flags;
+ };
+ 
+-static aarch64_pragma_builtins_data aarch64_pragma_builtins[] = {
++static CONSTEXPR aarch64_pragma_builtins_data aarch64_pragma_builtins[] = {
+ #include "aarch64-simd-pragma-builtins.def"
+ };
+ 
+diff --git a/gcc/config/aarch64/aarch64-simd-pragma-builtins.def b/gcc/config/aarch64/aarch64-simd-pragma-builtins.def
+index 776823651031..dc6d78c9f0e2 100644
+--- a/gcc/config/aarch64/aarch64-simd-pragma-builtins.def
++++ b/gcc/config/aarch64/aarch64-simd-pragma-builtins.def
+@@ -197,7 +197,7 @@ ENTRY_FMA_FPM (vmlalltt, f32, UNSPEC_FMLALLTT_FP8)
+ #undef REQUIRED_EXTENSIONS
+ 
+ // bsl
+-#define REQUIRED_EXTENSIONS nonstreaming_only (TARGET_SIMD)
++#define REQUIRED_EXTENSIONS nonstreaming_only (AARCH64_FL_SIMD)
+ ENTRY_TERNARY (vbsl_mf8, mf8, u8, mf8, mf8, UNSPEC_BSL, QUIET)
+ ENTRY_TERNARY (vbslq_mf8, mf8q, u8q, mf8q, mf8q, UNSPEC_BSL, QUIET)
+ #undef REQUIRED_EXTENSIONS
+@@ -208,7 +208,7 @@ ENTRY_BINARY (vcombine_mf8, mf8q, mf8, mf8, UNSPEC_COMBINE, QUIET)
+ #undef REQUIRED_EXTENSIONS
+ 
+ // copy_lane
+-#define REQUIRED_EXTENSIONS nonstreaming_only (TARGET_SIMD)
++#define REQUIRED_EXTENSIONS nonstreaming_only (AARCH64_FL_SIMD)
+ ENTRY_BINARY_TWO_LANES (vcopy_lane_mf8, mf8, mf8, mf8,
+ 			UNSPEC_VEC_COPY, QUIET)
+ ENTRY_BINARY_TWO_LANES (vcopyq_lane_mf8, mf8q, mf8q, mf8,
+@@ -220,12 +220,12 @@ ENTRY_BINARY_TWO_LANES (vcopyq_laneq_mf8, mf8q, mf8q, mf8q,
+ #undef REQUIRED_EXTENSIONS
+ 
+ // create
+-#define REQUIRED_EXTENSIONS nonstreaming_only (TARGET_SIMD)
++#define REQUIRED_EXTENSIONS nonstreaming_only (AARCH64_FL_SIMD)
+ ENTRY_UNARY (vcreate_mf8, mf8, u64_scalar, UNSPEC_VCREATE, QUIET)
+ #undef REQUIRED_EXTENSIONS
+ 
+ // dup
+-#define REQUIRED_EXTENSIONS nonstreaming_only (TARGET_SIMD)
++#define REQUIRED_EXTENSIONS nonstreaming_only (AARCH64_FL_SIMD)
+ ENTRY_UNARY (vdup_n_mf8, mf8, mf8_scalar, UNSPEC_DUP, QUIET)
+ ENTRY_UNARY (vdupq_n_mf8, mf8q, mf8_scalar, UNSPEC_DUP, QUIET)
+ 
+@@ -236,19 +236,19 @@ ENTRY_UNARY_LANE (vdupq_laneq_mf8, mf8q, mf8q, UNSPEC_DUP_LANE, QUIET)
+ #undef REQUIRED_EXTENSIONS
+ 
+ // dupb_lane
+-#define REQUIRED_EXTENSIONS nonstreaming_only (TARGET_SIMD)
++#define REQUIRED_EXTENSIONS nonstreaming_only (AARCH64_FL_SIMD)
+ ENTRY_UNARY_LANE (vdupb_lane_mf8, mf8_scalar, mf8, UNSPEC_GET_LANE, QUIET)
+ ENTRY_UNARY_LANE (vdupb_laneq_mf8, mf8_scalar, mf8q, UNSPEC_GET_LANE, QUIET)
+ #undef REQUIRED_EXTENSIONS
+ 
+ // ext
+-#define REQUIRED_EXTENSIONS nonstreaming_only (TARGET_SIMD)
++#define REQUIRED_EXTENSIONS nonstreaming_only (AARCH64_FL_SIMD)
+ ENTRY_BINARY_LANE (vext_mf8, mf8, mf8, mf8, UNSPEC_EXT, QUIET)
+ ENTRY_BINARY_LANE (vextq_mf8, mf8q, mf8q, mf8q, UNSPEC_EXT, QUIET)
+ #undef REQUIRED_EXTENSIONS
+ 
+ // ld1
+-#define REQUIRED_EXTENSIONS nonstreaming_only (TARGET_SIMD)
++#define REQUIRED_EXTENSIONS nonstreaming_only (AARCH64_FL_SIMD)
+ ENTRY_LOAD (vld1_mf8, mf8, mf8_scalar_const_ptr, UNSPEC_LD1)
+ ENTRY_LOAD (vld1q_mf8, mf8q, mf8_scalar_const_ptr, UNSPEC_LD1)
+ ENTRY_LOAD (vld1_dup_mf8, mf8, mf8_scalar_const_ptr, UNSPEC_DUP)
+@@ -261,7 +261,7 @@ ENTRY_LOAD_LANE (vld1q_lane_mf8, mf8q, mf8_scalar_const_ptr, mf8q,
+ #undef REQUIRED_EXTENSIONS
+ 
+ // ld<n>
+-#define REQUIRED_EXTENSIONS nonstreaming_only (TARGET_SIMD)
++#define REQUIRED_EXTENSIONS nonstreaming_only (AARCH64_FL_SIMD)
+ ENTRY_LOAD (vld1_mf8_x2, mf8x2, mf8_scalar_const_ptr, UNSPEC_LD1x2)
+ ENTRY_LOAD (vld1q_mf8_x2, mf8qx2, mf8_scalar_const_ptr, UNSPEC_LD1x2)
+ ENTRY_LOAD (vld2_mf8, mf8x2, mf8_scalar_const_ptr, UNSPEC_LD2)
+@@ -297,13 +297,13 @@ ENTRY_LOAD_LANE (vld4q_lane_mf8, mf8qx4, mf8_scalar_const_ptr, mf8qx4,
+ #undef REQUIRED_EXTENSIONS
+ 
+ // mov
+-#define REQUIRED_EXTENSIONS nonstreaming_only (TARGET_SIMD)
++#define REQUIRED_EXTENSIONS nonstreaming_only (AARCH64_FL_SIMD)
+ ENTRY_UNARY (vmov_n_mf8, mf8, mf8_scalar, UNSPEC_DUP, QUIET)
+ ENTRY_UNARY (vmovq_n_mf8, mf8q, mf8_scalar, UNSPEC_DUP, QUIET)
+ #undef REQUIRED_EXTENSIONS
+ 
+ // rev
+-#define REQUIRED_EXTENSIONS nonstreaming_only (TARGET_SIMD)
++#define REQUIRED_EXTENSIONS nonstreaming_only (AARCH64_FL_SIMD)
+ ENTRY_UNARY (vrev64_mf8, mf8, mf8, UNSPEC_REV64, QUIET)
+ ENTRY_UNARY (vrev64q_mf8, mf8q, mf8q, UNSPEC_REV64, QUIET)
+ 
+@@ -315,13 +315,13 @@ ENTRY_UNARY (vrev16q_mf8, mf8q, mf8q, UNSPEC_REV16, QUIET)
+ #undef REQUIRED_EXTENSIONS
+ 
+ // set_lane
+-#define REQUIRED_EXTENSIONS nonstreaming_only (TARGET_SIMD)
++#define REQUIRED_EXTENSIONS nonstreaming_only (AARCH64_FL_SIMD)
+ ENTRY_BINARY_LANE (vset_lane_mf8, mf8, mf8_scalar, mf8, UNSPEC_SET_LANE, QUIET)
+ ENTRY_BINARY_LANE (vsetq_lane_mf8, mf8q, mf8_scalar, mf8q, UNSPEC_SET_LANE, QUIET)
+ #undef REQUIRED_EXTENSIONS
+ 
+ // st1
+-#define REQUIRED_EXTENSIONS nonstreaming_only (TARGET_SIMD)
++#define REQUIRED_EXTENSIONS nonstreaming_only (AARCH64_FL_SIMD)
+ ENTRY_STORE (vst1_mf8, mf8_scalar_ptr, mf8, UNSPEC_ST1)
+ ENTRY_STORE (vst1q_mf8, mf8_scalar_ptr, mf8q, UNSPEC_ST1)
+ 
+@@ -330,7 +330,7 @@ ENTRY_STORE_LANE (vst1q_lane_mf8, mf8_scalar_ptr, mf8q, UNSPEC_ST1_LANE)
+ #undef REQUIRED_EXTENSIONS
+ 
+ // st<n>
+-#define REQUIRED_EXTENSIONS nonstreaming_only (TARGET_SIMD)
++#define REQUIRED_EXTENSIONS nonstreaming_only (AARCH64_FL_SIMD)
+ ENTRY_STORE (vst2_mf8, mf8_scalar_ptr, mf8x2, UNSPEC_ST2)
+ ENTRY_STORE (vst2q_mf8, mf8_scalar_ptr, mf8qx2, UNSPEC_ST2)
+ ENTRY_STORE (vst1_mf8_x2, mf8_scalar_ptr, mf8x2, UNSPEC_ST1x2)
+@@ -354,7 +354,7 @@ ENTRY_STORE_LANE (vst4q_lane_mf8, mf8_scalar_ptr, mf8qx4, UNSPEC_ST4_LANE)
+ #undef REQUIRED_EXTENSIONS
+ 
+ // tbl<n>
+-#define REQUIRED_EXTENSIONS nonstreaming_only (TARGET_SIMD)
++#define REQUIRED_EXTENSIONS nonstreaming_only (AARCH64_FL_SIMD)
+ ENTRY_BINARY (vtbl1_mf8, mf8, mf8, u8, UNSPEC_TBL, QUIET)
+ ENTRY_BINARY (vtbl2_mf8, mf8, mf8x2, u8, UNSPEC_TBL, QUIET)
+ ENTRY_BINARY (vtbl3_mf8, mf8, mf8x3, u8, UNSPEC_TBL, QUIET)
+@@ -371,7 +371,7 @@ ENTRY_BINARY (vqtbl4q_mf8, mf8q, mf8qx4, u8q, UNSPEC_TBL, QUIET)
+ #undef REQUIRED_EXTENSIONS
+ 
+ // tbx<n>
+-#define REQUIRED_EXTENSIONS nonstreaming_only (TARGET_SIMD)
++#define REQUIRED_EXTENSIONS nonstreaming_only (AARCH64_FL_SIMD)
+ ENTRY_TERNARY (vtbx1_mf8, mf8, mf8, mf8, u8, UNSPEC_TBX, QUIET)
+ ENTRY_TERNARY (vtbx2_mf8, mf8, mf8, mf8x2, u8, UNSPEC_TBX, QUIET)
+ ENTRY_TERNARY (vtbx3_mf8, mf8, mf8, mf8x3, u8, UNSPEC_TBX, QUIET)
+@@ -388,7 +388,7 @@ ENTRY_TERNARY (vqtbx4q_mf8, mf8q, mf8q, mf8qx4, u8q, UNSPEC_TBX, QUIET)
+ #undef REQUIRED_EXTENSIONS
+ 
+ // trn<n>
+-#define REQUIRED_EXTENSIONS nonstreaming_only (TARGET_SIMD)
++#define REQUIRED_EXTENSIONS nonstreaming_only (AARCH64_FL_SIMD)
+ ENTRY_BINARY (vtrn1_mf8, mf8, mf8, mf8, UNSPEC_TRN1, QUIET)
+ ENTRY_BINARY (vtrn1q_mf8, mf8q, mf8q, mf8q, UNSPEC_TRN1, QUIET)
+ ENTRY_BINARY (vtrn2_mf8, mf8, mf8, mf8, UNSPEC_TRN2, QUIET)
+@@ -398,7 +398,7 @@ ENTRY_BINARY (vtrnq_mf8, mf8qx2, mf8q, mf8q, UNSPEC_TRN, QUIET)
+ #undef REQUIRED_EXTENSIONS
+ 
+ // uzp<n>
+-#define REQUIRED_EXTENSIONS nonstreaming_only (TARGET_SIMD)
++#define REQUIRED_EXTENSIONS nonstreaming_only (AARCH64_FL_SIMD)
+ ENTRY_BINARY (vuzp1_mf8, mf8, mf8, mf8, UNSPEC_UZP1, QUIET)
+ ENTRY_BINARY (vuzp1q_mf8, mf8q, mf8q, mf8q, UNSPEC_UZP1, QUIET)
+ ENTRY_BINARY (vuzp2_mf8, mf8, mf8, mf8, UNSPEC_UZP2, QUIET)
+@@ -408,7 +408,7 @@ ENTRY_BINARY (vuzpq_mf8, mf8qx2, mf8q, mf8q, UNSPEC_UZP, QUIET)
+ #undef REQUIRED_EXTENSIONS
+ 
+ // zip<n>
+-#define REQUIRED_EXTENSIONS nonstreaming_only (TARGET_SIMD)
++#define REQUIRED_EXTENSIONS nonstreaming_only (AARCH64_FL_SIMD)
+ ENTRY_BINARY (vzip1_mf8, mf8, mf8, mf8, UNSPEC_ZIP1, QUIET)
+ ENTRY_BINARY (vzip1q_mf8, mf8q, mf8q, mf8q, UNSPEC_ZIP1, QUIET)
+ ENTRY_BINARY (vzip2_mf8, mf8, mf8, mf8, UNSPEC_ZIP2, QUIET)
+diff --git a/gcc/testsuite/gcc.target/aarch64/pr123206.c b/gcc/testsuite/gcc.target/aarch64/pr123206.c
+new file mode 100644
+index 000000000000..917af2e3974f
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/aarch64/pr123206.c
+@@ -0,0 +1,7 @@
++/* { dg-do compile } */
++/* { dg-options "-O2 -march=armv8-a+nosimd" } */
++#include <arm_neon.h>
++mfloat8x8_t foo(uint8x8_t a, mfloat8x8_t b, mfloat8x8_t c)
++{
++  return vbsl_mf8(a,b,c); /* { dg-error "ACLE function 'vbsl_mf8' requires ISA extension 'simd'" } */
++}
+-- 
+2.43.7
+
+

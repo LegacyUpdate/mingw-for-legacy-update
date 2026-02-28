@@ -1,0 +1,125 @@
+From a74a8b385f986b6c4d46324a401888bcc263d498 Mon Sep 17 00:00:00 2001
+From: Robin Dapp <rdapp@oss.qualcomm.com>
+Date: Mon, 2 Feb 2026 10:28:08 +0100
+Subject: [PATCH] RISC-V: Disable small memsets for xtheadvector [PR123910].
+
+This patch disables memsets with size less than a vector for
+xtheadvector.  As xtheadvector does not support fractional
+LMUL we need to ensure to not emit those vectors that might
+use it.
+
+	PR target/123910
+
+gcc/ChangeLog:
+
+	* config/riscv/riscv-string.cc (riscv_expand_block_move):
+	Remove !xtheadvector guard.
+	(use_vector_stringop_p): Guard small LMULs.
+	(check_vectorise_memory_operation): Ditto.
+
+gcc/testsuite/ChangeLog:
+
+	* gcc.target/riscv/rvv/autovec/pr123910.c: New test.
+	* gcc.target/riscv/rvv/xtheadvector/pr114194-rv32.c: xfail.
+
+Signed-off-by: Robin Dapp <rdapp@oss.qualcomm.com>
+(cherry picked from commit c3e3456007a46f5eb790817631a656a963326ddf)
+---
+ gcc/config/riscv/riscv-string.cc                   | 14 ++++++++++++--
+ .../gcc.target/riscv/rvv/autovec/pr123910.c        | 11 +++++++++++
+ .../riscv/rvv/xtheadvector/pr114194-rv32.c         |  8 ++++----
+ 3 files changed, 27 insertions(+), 6 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.target/riscv/rvv/autovec/pr123910.c
+
+diff --git a/gcc/config/riscv/riscv-string.cc b/gcc/config/riscv/riscv-string.cc
+index eb119dceeab9..4a197988e833 100644
+--- a/gcc/config/riscv/riscv-string.cc
++++ b/gcc/config/riscv/riscv-string.cc
+@@ -976,7 +976,7 @@ riscv_expand_block_move_scalar (rtx dest, rtx src, rtx length)
+ bool
+ riscv_expand_block_move (rtx dest, rtx src, rtx length)
+ {
+-  if ((TARGET_VECTOR && !TARGET_XTHEADVECTOR)
++  if (TARGET_VECTOR
+       && stringop_strategy & STRATEGY_VECTOR)
+     {
+       bool ok = riscv_vector::expand_block_move (dest, src, length, false);
+@@ -1082,9 +1082,15 @@ use_vector_stringop_p (struct stringop_info &info, HOST_WIDE_INT max_ew,
+   rtx avl = length_in;
+   HOST_WIDE_INT potential_ew = max_ew;
+ 
+-  if (!TARGET_VECTOR || !(stringop_strategy & STRATEGY_VECTOR))
++  if (!TARGET_VECTOR
++      || !(stringop_strategy & STRATEGY_VECTOR))
+     return false;
+ 
++  if (TARGET_XTHEADVECTOR
++      && (!CONST_INT_P (length_in)
++	  || known_lt (INTVAL (length_in), BYTES_PER_RISCV_VECTOR)))
++      return false;
++
+   if (CONST_INT_P (length_in))
+     {
+       HOST_WIDE_INT length = INTVAL (length_in);
+@@ -1571,6 +1577,10 @@ check_vectorise_memory_operation (rtx length_in, HOST_WIDE_INT &lmul_out)
+ 
+   HOST_WIDE_INT length = INTVAL (length_in);
+ 
++  if (TARGET_XTHEADVECTOR
++      && known_lt (length, BYTES_PER_RISCV_VECTOR))
++    return false;
++
+   /* If it's tiny, default operation is likely better; maybe worth
+      considering fractional lmul in the future as well.  */
+   if (length < (TARGET_MIN_VLEN / 8))
+diff --git a/gcc/testsuite/gcc.target/riscv/rvv/autovec/pr123910.c b/gcc/testsuite/gcc.target/riscv/rvv/autovec/pr123910.c
+new file mode 100644
+index 000000000000..a38dbb5fa5cb
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/riscv/rvv/autovec/pr123910.c
+@@ -0,0 +1,11 @@
++/* { dg-do compile } */
++/* { dg-options "-mcpu=xt-c920 -mrvv-vector-bits=zvl" } */
++
++int i;
++void *p;
++
++void
++foo ()
++{
++  __builtin_memset (p, i, 8);
++}
+diff --git a/gcc/testsuite/gcc.target/riscv/rvv/xtheadvector/pr114194-rv32.c b/gcc/testsuite/gcc.target/riscv/rvv/xtheadvector/pr114194-rv32.c
+index f95e713ea246..a9766ddffcb0 100644
+--- a/gcc/testsuite/gcc.target/riscv/rvv/xtheadvector/pr114194-rv32.c
++++ b/gcc/testsuite/gcc.target/riscv/rvv/xtheadvector/pr114194-rv32.c
+@@ -1,5 +1,5 @@
+-/* { dg-do compile { target { { ! riscv_abi_e } && rv32 } } } */
+-/* { dg-options "-march=rv32gc_xtheadvector -O2" } */
++/* { dg-do compile { target { ! riscv_abi_e } } } */
++/* { dg-options "-march=rv32gc_xtheadvector -O2 -mabi=ilp32d " } */
+ /* { dg-final { check-function-bodies "**" "" } } */
+ 
+ /*
+@@ -13,7 +13,7 @@ void foo0_1 (void *p)
+ }
+ 
+ /*
+-** foo0_7:
++** foo0_7: { xfail *-*-* }
+ **	li\t[a-x0-9]+,7
+ **	th.vsetvli\tzero,[a-x0-9]+,e8,m1
+ **	th\.vmv\.v\.i\tv[0-9],0
+@@ -37,7 +37,7 @@ void foo1_1 (void *p)
+ }
+ 
+ /*
+-** foo1_5:
++** foo1_5: { xfail *-*-* }
+ **	li\t[a-x0-9]+,5
+ **	th.vsetvli\tzero,[a-x0-9]+,e8,m1
+ **	th\.vmv\.v\.i\tv[0-9],1
+-- 
+2.43.7
+
+

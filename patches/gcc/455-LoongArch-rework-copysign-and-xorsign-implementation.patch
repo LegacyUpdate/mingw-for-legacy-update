@@ -1,0 +1,450 @@
+From bd78356f72b03118178d17f79415574149d4ad97 Mon Sep 17 00:00:00 2001
+From: Xi Ruoyao <xry111@xry111.site>
+Date: Thu, 29 Jan 2026 17:08:02 +0800
+Subject: [PATCH] LoongArch: rework copysign and xorsign implementation
+
+The copysign and xorsign implementation had two significant bugs:
+
+1. The GCC Internal documentation explicitly says the IOR, XOR, and AND
+   optabs are only for fixed-point modes, i.e. they cannot be used for
+   floating-point modes.
+2. The handling of "%V" uses a very nasty way to pun floating-point
+   const value to integer representation, invoking undefined behavior on
+   32-bit hosts by shifting left a "long" by 32 bits.  In fact
+   lowpart_subreg handles punning of const values correctly despite the
+   name contains "reg."
+
+Fix the bugs by using lowpart_subreg to pun the modes in the expanders.
+
+gcc/
+
+	* config/loongarch/predicates.md (const_vector_neg_fp_operand):
+	New define_predicate.
+	(reg_or_vector_neg_fp_operand): New define_predicate.
+	* config/loongarch/lasx.md (copysign<mode>3): Remove.
+	(xorsign<mode>3): Remove.
+	* config/loongarch/lsx.md (copysign<mode>3): Remove.
+	(@xorsign<mode>3): Remove.
+	* config/loongarch/simd.md (copysign<mode>3): New define_expand.
+	(@xorsign<mode>3): New define_expand.
+	(and<mode>3): Only allow IVEC instead of ALLVEC.
+	(ior<mode>3): Likewise.
+	(xor<mode>3): Likewise.
+	* config/loongarch/loongarch.cc (loongarch_print_operand): No
+	longer allow floating-point vector constants for %V.
+	(loongarch_const_vector_bitimm_set_p): Always return false for
+	floating-point vector constants.
+	(loongarch_build_signbit_mask): Factor out force_reg.
+	(loongarch_emit_swrsqrtsf): Use integer vector mode instead of
+	floating-point vector mode when masking zero inputs.
+
+(cherry picked from commit 77527ecae9275e34a6a6dc0b7abfce27c607ee3d)
+---
+ gcc/config/loongarch/lasx.md       | 53 -----------------
+ gcc/config/loongarch/loongarch.cc  | 65 +++++----------------
+ gcc/config/loongarch/lsx.md        | 53 -----------------
+ gcc/config/loongarch/predicates.md | 16 +++++
+ gcc/config/loongarch/simd.md       | 94 +++++++++++++++++++-----------
+ 5 files changed, 91 insertions(+), 190 deletions(-)
+
+diff --git a/gcc/config/loongarch/lasx.md b/gcc/config/loongarch/lasx.md
+index 8f4e050ed709..7c6adff75c2d 100644
+--- a/gcc/config/loongarch/lasx.md
++++ b/gcc/config/loongarch/lasx.md
+@@ -2636,59 +2636,6 @@
+   [(set_attr "type" "simd_int_arith")
+    (set_attr "mode" "<MODE>")])
+ 
+-(define_expand "copysign<mode>3"
+-  [(set (match_dup 4)
+-	(and:FLASX
+-	  (not:FLASX (match_dup 3))
+-	  (match_operand:FLASX 1 "register_operand")))
+-   (set (match_dup 5)
+-	(and:FLASX (match_dup 3)
+-		   (match_operand:FLASX 2 "reg_or_vector_same_val_operand")))
+-   (set (match_operand:FLASX 0 "register_operand")
+-	(ior:FLASX (match_dup 4) (match_dup 5)))]
+-  "ISA_HAS_LASX"
+-{
+-  /* copysign (x, -1) should instead be expanded as setting the sign
+-     bit.  */
+-  if (!REG_P (operands[2]))
+-    {
+-      rtx op2_elt = unwrap_const_vec_duplicate (operands[2]);
+-      if (GET_CODE (op2_elt) == CONST_DOUBLE
+-	  && real_isneg (CONST_DOUBLE_REAL_VALUE (op2_elt)))
+-	{
+-	  rtx n = GEN_INT (8 * GET_MODE_SIZE (<UNITMODE>mode) - 1);
+-	  operands[0] = lowpart_subreg (<VIMODE256>mode, operands[0],
+-					<MODE>mode);
+-	  operands[1] = lowpart_subreg (<VIMODE256>mode, operands[1],
+-					<MODE>mode);
+-	  emit_insn (gen_lasx_xvbitseti_<lasxfmt> (operands[0],
+-						   operands[1], n));
+-	  DONE;
+-	}
+-    }
+-
+-  operands[2] = force_reg (<MODE>mode, operands[2]);
+-  operands[3] = loongarch_build_signbit_mask (<MODE>mode, 1, 0);
+-
+-  operands[4] = gen_reg_rtx (<MODE>mode);
+-  operands[5] = gen_reg_rtx (<MODE>mode);
+-})
+-
+-(define_expand "xorsign<mode>3"
+-  [(set (match_dup 4)
+-    (and:FLASX (match_dup 3)
+-        (match_operand:FLASX 2 "register_operand")))
+-   (set (match_operand:FLASX 0 "register_operand")
+-    (xor:FLASX (match_dup 4)
+-         (match_operand:FLASX 1 "register_operand")))]
+-  "ISA_HAS_LASX"
+-{
+-  operands[3] = loongarch_build_signbit_mask (<MODE>mode, 1, 0);
+-
+-  operands[4] = gen_reg_rtx (<MODE>mode);
+-})
+-
+-
+ (define_insn "absv4df2"
+   [(set (match_operand:V4DF 0 "register_operand" "=f")
+ 	(abs:V4DF (match_operand:V4DF 1 "register_operand" "f")))]
+diff --git a/gcc/config/loongarch/loongarch.cc b/gcc/config/loongarch/loongarch.cc
+index fcf26cf3a528..51aa1b2aa3e4 100644
+--- a/gcc/config/loongarch/loongarch.cc
++++ b/gcc/config/loongarch/loongarch.cc
+@@ -1722,28 +1722,7 @@ loongarch_const_vector_bitimm_set_p (rtx op, machine_mode mode)
+       && (GET_MODE_CLASS (mode) == MODE_VECTOR_FLOAT
+ 	  || GET_MODE_CLASS (mode) == MODE_VECTOR_INT))
+     {
+-      unsigned HOST_WIDE_INT val;
+-
+-      if (GET_MODE_CLASS (mode) == MODE_VECTOR_FLOAT)
+-	{
+-	  rtx val_s = CONST_VECTOR_ELT (op, 0);
+-	  const REAL_VALUE_TYPE *x = CONST_DOUBLE_REAL_VALUE (val_s);
+-	  if (GET_MODE (val_s) == DFmode)
+-	    {
+-	      long tmp[2];
+-	      REAL_VALUE_TO_TARGET_DOUBLE (*x, tmp);
+-	      val = (unsigned HOST_WIDE_INT) tmp[1] << 32 | tmp[0];
+-	    }
+-	  else
+-	    {
+-	      long tmp;
+-	      REAL_VALUE_TO_TARGET_SINGLE (*x, tmp);
+-	      val = (unsigned HOST_WIDE_INT) tmp;
+-	    }
+-	}
+-      else
+-	val = UINTVAL (CONST_VECTOR_ELT (op, 0));
+-
++      unsigned HOST_WIDE_INT val = UINTVAL (CONST_VECTOR_ELT (op, 0));
+       int vlog2 = exact_log2 (val & GET_MODE_MASK (GET_MODE_INNER (mode)));
+ 
+       if (vlog2 != -1)
+@@ -6483,35 +6462,18 @@ loongarch_print_operand (FILE *file, rtx op, int letter)
+ 	{
+ 	  machine_mode mode = GET_MODE_INNER (GET_MODE (op));
+ 	  rtx val_s = CONST_VECTOR_ELT (op, 0);
+-	  unsigned HOST_WIDE_INT val;
+-
+-	  if (GET_MODE_CLASS (mode) == MODE_FLOAT)
++	  if (CONST_INT_P (val_s))
+ 	    {
+-	      const REAL_VALUE_TYPE *x = CONST_DOUBLE_REAL_VALUE (val_s);
+-	      if (GET_MODE (val_s) == DFmode)
+-		{
+-		  long tmp[2];
+-		  REAL_VALUE_TO_TARGET_DOUBLE (*x, tmp);
+-		  val = (unsigned HOST_WIDE_INT) (tmp[1] << 32 | tmp[0]);
+-		}
+-	      else
++	      unsigned HOST_WIDE_INT val = UINTVAL (val_s);
++	      int vlog2 = exact_log2 (val & GET_MODE_MASK (mode));
++	      if (vlog2 != -1)
+ 		{
+-		  long tmp;
+-		  REAL_VALUE_TO_TARGET_SINGLE (*x, tmp);
+-		  val = (unsigned HOST_WIDE_INT) tmp;
++		  fprintf (file, "%d", vlog2);
++		  break;
+ 		}
+ 	    }
+-	  else
+-	    val = UINTVAL (val_s);
+-
+-	  int vlog2 = exact_log2 (val & GET_MODE_MASK (mode));
+-	  if (vlog2 != -1)
+-	    fprintf (file, "%d", vlog2);
+-	  else
+-	    output_operand_lossage ("invalid use of '%%%c'", letter);
+ 	}
+-      else
+-	output_operand_lossage ("invalid use of '%%%c'", letter);
++      output_operand_lossage ("invalid use of '%%%c'", letter);
+       break;
+ 
+     case 'W':
+@@ -10965,7 +10927,7 @@ loongarch_build_signbit_mask (machine_mode mode, bool vect, bool invert)
+     return force_reg (inner_mode, mask);
+ 
+   v = loongarch_build_const_vector (vec_mode, vect, mask);
+-  return force_reg (vec_mode, v);
++  return v;
+ }
+ 
+ /* Use rsqrte instruction and Newton-Rhapson to compute the approximation of
+@@ -11014,10 +10976,11 @@ void loongarch_emit_swrsqrtsf (rtx res, rtx a, machine_mode mode, bool recip)
+       if (VECTOR_MODE_P (mode))
+ 	{
+ 	  machine_mode imode = related_int_vector_mode (mode).require ();
+-	  rtx mask = gen_reg_rtx (imode);
+-	  emit_insn (gen_rtx_SET (mask, gen_rtx_NE (imode, a, zero)));
+-	  emit_insn (gen_rtx_SET (x0, gen_rtx_AND (mode, x0,
+-						   gen_lowpart (mode, mask))));
++	  rtx mask = force_reg (imode, gen_rtx_NE (imode, a, zero));
++	  emit_move_insn (gen_lowpart (imode, x0),
++			  gen_rtx_AND (imode,
++				       gen_lowpart (imode, x0),
++				       mask));
+ 	}
+       else
+ 	{
+diff --git a/gcc/config/loongarch/lsx.md b/gcc/config/loongarch/lsx.md
+index 5424b47c9ed2..be50047448b1 100644
+--- a/gcc/config/loongarch/lsx.md
++++ b/gcc/config/loongarch/lsx.md
+@@ -2226,59 +2226,6 @@
+   [(set_attr "type" "simd_int_arith")
+    (set_attr "mode" "<MODE>")])
+ 
+-(define_expand "copysign<mode>3"
+-  [(set (match_dup 4)
+-	(and:FLSX
+-	  (not:FLSX (match_dup 3))
+-	  (match_operand:FLSX 1 "register_operand")))
+-   (set (match_dup 5)
+-	(and:FLSX (match_dup 3)
+-		  (match_operand:FLSX 2 "reg_or_vector_same_val_operand")))
+-   (set (match_operand:FLSX 0 "register_operand")
+-	(ior:FLSX (match_dup 4) (match_dup 5)))]
+-  "ISA_HAS_LSX"
+-{
+-  /* copysign (x, -1) should instead be expanded as setting the sign
+-     bit.  */
+-  if (!REG_P (operands[2]))
+-    {
+-      rtx op2_elt = unwrap_const_vec_duplicate (operands[2]);
+-      if (GET_CODE (op2_elt) == CONST_DOUBLE
+-	  && real_isneg (CONST_DOUBLE_REAL_VALUE (op2_elt)))
+-	{
+-	  rtx n = GEN_INT (8 * GET_MODE_SIZE (<UNITMODE>mode) - 1);
+-	  operands[0] = lowpart_subreg (<VIMODE>mode, operands[0],
+-					<MODE>mode);
+-	  operands[1] = lowpart_subreg (<VIMODE>mode, operands[1],
+-					<MODE>mode);
+-	  emit_insn (gen_lsx_vbitseti_<lsxfmt> (operands[0], operands[1],
+-						n));
+-	  DONE;
+-	}
+-    }
+-
+-  operands[2] = force_reg (<MODE>mode, operands[2]);
+-  operands[3] = loongarch_build_signbit_mask (<MODE>mode, 1, 0);
+-
+-  operands[4] = gen_reg_rtx (<MODE>mode);
+-  operands[5] = gen_reg_rtx (<MODE>mode);
+-})
+-
+-(define_expand "@xorsign<mode>3"
+-  [(set (match_dup 4)
+-    (and:FLSX (match_dup 3)
+-        (match_operand:FLSX 2 "register_operand")))
+-   (set (match_operand:FLSX 0 "register_operand")
+-    (xor:FLSX (match_dup 4)
+-         (match_operand:FLSX 1 "register_operand")))]
+-  "ISA_HAS_LSX"
+-{
+-  operands[3] = loongarch_build_signbit_mask (<MODE>mode, 1, 0);
+-
+-  operands[4] = gen_reg_rtx (<MODE>mode);
+-})
+-
+-
+ (define_insn "absv2df2"
+   [(set (match_operand:V2DF 0 "register_operand" "=f")
+ 	(abs:V2DF (match_operand:V2DF 1 "register_operand" "f")))]
+diff --git a/gcc/config/loongarch/predicates.md b/gcc/config/loongarch/predicates.md
+index fd2d7b9ab551..d4ff2522881d 100644
+--- a/gcc/config/loongarch/predicates.md
++++ b/gcc/config/loongarch/predicates.md
+@@ -647,6 +647,18 @@
+   return loongarch_const_vector_same_int_p (op, mode);
+ })
+ 
++(define_predicate "const_vector_neg_fp_operand"
++  (match_code "const_vector")
++{
++  machine_mode imode = related_int_vector_mode (mode).require ();
++  rtx mask = loongarch_build_signbit_mask (imode, 1, 0);
++
++  op = gen_lowpart (imode, op);
++  return rtx_equal_p (mask,
++		      simplify_const_binary_operation (AND, imode, mask,
++						       op));
++})
++
+ (define_predicate "par_const_vector_shf_set_operand"
+   (match_code "parallel")
+ {
+@@ -673,6 +685,10 @@
+   (ior (match_operand 0 "register_operand")
+        (match_operand 0 "const_vector_same_uimm_operand")))
+ 
++(define_predicate "reg_or_vector_neg_fp_operand"
++  (ior (match_operand 0 "register_operand")
++       (match_operand 0 "const_vector_neg_fp_operand")))
++
+ ;; PARALLEL for a vec_select that selects all the even or all the odd
+ ;; elements of a vector of MODE.
+ (define_special_predicate "vect_par_cnst_even_or_odd_half"
+diff --git a/gcc/config/loongarch/simd.md b/gcc/config/loongarch/simd.md
+index fb20935471de..adf96bd1e506 100644
+--- a/gcc/config/loongarch/simd.md
++++ b/gcc/config/loongarch/simd.md
+@@ -984,10 +984,10 @@
+ })
+ 
+ (define_insn "xor<mode>3"
+-  [(set (match_operand:ALLVEC 0 "register_operand" "=f,f,f")
+-	(xor:ALLVEC
+-	  (match_operand:ALLVEC 1 "register_operand" "f,f,f")
+-	  (match_operand:ALLVEC 2 "reg_or_vector_same_val_operand" "f,YC,Urv8")))]
++  [(set (match_operand:IVEC 0 "register_operand" "=f,f,f")
++	(xor:IVEC
++	  (match_operand:IVEC 1 "register_operand" "f,f,f")
++	  (match_operand:IVEC 2 "reg_or_vector_same_val_operand" "f,YC,Urv8")))]
+   ""
+   "@
+    <x>vxor.v\t%<wu>0,%<wu>1,%<wu>2
+@@ -997,10 +997,10 @@
+    (set_attr "mode" "<MODE>")])
+ 
+ (define_insn "ior<mode>3"
+-  [(set (match_operand:ALLVEC 0 "register_operand" "=f,f,f")
+-	(ior:ALLVEC
+-	  (match_operand:ALLVEC 1 "register_operand" "f,f,f")
+-	  (match_operand:ALLVEC 2 "reg_or_vector_same_val_operand" "f,YC,Urv8")))]
++  [(set (match_operand:IVEC 0 "register_operand" "=f,f,f")
++	(ior:IVEC
++	  (match_operand:IVEC 1 "register_operand" "f,f,f")
++	  (match_operand:IVEC 2 "reg_or_vector_same_val_operand" "f,YC,Urv8")))]
+   ""
+   "@
+    <x>vor.v\t%<wu>0,%<wu>1,%<wu>2
+@@ -1010,10 +1010,10 @@
+    (set_attr "mode" "<MODE>")])
+ 
+ (define_insn "and<mode>3"
+-  [(set (match_operand:ALLVEC 0 "register_operand" "=f,f,f")
+-	(and:ALLVEC
+-	  (match_operand:ALLVEC 1 "register_operand" "f,f,f")
+-	  (match_operand:ALLVEC 2 "reg_or_vector_same_val_operand" "f,YZ,Urv8")))]
++  [(set (match_operand:IVEC 0 "register_operand" "=f,f,f")
++	(and:IVEC
++	  (match_operand:IVEC 1 "register_operand" "f,f,f")
++	  (match_operand:IVEC 2 "reg_or_vector_same_val_operand" "f,YZ,Urv8")))]
+   ""
+ {
+   switch (which_alternative)
+@@ -1022,27 +1022,9 @@
+       return "<x>vand.v\t%<wu>0,%<wu>1,%<wu>2";
+     case 1:
+       {
+-	rtx elt0 = CONST_VECTOR_ELT (operands[2], 0);
+-	unsigned HOST_WIDE_INT val;
+-	if (GET_MODE_CLASS (<MODE>mode) == MODE_VECTOR_FLOAT)
+-	  {
+-	  const REAL_VALUE_TYPE *x = CONST_DOUBLE_REAL_VALUE (elt0);
+-	  if (GET_MODE (elt0) == DFmode)
+-	    {
+-	      long tmp[2];
+-	      REAL_VALUE_TO_TARGET_DOUBLE (*x, tmp);
+-	      val = ~((unsigned HOST_WIDE_INT) tmp[1] << 32 | tmp[0]);
+-	    }
+-	  else
+-	    {
+-	      long tmp;
+-	      REAL_VALUE_TO_TARGET_SINGLE (*x, tmp);
+-	      val = ~((unsigned HOST_WIDE_INT) tmp);
+-	    }
+-	  }
+-	else
+-	  val = ~UINTVAL (elt0);
+-	operands[2] = loongarch_gen_const_int_vector (<VIMODE>mode, val & (-val));
++	operands[2] = simplify_const_unary_operation (NOT, <MODE>mode,
++						      operands[2],
++						      <MODE>mode);
+ 	return "<x>vbitclri.%v0\t%<wu>0,%<wu>1,%V2";
+       }
+     case 2:
+@@ -1054,6 +1036,52 @@
+   [(set_attr "type" "simd_logic,simd_bit,simd_logic")
+    (set_attr "mode" "<MODE>")])
+ 
++(define_expand "copysign<mode>3"
++  [(match_operand:FVEC 0 "register_operand")
++   (match_operand:FVEC 1 "register_operand")
++   (match_operand:FVEC 2 "reg_or_vector_neg_fp_operand")]
++  ""
++{
++  machine_mode imode = <VIMODE>mode;
++  rtx op[3], mask = loongarch_build_signbit_mask (imode, 1, 0);
++
++  /* Pun the operation into fixed-point bitwise operations.  */
++  for (int i = 0; i < 3; i++)
++    op[i] = lowpart_subreg (imode, operands[i], <MODE>mode);
++
++  /* Copysign from a positive const should have been already simplified
++     to abs, ignore the case here.  Copysign from a negative const is
++     a simple vbitset which is an alternative of ior (see above).  */
++  if (const_vector_neg_fp_operand (operands[2], <MODE>mode))
++    emit_insn (gen_ior<vimode>3 (op[0], op[1], mask));
++  else
++    {
++      mask = force_reg (imode, mask);
++      emit_insn (gen_<simd_isa>_<x>vbitsel_<simdfmt_as_i> (op[0], op[1],
++							   op[2], mask));
++    }
++
++  DONE;
++})
++
++(define_expand "@xorsign<mode>3"
++  [(match_operand:FVEC 0 "register_operand")
++   (match_operand:FVEC 1 "register_operand")
++   (match_operand:FVEC 2 "register_operand")]
++  ""
++{
++  machine_mode imode = <VIMODE>mode;
++  rtx op[3];
++
++  for (int i = 0; i < 3; i++)
++    op[i] = lowpart_subreg (imode, operands[i], <MODE>mode);
++
++  rtx t = loongarch_build_signbit_mask (imode, 1, 0);
++  t = force_reg (imode, simplify_gen_binary (AND, imode, op[2], t));
++  emit_move_insn (op[0], simplify_gen_binary (XOR, imode, op[1], t));
++  DONE;
++})
++
+ ; The LoongArch SX Instructions.
+ (include "lsx.md")
+ 
+-- 
+2.43.7
+
+

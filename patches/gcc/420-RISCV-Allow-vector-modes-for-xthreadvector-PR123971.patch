@@ -1,0 +1,74 @@
+From b2d78cceff9747eac780e25f601038dcd7d08ec4 Mon Sep 17 00:00:00 2001
+From: Robin Dapp <rdapp@oss.qualcomm.com>
+Date: Wed, 4 Feb 2026 12:51:36 +0100
+Subject: [PATCH] RISC-V: Allow vector modes for xtheadvector. [PR123971]
+
+In riscv_vector_mode_supported_any_target_p we disallow any vector mode
+when TARGET_XTHEADVECTOR.
+Things go wrong when we check if a permutation for a mode is supported
+by just looking at the optab (e.g. in forwprop).  Then later we try to
+expand that permutation but cannot find a related int vector mode because
+we don't allow any vector mode.
+
+Strictly speaking, this is fallout from the simplify_vector_constructor
+changes but it's still a target issue as the common code has done the
+proper check and we don't live up to the promise of being able to extend
+a certain mode.
+
+This patch just allows all modes in
+riscv_vector_mode_supported_any_target_p, even for theadvector.
+
+	PR target/123971
+
+gcc/ChangeLog:
+
+	* config/riscv/riscv.cc (riscv_vector_mode_supported_any_target_p):
+	Remove TARGET_XTHEADVECTOR.
+
+gcc/testsuite/ChangeLog:
+
+	* gcc.target/riscv/rvv/xtheadvector/pr123971.c: New test.
+
+Signed-off-by: Robin Dapp <rdapp@oss.qualcomm.com>
+(cherry picked from commit ecc37444062b408c9e06f811fb3f382ea94f3245)
+---
+ gcc/config/riscv/riscv.cc                            |  2 --
+ .../gcc.target/riscv/rvv/xtheadvector/pr123971.c     | 12 ++++++++++++
+ 2 files changed, 12 insertions(+), 2 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.target/riscv/rvv/xtheadvector/pr123971.c
+
+diff --git a/gcc/config/riscv/riscv.cc b/gcc/config/riscv/riscv.cc
+index d3520af1cddc..4007e0db3211 100644
+--- a/gcc/config/riscv/riscv.cc
++++ b/gcc/config/riscv/riscv.cc
+@@ -12642,8 +12642,6 @@ extract_base_offset_in_addr (rtx mem, rtx *base, rtx *offset)
+ static bool
+ riscv_vector_mode_supported_any_target_p (machine_mode)
+ {
+-  if (TARGET_XTHEADVECTOR)
+-    return false;
+   return true;
+ }
+ 
+diff --git a/gcc/testsuite/gcc.target/riscv/rvv/xtheadvector/pr123971.c b/gcc/testsuite/gcc.target/riscv/rvv/xtheadvector/pr123971.c
+new file mode 100644
+index 000000000000..a39e30616b3b
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/riscv/rvv/xtheadvector/pr123971.c
+@@ -0,0 +1,12 @@
++/* { dg-do compile } */
++/* { dg-options "-O -mcpu=xt-c920 -mrvv-vector-bits=zvl" } */
++
++__attribute__((__vector_size__(sizeof(int)))) int u;
++__attribute__((__vector_size__(4 * sizeof(int)))) int v;
++__attribute__((__vector_size__(8 * sizeof(int)))) int w;
++
++void
++foo()
++{
++  v ^= __builtin_shufflevector(u, w % 3, 4, 3, 4, 1);
++}
+-- 
+2.43.7
+
+

@@ -1,0 +1,49 @@
+From 1a8312acb95e35ff717ee3e2f75d6a1ba673b9ac Mon Sep 17 00:00:00 2001
+From: Jonathan Wakely <jwakely@redhat.com>
+Date: Mon, 24 Nov 2025 12:48:42 +0000
+Subject: [PATCH] libstdc++: Fix pretty printers for std::list
+
+The logs for xmethods.exp show that the std::list tests have never
+worked:
+
+gdb.error: No type named std::__cxx11::list<int, std::allocator<int> >::_Node.^M
+skipping:   File "/home/jwakely/src/gcc/gcc/libstdc++-v3/testsuite/../python/libstdcxx/v6/xmethods.py", line 445, in match\r\nskipping:     node_type = gdb.lookup_type(str(class_type) + '::_Node').pointer()\r\nskipping:                 ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\r\nskipping: gdb.error: No type named std::__cxx11::list<int, std::allocator<int> >::_Node.\r\nlist.gdb:11: Error in sourced command file:^M
+Error while looking for matching xmethod workers defined in Python.^M
+skipping: list.gdb:11: Error in sourced command file:\r\nskipping: Error while looking for matching xmethod workers defined in Python.\r\nUNSUPPORTED: libstdc++-xmethods/list.cc
+
+Because of the way the GDB tests treat errors as UNSUPPORTED (so that
+the tests don't fail if the version of GDB is too old to support
+xmethods) we were not getting any FAIL, even though the tests were
+broken.
+
+The std::list type does not have a nested _Node type, it only has
+_Node_ptr. Instead of looking up _Node and then getting a pointer to
+that type, just look up _Node_ptr instead.
+
+libstdc++-v3/ChangeLog:
+
+	* python/libstdcxx/v6/xmethods.py (ListMethodsMatcher.match):
+	Fix lookup for node type.
+
+(cherry picked from commit 39cd9fd2404fe51eabe7587392dad4819fcc2ca8)
+---
+ libstdc++-v3/python/libstdcxx/v6/xmethods.py | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/libstdc++-v3/python/libstdcxx/v6/xmethods.py b/libstdc++-v3/python/libstdcxx/v6/xmethods.py
+index 30359c50b6f9..5362f6d7476c 100644
+--- a/libstdc++-v3/python/libstdcxx/v6/xmethods.py
++++ b/libstdc++-v3/python/libstdcxx/v6/xmethods.py
+@@ -442,7 +442,7 @@ class ListMethodsMatcher(gdb.xmethod.XMethodMatcher):
+         if method is None or not method.enabled:
+             return None
+         val_type = class_type.template_argument(0)
+-        node_type = gdb.lookup_type(str(class_type) + '::_Node').pointer()
++        node_type = gdb.lookup_type(str(class_type) + '::_Node_ptr')
+         return method.worker_class(val_type, node_type)
+ 
+ # Xmethods for std::vector
+-- 
+2.43.7
+
+

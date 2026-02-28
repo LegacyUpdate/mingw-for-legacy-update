@@ -1,0 +1,274 @@
+From 0ccfda02076f0265ad6a8267e1f2030b7eaae0c7 Mon Sep 17 00:00:00 2001
+From: =?utf8?q?Tomasz=20Kami=C5=84ski?= <tkaminsk@redhat.com>
+Date: Thu, 29 Jan 2026 18:14:47 +0100
+Subject: [PATCH] libstdc++: Allow constant initialization of std::atomic of
+ types with padding [PR123875]
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf8
+Content-Transfer-Encoding: 8bit
+
+Currently for the types T that contains padding bits, std::atomic<T>(T)
+constructor was not usable at compile-time in C++14 or later modes. This
+regression caused by use of __builtin_clear_padding introduced in
+r13-2548-g157236dbd62164.
+
+This leads to two regressions when switching from C++11 to C++14
+standard (or switching from GCC-12 to later version for C++14 standard),
+where for type X that contains padding
+* constexpr std::atomic<X> cx(X(...)) becomes ill-formed,
+* std::atomic<X> gx(X(...)) with static storage duration, switch from
+  static to dynamic initialization.
+The latter breakage is silent and may introduced very hard to localize
+order of initialization issues.
+
+This patch mitigates above issue by not invoking the __builtin_clear_padding,
+during constant initialization (std::__is_constant_evaluated() is false).
+This is considered to be safe, as:
+* for objects with static storage duration, padding bits are already
+  cleared by zero-initialization
+* for constexpr objects with non-static storage duration, there is no
+  API that would allow user to observe padding bits on const atomic objects
+
+To elaborate on the second point, values of padding bits in atomic can
+be observed by:
+* The compare_exchange_weak/compare_exchange_strong operations are mutating,
+  so cannot be invoked on const objects.
+* As atomic<X> is not required to store actual object of type X,
+  observing its object representation does (via bitcast, memcpy), does
+  not provide values of object representation of X. Furthermore, the
+  operations are defined only for trivially_copyable types, and atomic
+  specializations meets above requirement only due to bug in libstdc++
+  (see PR67572).
+
+Note that above will no longer hold, and the solution will need to be
+revisited during implementation of C++26 paper P3309R3: constexpr
+atomic and atomic_ref (it will be possible to call compare_exchange
+during constant evaluation).
+
+	PR libstdc++/123875
+
+libstdc++-v3/ChangeLog:
+
+	* include/bits/atomic_base.h (__atomic_impl::__clear_padding):
+	Use if constexpr unconditionally.
+	(__atomic_float<_Fp>::__atomic_float(_Fp)): Skip __clear_padding
+	call for constant evaluation.
+	* include/std/atomic (atomic<_Tp>::atomic(_Tp)): Likewise.
+	* testsuite/29_atomics/atomic/cons/zero_padding.cc: New test.
+	* testsuite/29_atomics/atomic_float/zero_padding.cc: New test.
+
+Reviewed-by: Patrick Palka  <ppalka@redhat.com>
+Reviewed-by: Jonathan Wakely <jwakely@redhat.com>
+Signed-off-by: Tomasz KamiÅski <tkaminsk@redhat.com>
+	(cherry picked from commits
+	6b550d69fe7cb62ea6e240ce7a4ba29ce33aa1b1
+	682c95b808724e6f876ea709b873ac6771704d7b
+	060d7c2a9c1fe16d23d98a74287fdb7c73ddb784
+	f3ba5ad088cebe117f857329a35b95d18d97a808)
+---
+ libstdc++-v3/include/bits/atomic_base.h       | 13 +--
+ libstdc++-v3/include/std/atomic               |  3 +-
+ .../29_atomics/atomic/cons/zero_padding.cc    | 79 +++++++++++++++++++
+ .../29_atomics/atomic_float/zero_padding.cc   | 45 +++++++++++
+ 4 files changed, 134 insertions(+), 6 deletions(-)
+ create mode 100644 libstdc++-v3/testsuite/29_atomics/atomic/cons/zero_padding.cc
+ create mode 100644 libstdc++-v3/testsuite/29_atomics/atomic_float/zero_padding.cc
+
+diff --git a/libstdc++-v3/include/bits/atomic_base.h b/libstdc++-v3/include/bits/atomic_base.h
+index 92d1269493f7..49a3d2e35ad2 100644
+--- a/libstdc++-v3/include/bits/atomic_base.h
++++ b/libstdc++-v3/include/bits/atomic_base.h
+@@ -964,13 +964,16 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
+ #endif
+       }
+ 
++#pragma GCC diagnostic push
++#pragma GCC diagnostic ignored "-Wc++17-extensions"
++
+     template<typename _Tp>
+       _GLIBCXX_ALWAYS_INLINE _GLIBCXX14_CONSTEXPR _Tp*
+       __clear_padding(_Tp& __val) noexcept
+       {
+ 	auto* __ptr = std::__addressof(__val);
+ #if __has_builtin(__builtin_clear_padding)
+-	if _GLIBCXX17_CONSTEXPR (__atomic_impl::__maybe_has_padding<_Tp>())
++	if constexpr (__atomic_impl::__maybe_has_padding<_Tp>())
+ 	  __builtin_clear_padding(__ptr);
+ #endif
+ 	return __ptr;
+@@ -980,9 +983,6 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
+     template<typename _Tp>
+       using _Val = typename remove_volatile<_Tp>::type;
+ 
+-#pragma GCC diagnostic push
+-#pragma GCC diagnostic ignored "-Wc++17-extensions"
+-
+     template<bool _AtomicRef = false, typename _Tp>
+       _GLIBCXX_ALWAYS_INLINE bool
+       __compare_exchange(_Tp& __val, _Val<_Tp>& __e, _Val<_Tp>& __i,
+@@ -1314,7 +1314,10 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
+ 
+       constexpr
+       __atomic_float(_Fp __t) : _M_fp(__t)
+-      { __atomic_impl::__clear_padding(_M_fp); }
++      { 
++ 	if (!std::__is_constant_evaluated())
++	  __atomic_impl::__clear_padding(_M_fp);
++      }
+ 
+       __atomic_float(const __atomic_float&) = delete;
+       __atomic_float& operator=(const __atomic_float&) = delete;
+diff --git a/libstdc++-v3/include/std/atomic b/libstdc++-v3/include/std/atomic
+index eac888231588..98576234b6ec 100644
+--- a/libstdc++-v3/include/std/atomic
++++ b/libstdc++-v3/include/std/atomic
+@@ -245,7 +245,8 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
+       {
+ #if __cplusplus >= 201402L && __has_builtin(__builtin_clear_padding)
+ 	if _GLIBCXX17_CONSTEXPR (__atomic_impl::__maybe_has_padding<_Tp>())
+-	  __builtin_clear_padding(std::__addressof(_M_i));
++	  if (!std::__is_constant_evaluated())
++	    __builtin_clear_padding(std::__addressof(_M_i));
+ #endif
+       }
+ 
+diff --git a/libstdc++-v3/testsuite/29_atomics/atomic/cons/zero_padding.cc b/libstdc++-v3/testsuite/29_atomics/atomic/cons/zero_padding.cc
+new file mode 100644
+index 000000000000..d57846d60205
+--- /dev/null
++++ b/libstdc++-v3/testsuite/29_atomics/atomic/cons/zero_padding.cc
+@@ -0,0 +1,79 @@
++// { dg-do run { target c++11 } }
++// { dg-require-atomic-cmpxchg-word "" }
++// { dg-add-options libatomic }
++
++#include <atomic>
++#include <cstring>
++#include <testsuite_hooks.h>
++
++struct TailPadding { int i; char c; };
++TailPadding ztail{1, 2}; // zeroed-padding
++constexpr std::atomic<TailPadding> ctail(TailPadding{1,2});
++std::atomic<TailPadding> gtail(TailPadding{1,2});
++
++struct MidPadding { char c; int x; };
++MidPadding zmid{1, 2}; // zeroed-padding
++constexpr std::atomic<MidPadding> cmid(MidPadding{1,2});
++std::atomic<MidPadding> gmid(MidPadding{1,2});
++
++struct BitPadding { int : 4; int i : 5; int : 4; int j : 5; int : 4;  };
++BitPadding zbit{1, 2}; // zeroed-padding
++constexpr std::atomic<BitPadding> cbit(BitPadding{1,2});
++std::atomic<BitPadding> gbit(BitPadding{1,2});
++
++struct Ctor
++{
++  Ctor() = default;
++
++  constexpr Ctor(char pc, char pi)
++    : c(pc), i(pi)
++  {}
++
++  char c;
++  int i;
++};
++
++Ctor zctor{1, 2}; // zeroed-padding
++constexpr std::atomic<Ctor> cctor(Ctor{1,2});
++std::atomic<Ctor> gctor(Ctor{1,2});
++
++template<typename T>
++void test_struct(std::atomic<T>& g, const T& zp)
++{
++  T const d{3, 4};
++  T t;
++
++  std::memcpy(&t, &zp, sizeof(T));
++  VERIFY( g.compare_exchange_strong(t, d) );
++
++  static std::atomic<T> st(T{1, 2});
++  std::memcpy(&t, &zp, sizeof(T));
++  VERIFY( st.compare_exchange_strong(t, d) );
++
++  thread_local std::atomic<T> tl(T{1, 2});
++  std::memcpy(&t, &zp, sizeof(T));
++  VERIFY( tl.compare_exchange_strong(t, d) );
++
++  std::atomic<T> l(T{1, 2});
++  std::memcpy(&t, &zp, sizeof(T));
++#if __cplusplus >= 201402L // Remove once PR114865 is fixed
++  VERIFY( l.compare_exchange_strong(t, d) );
++#endif
++
++  std::atomic<T>* h = new std::atomic<T>(T{1, 2});
++  std::memcpy(&t, &zp, sizeof(T));
++#if __cplusplus >= 201402L // Remove once PR114865 is fixed
++  VERIFY( h->compare_exchange_strong(t, d) );
++#endif
++  delete h;
++
++  constexpr std::atomic<T> cl(T{1, 2});
++}
++
++int main()
++{
++  test_struct(gtail, ztail);
++  test_struct(gmid, zmid);
++  test_struct(gbit, zbit);
++  test_struct(gctor, zctor);
++}
+diff --git a/libstdc++-v3/testsuite/29_atomics/atomic_float/zero_padding.cc b/libstdc++-v3/testsuite/29_atomics/atomic_float/zero_padding.cc
+new file mode 100644
+index 000000000000..26e9d11b574a
+--- /dev/null
++++ b/libstdc++-v3/testsuite/29_atomics/atomic_float/zero_padding.cc
+@@ -0,0 +1,45 @@
++// { dg-do run { target c++20 } }
++// { dg-require-effective-target libatomic_available }
++// { dg-additional-options "[atomic_link_flags [get_multilibs]] -latomic" }
++
++#include <atomic>
++#include <cstring>
++#include <testsuite_hooks.h>
++
++long double zld(10.5);
++constexpr std::atomic<long double> cld(10.5);
++std::atomic<long double> gld(10.5);
++
++template<typename T>
++void test_floating(std::atomic<T>& g, const T& zp)
++{
++  T const d = T(7.5);
++  T t;
++
++  std::memcpy(&t, &zp, sizeof(T));
++  VERIFY( g.compare_exchange_strong(t, d) );
++
++  static std::atomic<T> st(T(10.5));
++  std::memcpy(&t, &zp, sizeof(T));
++  VERIFY( st.compare_exchange_strong(t, d) );
++
++  thread_local std::atomic<T> tl(T(10.5));
++  std::memcpy(&t, &zp, sizeof(T));
++  VERIFY( tl.compare_exchange_strong(t, d) );
++
++  std::atomic<T> l(T(10.5));
++  std::memcpy(&t, &zp, sizeof(T));
++  VERIFY( l.compare_exchange_strong(t, d) );
++
++  std::atomic<T>* h = new std::atomic<T>(T(10.5));
++  std::memcpy(&t, &zp, sizeof(T));
++  VERIFY( h->compare_exchange_strong(t, d) );
++  delete h;
++
++  constexpr std::atomic<T> cl(T(10.5));
++}
++
++int main()
++{
++  test_floating(gld, zld);
++}
+-- 
+2.43.7
+
+

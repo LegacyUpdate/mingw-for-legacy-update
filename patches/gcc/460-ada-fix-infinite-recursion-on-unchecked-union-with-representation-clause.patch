@@ -1,0 +1,190 @@
+From ba99b94208670193f3b4d852e668d8b8b07754ac Mon Sep 17 00:00:00 2001
+From: Eric Botcazou <ebotcazou@adacore.com>
+Date: Sat, 28 Feb 2026 19:48:23 +0100
+Subject: [PATCH] Ada: Fix infinite recursion on unchecked union with
+ representation clause
+
+This is a regression present on all active branches: the compiler enters an
+infinite recursion when it is generating the initialization procedure of an
+unchecked union type with a representation clause, because the layout it has
+done for it is problematic.  This comes from an old kludge added to support
+aggregates for such types, so the fix is to further tweak this kludge.
+
+gcc/ada/
+	PR ada/124285
+	* gcc-interface/decl.cc (components_to_record): Force a packed
+	layout for the innermost variant of an unchecked union type with
+	fixed part and full representation clause.
+
+gcc/testsuite/
+	* gnat.dg/specs/unchecked_union3.ads: New test.
+---
+ gcc/ada/gcc-interface/decl.cc                 | 36 +++++----
+ .../gnat.dg/specs/unchecked_union3.ads        | 80 +++++++++++++++++++
+ 2 files changed, 100 insertions(+), 16 deletions(-)
+ create mode 100644 gcc/testsuite/gnat.dg/specs/unchecked_union3.ads
+
+diff --git a/gcc/ada/gcc-interface/decl.cc b/gcc/ada/gcc-interface/decl.cc
+index 029f313eff9c..40a58e17824b 100644
+--- a/gcc/ada/gcc-interface/decl.cc
++++ b/gcc/ada/gcc-interface/decl.cc
+@@ -8217,7 +8217,7 @@ typedef struct vinfo
+ 
+    DEBUG_INFO is true if we need to write debug information about the type.
+ 
+-   IN_VARIANT is true if the componennt list is that of a variant.
++   IN_VARIANT is true if the component list is that of a variant.
+ 
+    FIRST_FREE_POS, if nonzero, is the first (lowest) free field position in
+    the outer record type down to this variant level.  It is nonzero only if
+@@ -8334,7 +8334,7 @@ components_to_record (Node_Id gnat_component_list, Entity_Id gnat_record_type,
+       tree gnu_union_type;
+       tree this_first_free_pos, gnu_variant_list = NULL_TREE;
+       bool union_field_needs_strict_alignment = false;
+-      bool innermost_variant_level = true;
++      bool innermost_of_unchecked_union = false;
+       auto_vec <vinfo_t, 16> variant_types;
+       vinfo_t *gnu_variant;
+       unsigned int variants_align = 0;
+@@ -8383,15 +8383,19 @@ components_to_record (Node_Id gnat_component_list, Entity_Id gnat_record_type,
+       /* For an unchecked union with a fixed part, we need to compute whether
+ 	 we are at the innermost level of the variant part.  */
+       if (unchecked_union && gnu_field_list)
+-	for (variant = First_Non_Pragma (Variants (gnat_variant_part));
+-	     Present (variant);
+-	     variant = Next_Non_Pragma (variant))
+-	  if (Present (Component_List (variant))
+-	      && Present (Variant_Part (Component_List (variant))))
+-	    {
+-	      innermost_variant_level = false;
+-	      break;
+-	    }
++	{
++	  innermost_of_unchecked_union = true;
++
++	  for (variant = First_Non_Pragma (Variants (gnat_variant_part));
++	       Present (variant);
++	       variant = Next_Non_Pragma (variant))
++	    if (Present (Component_List (variant))
++		&& Present (Variant_Part (Component_List (variant))))
++	      {
++		innermost_of_unchecked_union = false;
++		break;
++	      }
++	}
+ 
+       /* We build the variants in two passes.  The bulk of the work is done in
+ 	 the first pass, that is to say translating the GNAT nodes, building
+@@ -8438,17 +8442,17 @@ components_to_record (Node_Id gnat_component_list, Entity_Id gnat_record_type,
+ 	     the outer variant, so as to flatten the rep-ed layout as much as
+ 	     possible, the reason being that we cannot do any flattening when
+ 	     a subtype statically selects a variant later on, for example for
+-	     an aggregate.  */
++	     an aggregate; in that case, we force a packed layout because the
++	     moved fields may overlap with packed bit-fields.  */
+ 	  has_rep
+ 	    = components_to_record (Component_List (variant), gnat_record_type,
+-				    NULL_TREE, gnu_variant_type, packed,
++				    NULL_TREE, gnu_variant_type, packed ||
++				    (all_rep && innermost_of_unchecked_union),
+ 				    definition, !all_rep_and_size, all_rep,
+ 				    unchecked_union, true, needs_xv_encodings,
+ 				    true, this_first_free_pos,
+ 				    (all_rep || this_first_free_pos)
+-				    && !(unchecked_union
+-				         && gnu_field_list
+-					 && innermost_variant_level)
++				    && !innermost_of_unchecked_union
+ 				    ? NULL : &gnu_rep_list);
+ 
+ 	  /* Translate the qualifier and annotate the GNAT node.  */
+diff --git a/gcc/testsuite/gnat.dg/specs/unchecked_union3.ads b/gcc/testsuite/gnat.dg/specs/unchecked_union3.ads
+new file mode 100644
+index 000000000000..f051666d4398
+--- /dev/null
++++ b/gcc/testsuite/gnat.dg/specs/unchecked_union3.ads
+@@ -0,0 +1,80 @@
++-- { dg-do compile }
++
++with Interfaces;
++
++package Unchecked_Union3 is
++
++   type T_CAN_ID is mod 2**29 with
++      Default_Value => 0,
++      Size          => 29;
++
++   type T_Node_ID is mod 2**7 with
++      Size          => 7,
++      Default_Value => 0;
++
++   type T_Message_Type_ID is new Interfaces.Unsigned_16;
++
++   type T_Service_Type_ID is new Interfaces.Unsigned_8;
++
++   type T_Priority is mod 2**5 with
++      Size          => 5,
++      Default_Value => 0;
++
++   type T_Format_Selector is
++     (CAN_Fields,
++      DroneCAN_Fields);
++
++   type T_Frame_Selector is
++     (Message_Frame,
++      Anonymous_Frame,
++      Service_Frame);
++
++   type Unsigned_2 is mod 2**2 with
++      Size          => 2,
++      Default_Value => 0;
++
++   type Unsigned_14 is mod 2**14 with
++      Size          => 14,
++      Default_Value => 0;
++
++   type T_Header (Format_Selector : T_Format_Selector := DroneCAN_Fields;
++      Frame_Selector              : T_Frame_Selector  := Message_Frame) is record
++      case Format_Selector is
++         when CAN_Fields =>
++            CAN_ID : T_CAN_ID;
++
++         when DroneCAN_Fields =>
++            Source_Node_ID      : T_Node_ID;
++            Service_Not_Message : Boolean := False;
++            Priority            : T_Priority;
++
++            case Frame_Selector is
++               when Message_Frame =>
++                  Message_Type_ID : T_Message_Type_ID;
++               when Anonymous_Frame =>
++                  Message_Type_ID_Lower_Bits : Unsigned_2;
++                  Discriminator              : Unsigned_14;
++               when Service_Frame =>
++                  Destination_Node_ID  : T_Node_ID;
++                  Request_Not_Response : Boolean := False;
++                  Service_Type_ID      : T_Service_Type_ID;
++            end case;
++      end case;
++   end record with
++      Unchecked_Union,
++      Size => 29;
++
++   for T_Header use record
++      CAN_ID                     at 0 range  0 .. 28;
++      Source_Node_ID             at 0 range  0 ..  6;
++      Service_Not_Message        at 0 range  7 ..  7;
++      Priority                   at 0 range 24 .. 28;
++      Message_Type_ID            at 0 range  8 .. 23;
++      Message_Type_ID_Lower_Bits at 0 range  8 ..  9;
++      Discriminator              at 0 range 10 .. 23;
++      Destination_Node_ID        at 0 range  8 .. 14;
++      Request_Not_Response       at 0 range 15 .. 15;
++      Service_Type_ID            at 0 range 16 .. 23;
++   end record;
++
++end Unchecked_Union3;
+-- 
+2.43.7
+
+

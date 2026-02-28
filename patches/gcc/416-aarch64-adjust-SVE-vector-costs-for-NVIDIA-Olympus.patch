@@ -1,0 +1,40 @@
+From 5ed84110cc97456c483a0957048a225e68c67128 Mon Sep 17 00:00:00 2001
+From: Kyrylo Tkachov <ktkachov@nvidia.com>
+Date: Fri, 6 Feb 2026 02:34:29 -0800
+Subject: [PATCH] aarch64: Adjust SVE vector costs for NVIDIA Olympus
+
+After some more analysis, I'd like to adjust the SVE load
+cost for NVIDIA Olympus to more accurately reflect the core SWOG.
+This leads to more sensible Advanced SIMD vs SVE autovec decisions.
+
+Bootstrapped and tested on aarch64-none-linux-gnu.
+
+Signed-off-by: Kyrylo Tkachov <ktkachov@nvidia.com>
+
+gcc/ChangeLog
+
+	* config/aarch64/tuning_models/olympus.h (olympus_sve_vector_cost):
+	Set align_load_cost to 6.
+
+(cherry picked from commit 4d2af0735063ab7d38c4da0ec6f992276af855af)
+---
+ gcc/config/aarch64/tuning_models/olympus.h | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/gcc/config/aarch64/tuning_models/olympus.h b/gcc/config/aarch64/tuning_models/olympus.h
+index 268789db019a..b62a852eaa78 100644
+--- a/gcc/config/aarch64/tuning_models/olympus.h
++++ b/gcc/config/aarch64/tuning_models/olympus.h
+@@ -75,7 +75,7 @@ static sve_vec_cost olympus_sve_vector_cost =
+     2, /* store_elt_extra_cost  */
+     8, /* vec_to_scalar_cost  */
+     4, /* scalar_to_vec_cost  */
+-    4, /* align_load_cost  */
++    6, /* align_load_cost  */
+     6, /* unalign_load_cost  */
+     1, /* unalign_store_cost  */
+     1  /* store_cost  */
+-- 
+2.43.7
+
+

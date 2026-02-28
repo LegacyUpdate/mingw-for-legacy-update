@@ -1,0 +1,69 @@
+From ff6032ed4111be2f8a85c910fe899b33557447cb Mon Sep 17 00:00:00 2001
+From: Nathaniel Shead <nathanieloshead@gmail.com>
+Date: Sun, 22 Feb 2026 13:09:00 +1100
+Subject: [PATCH] driver: Escape special characters in '-fdeps-{file,target}'
+ [PR120974]
+
+The driver uses the 'join' function to calculate the default output for
+the -fdeps-file and -fdeps-target parameters from the parameter given to
+-o (or the basename of the input file).  But if the path given to -o has
+any whitespace in it this causes cc1plus to see arguments like
+
+  "-o some file.o" "-fdeps-file=some" "file.ddi"
+
+which breaks.  Fixed by adjusting the 'join' function to escape any
+special characters in the result.
+
+	PR c++/120974
+
+gcc/ChangeLog:
+
+	* gcc.cc (join_spec_func): Escape special characters.
+
+Signed-off-by: Nathaniel Shead <nathanieloshead@gmail.com>
+Reviewed-by: Jason Merrill <jason@redhat.com>
+(cherry picked from commit 64125642775fc485a58bda8df4401b667682254f)
+---
+ gcc/gcc.cc | 18 +++++++++++-------
+ 1 file changed, 11 insertions(+), 7 deletions(-)
+
+diff --git a/gcc/gcc.cc b/gcc/gcc.cc
+index 4fd87f2c4a13..3b0f946f04f5 100644
+--- a/gcc/gcc.cc
++++ b/gcc/gcc.cc
+@@ -11092,7 +11092,8 @@ find_fortran_preinclude_file (int argc, const char **argv)
+   return result;
+ }
+ 
+-/* The function takes any number of arguments and joins them together.
++/* The function takes any number of arguments and joins them together,
++   escaping any special characters.
+ 
+    This seems to be necessary to build "-fjoined=foo.b" from "-fseparate foo.a"
+    with a %{fseparate*:-fjoined=%.b$*} rule without adding undesired spaces:
+@@ -11105,12 +11106,15 @@ find_fortran_preinclude_file (int argc, const char **argv)
+ static const char *
+ join_spec_func (int argc, const char **argv)
+ {
+-  if (argc == 1)
+-    return argv[0];
+-  for (int i = 0; i < argc; ++i)
+-    obstack_grow (&obstack, argv[i], strlen (argv[i]));
+-  obstack_1grow (&obstack, '\0');
+-  return XOBFINISH (&obstack, const char *);
++  const char *result = argv[0];
++  if (argc != 1)
++    {
++      for (int i = 0; i < argc; ++i)
++	obstack_grow (&obstack, argv[i], strlen (argv[i]));
++      obstack_1grow (&obstack, '\0');
++      result = XOBFINISH (&obstack, const char *);
++    }
++  return quote_spec (xstrdup (result));
+ }
+ 
+ /* If any character in ORIG fits QUOTE_P (_, P), reallocate the string
+-- 
+2.43.7
+
+

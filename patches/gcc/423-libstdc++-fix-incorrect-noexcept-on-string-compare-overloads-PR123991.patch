@@ -1,0 +1,207 @@
+From 7d429e9faa41258d5a4196ef11ddcedb3e35f555 Mon Sep 17 00:00:00 2001
+From: Jonathan Wakely <jwakely@redhat.com>
+Date: Mon, 9 Feb 2026 10:48:44 +0000
+Subject: [PATCH] libstdc++: Fix incorrect noexcept on string::compare
+ overloads [PR123991]
+
+These compare overloads throw when the pos index is out of range, not
+only when the const T& parameter throws on conversion to string_view.
+
+Remove the incorrect conditional noexcept-specifier from the two
+overloads that can throw.
+
+libstdc++-v3/ChangeLog:
+
+	PR libstdc++/123991
+	* include/bits/basic_string.h (compare(size_type, size_type, T)):
+	Remove noexcept-specifier.
+	(compare(size_type, size_type, T, size_type, size_type)):
+	Likewise.
+	* include/bits/cow_string.h (compare(size_type, size_type, T)):
+	Remove noexcept-specifier.
+	(compare(size_type, size_type, T, size_type, size_type)):
+	Likewise.
+	* testsuite/21_strings/basic_string/operations/compare/char/123991.cc:
+	New test.
+	* testsuite/21_strings/basic_string/operations/compare/wchar_t/123991.cc:
+	New test.
+
+Reviewed-by: Nathan Myers <nmyers@redhat.com>
+(cherry picked from commit 0912dfcd1e901d7dc1ff5e10528eefe3f3ff7b22)
+---
+ libstdc++-v3/include/bits/basic_string.h      |  2 -
+ libstdc++-v3/include/bits/cow_string.h        |  2 -
+ .../operations/compare/char/123991.cc         | 56 +++++++++++++++++++
+ .../operations/compare/wchar_t/123991.cc      | 56 +++++++++++++++++++
+ 4 files changed, 112 insertions(+), 4 deletions(-)
+ create mode 100644 libstdc++-v3/testsuite/21_strings/basic_string/operations/compare/char/123991.cc
+ create mode 100644 libstdc++-v3/testsuite/21_strings/basic_string/operations/compare/wchar_t/123991.cc
+
+diff --git a/libstdc++-v3/include/bits/basic_string.h b/libstdc++-v3/include/bits/basic_string.h
+index c90bd099b639..8c7b3a10b977 100644
+--- a/libstdc++-v3/include/bits/basic_string.h
++++ b/libstdc++-v3/include/bits/basic_string.h
+@@ -3505,7 +3505,6 @@ _GLIBCXX_BEGIN_NAMESPACE_CXX11
+ 	_GLIBCXX_NODISCARD _GLIBCXX20_CONSTEXPR
+ 	_If_sv<_Tp, int>
+ 	compare(size_type __pos, size_type __n, const _Tp& __svt) const
+-	noexcept(is_same<_Tp, __sv_type>::value)
+ 	{
+ 	  __sv_type __sv = __svt;
+ 	  return __sv_type(*this).substr(__pos, __n).compare(__sv);
+@@ -3526,7 +3525,6 @@ _GLIBCXX_BEGIN_NAMESPACE_CXX11
+ 	_If_sv<_Tp, int>
+ 	compare(size_type __pos1, size_type __n1, const _Tp& __svt,
+ 		size_type __pos2, size_type __n2 = npos) const
+-	noexcept(is_same<_Tp, __sv_type>::value)
+ 	{
+ 	  __sv_type __sv = __svt;
+ 	  return __sv_type(*this)
+diff --git a/libstdc++-v3/include/bits/cow_string.h b/libstdc++-v3/include/bits/cow_string.h
+index f9df2be20bed..161a717cf49f 100644
+--- a/libstdc++-v3/include/bits/cow_string.h
++++ b/libstdc++-v3/include/bits/cow_string.h
+@@ -2979,7 +2979,6 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
+       template<typename _Tp>
+ 	_If_sv<_Tp, int>
+ 	compare(size_type __pos, size_type __n, const _Tp& __svt) const
+-	noexcept(is_same<_Tp, __sv_type>::value)
+ 	{
+ 	  __sv_type __sv = __svt;
+ 	  return __sv_type(*this).substr(__pos, __n).compare(__sv);
+@@ -2999,7 +2998,6 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
+ 	_If_sv<_Tp, int>
+ 	compare(size_type __pos1, size_type __n1, const _Tp& __svt,
+ 		size_type __pos2, size_type __n2 = npos) const
+-	noexcept(is_same<_Tp, __sv_type>::value)
+ 	{
+ 	  __sv_type __sv = __svt;
+ 	  return __sv_type(*this)
+diff --git a/libstdc++-v3/testsuite/21_strings/basic_string/operations/compare/char/123991.cc b/libstdc++-v3/testsuite/21_strings/basic_string/operations/compare/char/123991.cc
+new file mode 100644
+index 000000000000..53ef2d4606c6
+--- /dev/null
++++ b/libstdc++-v3/testsuite/21_strings/basic_string/operations/compare/char/123991.cc
+@@ -0,0 +1,56 @@
++// { dg-do run { target c++17 } }
++
++// Bug 123991 - std::string::compare crashes instead of throwing
++
++#include <string>
++#include <string_view>
++#include <stdexcept>
++#include <testsuite_hooks.h>
++
++void
++test_compare_3arg()
++{
++  std::string_view sv;
++  std::string s;
++  static_assert( ! noexcept(s.compare(0, 0, sv)) );
++#ifdef __cpp_exceptions
++  try
++  {
++    (void) s.compare(1, 0, sv);
++    VERIFY(false);
++  }
++  catch (const std::out_of_range&)
++  { }
++#endif
++}
++
++void
++test_compare_5arg()
++{
++  std::string_view sv;
++  std::string s;
++  static_assert( ! noexcept(s.compare(0, 0, sv, 0, 0)) );
++#ifdef __cpp_exceptions
++  try
++  {
++    (void) s.compare(1, 0, sv, 0, 0);
++    VERIFY(false);
++  }
++  catch (const std::out_of_range&)
++  { }
++
++  try
++  {
++    (void) s.compare(0, 0, sv, 1, 0);
++    VERIFY(false);
++  }
++  catch (const std::out_of_range&)
++  { }
++#endif
++}
++
++int main()
++{
++  test_compare_3arg();
++  test_compare_5arg();
++}
+diff --git a/libstdc++-v3/testsuite/21_strings/basic_string/operations/compare/wchar_t/123991.cc b/libstdc++-v3/testsuite/21_strings/basic_string/operations/compare/wchar_t/123991.cc
+new file mode 100644
+index 000000000000..c4188bbff8b2
+--- /dev/null
++++ b/libstdc++-v3/testsuite/21_strings/basic_string/operations/compare/wchar_t/123991.cc
+@@ -0,0 +1,56 @@
++// { dg-do run { target c++17 } }
++
++// Bug 123991 - std::string::compare crashes instead of throwing
++
++#include <string>
++#include <string_view>
++#include <stdexcept>
++#include <testsuite_hooks.h>
++
++void
++test_compare_3arg()
++{
++  std::wstring_view sv;
++  std::wstring s;
++  static_assert( ! noexcept(s.compare(0, 0, sv)) );
++#ifdef __cpp_exceptions
++  try
++  {
++    (void) s.compare(1, 0, sv);
++    VERIFY(false);
++  }
++  catch (const std::out_of_range&)
++  { }
++#endif
++}
++
++void
++test_compare_5arg()
++{
++  std::wstring_view sv;
++  std::wstring s;
++  static_assert( ! noexcept(s.compare(0, 0, sv, 0, 0)) );
++#ifdef __cpp_exceptions
++  try
++  {
++    (void) s.compare(1, 0, sv, 0, 0);
++    VERIFY(false);
++  }
++  catch (const std::out_of_range&)
++  { }
++
++  try
++  {
++    (void) s.compare(0, 0, sv, 1, 0);
++    VERIFY(false);
++  }
++  catch (const std::out_of_range&)
++  { }
++#endif
++}
++
++int main()
++{
++  test_compare_3arg();
++  test_compare_5arg();
++}
+-- 
+2.43.7
+
+

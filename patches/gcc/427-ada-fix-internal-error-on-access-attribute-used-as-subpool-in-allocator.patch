@@ -1,0 +1,120 @@
+From ba7382a8444cb8f5dbff305bcfd49f60ce87b97a Mon Sep 17 00:00:00 2001
+From: Eric Botcazou <ebotcazou@adacore.com>
+Date: Wed, 11 Feb 2026 11:38:24 +0100
+Subject: [PATCH] Ada: Fix internal error on access attribute used as subpool
+ in allocator
+
+This is a regression present for quite a long time: the compiler aborts
+on an allocator whose subpool name is an access attribute and when an
+allocation procedure must be generated, for example when the allocation
+is controlled.
+
+The fix is to do what is done elsewhere in Build_Allocate_Deallocate_Proc,
+that is to say pass the allocation procedure as the new scope in the call
+to the New_Copy_Tree function.
+
+gcc/ada/
+	PR ada/124054
+	* exp_util.adb (Build_Allocate_Deallocate_Proc): Tidy up and pass
+	Proc_Id as the new scope in the call to the New_Copy_Tree function.
+
+gcc/testsuite/
+	* gnat.dg/allocator4.adb: New test.
+
+Co-authored-by: Liam Powell <liam@liampwll.com>
+---
+ gcc/ada/exp_util.adb                 | 28 +++++++++++++---------------
+ gcc/testsuite/gnat.dg/allocator4.adb | 23 +++++++++++++++++++++++
+ 2 files changed, 36 insertions(+), 15 deletions(-)
+ create mode 100644 gcc/testsuite/gnat.dg/allocator4.adb
+
+diff --git a/gcc/ada/exp_util.adb b/gcc/ada/exp_util.adb
+index bfbbab78602e..1b6a0899cc7c 100644
+--- a/gcc/ada/exp_util.adb
++++ b/gcc/ada/exp_util.adb
+@@ -971,23 +971,22 @@ package body Exp_Util is
+          Size_Id : constant Entity_Id := Make_Temporary (Loc, 'S');
+ 
+          Actuals      : List_Id;
+-         Alloc_Expr   : Node_Id := Empty;
++         Alloc_Expr   : Node_Id;
+          Fin_Coll_Id  : Entity_Id;
+          Proc_To_Call : Entity_Id;
+          Ptr_Coll_Id  : Entity_Id;
+-         Subpool      : Node_Id := Empty;
++         Subpool      : Node_Id;
+ 
+       begin
+-         --  When we are building an allocator procedure, extract the allocator
+-         --  node for later processing and calculation of alignment.
++         --  When we are building an allocator procedure, extract the qualified
++         --  expression from the allocator if there is one.
+ 
+-         if Is_Allocate then
+-            --  Extract the qualified expression if there is one from the
+-            --  allocator.
+-
+-            if Nkind (Expression (Expr)) = N_Qualified_Expression then
+-               Alloc_Expr := Expression (Expr);
+-            end if;
++         if Is_Allocate
++           and then Nkind (Expression (Expr)) = N_Qualified_Expression
++         then
++            Alloc_Expr := Expression (Expr);
++         else
++            Alloc_Expr := Empty;
+          end if;
+ 
+          --  Step 1: Construct all the actuals for the call to library routine
+@@ -1001,15 +1000,14 @@ package body Exp_Util is
+ 
+             --  b) Subpool
+ 
+-            if Nkind (Expr) = N_Allocator then
+-               Subpool := Subpool_Handle_Name (Expr);
+-            end if;
++            Subpool := Subpool_Handle_Name (Expr);
+ 
+             --  If a subpool is present it can be an arbitrary name, so make
+             --  the actual by copying the tree.
+ 
+             if Present (Subpool) then
+-               Append_To (Actuals, New_Copy_Tree (Subpool, New_Sloc => Loc));
++               Append_To
++                 (Actuals, New_Copy_Tree (Subpool, New_Scope => Proc_Id));
+             else
+                Append_To (Actuals, Make_Null (Loc));
+             end if;
+diff --git a/gcc/testsuite/gnat.dg/allocator4.adb b/gcc/testsuite/gnat.dg/allocator4.adb
+new file mode 100644
+index 000000000000..ba3d00bb5cd6
+--- /dev/null
++++ b/gcc/testsuite/gnat.dg/allocator4.adb
+@@ -0,0 +1,23 @@
++--  { dg-do compile }
++--  { dg-options "-gnatws" }
++
++with System.Storage_Pools.Subpools; use System.Storage_Pools.Subpools;
++with Ada.Finalization;              use Ada.Finalization;
++
++procedure Allocator4 is
++
++   type My_Subpool_Type is new Root_Subpool with null record;
++   type My_Subpool_Access_Type is access all My_Subpool_Type;
++
++   My_Subpool        : aliased My_Subpool_Type;
++   My_Subpool_Access : Subpool_Handle := My_Subpool'Unchecked_Access;
++
++   type T is new Ada.Finalization.Controlled with null record;
++
++   A : access T := new (Subpool_Handle'(My_Subpool'Unchecked_Access)) T;
++   B : access T := new (My_Subpool_Access) T;
++   C : access T := new (My_Subpool'Access) T;
++
++begin
++   null;
++end;
+-- 
+2.43.7
+
+

@@ -1,0 +1,132 @@
+From f91405783afbb091f05b2cfa5f290a7c9b3b8853 Mon Sep 17 00:00:00 2001
+From: Martin Jambor <mjambor@suse.cz>
+Date: Mon, 16 Feb 2026 19:06:51 +0100
+Subject: [PATCH] ipa-cp: Fix assert triggering with -fno-toplevel-reorder (PR
+ 106260)
+
+with -fno-toplevel-reorder (and -fwhole-program), there apparently can
+be local functions without any callers.  This is something that IPA-CP
+does not like because its propagation verifier checks that local
+functions do not end up with TOP in their lattices.  Therefore there
+is an assert checking that all call-less unreachable functions have
+been removed, which tigers in PR 106260 with these two options.
+
+This patch detects the situation and marks the lattices as variable,
+thus avoiding both the assert trigger and the verification failure.
+
+gcc/ChangeLog:
+
+2022-07-13  Martin Jambor  <mjambor@suse.cz>
+
+	PR ipa/106260
+	* ipa-cp.cc (initialize_node_lattices): Replace assert that there are
+	callers with handling that situation when -fno-toplevel_reorder.
+
+gcc/testsuite/ChangeLog:
+
+2022-07-13  Martin Jambor  <mjambor@suse.cz>
+
+	PR ipa/106260
+	* g++.dg/ipa/pr106260.C: New test.
+
+(cherry picked from commit f7e335aa007f32a003dde88a7500e326b1dcef65)
+---
+ gcc/ipa-cp.cc                       |  6 ++-
+ gcc/testsuite/g++.dg/ipa/pr106260.C | 64 +++++++++++++++++++++++++++++
+ 2 files changed, 69 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/g++.dg/ipa/pr106260.C
+
+diff --git a/gcc/ipa-cp.cc b/gcc/ipa-cp.cc
+index 7ce9ba776961..782a39791840 100644
+--- a/gcc/ipa-cp.cc
++++ b/gcc/ipa-cp.cc
+@@ -1368,10 +1368,14 @@ initialize_node_lattices (struct cgraph_node *node)
+       int caller_count = 0;
+       node->call_for_symbol_thunks_and_aliases (count_callers, &caller_count,
+ 						true);
+-      gcc_checking_assert (caller_count > 0);
+       if (caller_count == 1)
+ 	node->call_for_symbol_thunks_and_aliases (set_single_call_flag,
+ 						  NULL, true);
++      else if (caller_count == 0)
++	{
++	  gcc_checking_assert (!opt_for_fn (node->decl, flag_toplevel_reorder));
++	  variable = true;
++	}
+     }
+   else
+     {
+diff --git a/gcc/testsuite/g++.dg/ipa/pr106260.C b/gcc/testsuite/g++.dg/ipa/pr106260.C
+new file mode 100644
+index 000000000000..bd3b6e0af790
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/ipa/pr106260.C
+@@ -0,0 +1,64 @@
++// { dg-do compile }
++// { dg-options "-O2 -std=gnu++14 -fwhole-program -fno-unit-at-a-time" }
++
++struct A;
++template <class T>
++struct Q { Q (T); };
++template<typename T, class D>
++struct U {
++  ~U () { m1 (nullptr); }
++  D m2 ();
++  T *u;
++  void m1 (T *) { m2 () (u); }
++};
++struct F { F (int *); };
++template <class, class T = F>
++using W = Q<T>;
++int a, b;
++void fn1 (void *);
++template <class T>
++void
++fn2 (T *x)
++{
++  if (x)
++    x->~T();
++  fn1 (x);
++}
++template <typename T>
++struct C {
++  void operator() (T *x) { fn2 (x); }
++};
++struct D;
++template <typename T, typename D = C<T> >
++using V = U<T, D>;
++struct A {
++  A (int *);
++};
++struct S;
++struct G {
++  V<S> m3 ();
++};
++struct S {
++  int e;
++  virtual ~S () {}
++};
++template<typename T>
++struct H {
++  H (int, T x, int) : h(x) {}
++  G g;
++  void m4 () { g.m3 (); }
++  T h;
++};
++struct I {
++  I(A, W<D>);
++};
++void
++test ()
++{
++  A c (&b);
++  W<D> d (&b);
++  I e (c, d);
++  H<I> f (0, e, a);
++  f.m4 ();
++}
++
+-- 
+2.43.7
+
+

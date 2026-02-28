@@ -1,0 +1,41 @@
+From 8a0b0f28b36b429d630dac872997de9990e9663e Mon Sep 17 00:00:00 2001
+From: =?utf8?q?Torbj=C3=B6rn=20SVENSSON?= <torbjorn.svensson@foss.st.com>
+Date: Fri, 13 Feb 2026 14:01:57 +0100
+Subject: [PATCH] testsuite: arm: drop xfail for dg-bogus in
+ bfloat_cpp_typecheck.C [PR124064]
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf8
+Content-Transfer-Encoding: 8bit
+
+After r11-6321-g550880a31688f1, the bogous errors are no longer emitted.
+
+gcc/testsuite/ChangeLog:
+
+	PR testsuite/124064
+	* g++.target/arm/bfloat_cpp_typecheck.C: Drop xfail.
+
+Signed-off-by: TorbjÃ¶rn SVENSSON <torbjorn.svensson@foss.st.com>
+(cherry picked from commit 7f0f5e109c567de7f84cb30d6b7b3ca79cffd0ef)
+---
+ gcc/testsuite/g++.target/arm/bfloat_cpp_typecheck.C | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/gcc/testsuite/g++.target/arm/bfloat_cpp_typecheck.C b/gcc/testsuite/g++.target/arm/bfloat_cpp_typecheck.C
+index 3e6f7d837527..965d3d5de31b 100644
+--- a/gcc/testsuite/g++.target/arm/bfloat_cpp_typecheck.C
++++ b/gcc/testsuite/g++.target/arm/bfloat_cpp_typecheck.C
+@@ -7,8 +7,8 @@
+ 
+ void foo (void)
+ {
+-  bfloat16_t (); /* { dg-bogus {invalid conversion to type 'bfloat16_t'} "" { xfail *-*-* } } */
+-  bfloat16_t a = bfloat16_t(); /* { dg-bogus {invalid conversion to type 'bfloat16_t'} "" { xfail *-*-* } } */
++  bfloat16_t (); /* { dg-bogus {invalid conversion to type 'bfloat16_t'} } */
++  bfloat16_t a = bfloat16_t(); /* { dg-bogus {invalid conversion to type 'bfloat16_t'} } */
+   bfloat16_t (0x1234); /* { dg-error {invalid conversion to type 'bfloat16_t'} } */
+   bfloat16_t (0.1); /* { dg-error {invalid conversion to type 'bfloat16_t'} } */
+ }
+-- 
+2.43.7
+
+

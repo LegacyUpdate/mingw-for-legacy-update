@@ -1,0 +1,81 @@
+From e1bb34116fa829c410e2c6aad379e884d3da3c24 Mon Sep 17 00:00:00 2001
+From: Alexandre Oliva <oliva@adacore.com>
+Date: Sat, 31 Jan 2026 01:52:05 -0300
+Subject: [PATCH] testsuite: arm: add -mcpu=unset before -march
+
+Reset the cpu selection to the default on tests that set -march
+explicitly instead of using dg-add-options.  The latter would reset
+the cpu selection to avoid interference from TOOL_OPTIONS.
+
+Also add +fp to -march in tests that don't override float-abi and fpu,
+so that -mfloat-abi=hard -mfpu=auto in TOOL_OPTIONS won't cause a
+failure.
+
+
+for  gcc/testsuite/ChangeLog
+
+	* gcc.target/arm/bfloat16_simd_1_2.c: Add -mcpu=unset.
+	* gcc.target/arm/bfloat16_simd_2_2.c: Likewise.
+	* gcc.target/arm/bfloat16_simd_3_2.c: Likewise.
+	* gcc.dg/torture/pr120347.c: Likewise.  Add +fp to -march.
+---
+ gcc/testsuite/gcc.dg/torture/pr120347.c          | 2 +-
+ gcc/testsuite/gcc.target/arm/bfloat16_simd_1_2.c | 2 +-
+ gcc/testsuite/gcc.target/arm/bfloat16_simd_2_2.c | 2 +-
+ gcc/testsuite/gcc.target/arm/bfloat16_simd_3_2.c | 2 +-
+ 4 files changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/gcc/testsuite/gcc.dg/torture/pr120347.c b/gcc/testsuite/gcc.dg/torture/pr120347.c
+index a2d187bbc5c6..375a3ec0bc29 100644
+--- a/gcc/testsuite/gcc.dg/torture/pr120347.c
++++ b/gcc/testsuite/gcc.dg/torture/pr120347.c
+@@ -1,5 +1,5 @@
+ /* { dg-do assemble } */
+-/* { dg-additional-options "-march=armv7-a -mthumb" { target { arm_arch_v7a_ok && arm_thumb2_ok } } } */
++/* { dg-additional-options "-mcpu=unset -march=armv7-a+fp -mthumb" { target { arm_arch_v7a_ok && arm_thumb2_ok } } } */
+ 
+ void *end;
+ void **start;
+diff --git a/gcc/testsuite/gcc.target/arm/bfloat16_simd_1_2.c b/gcc/testsuite/gcc.target/arm/bfloat16_simd_1_2.c
+index 95eecec2d097..299bd60086b9 100644
+--- a/gcc/testsuite/gcc.target/arm/bfloat16_simd_1_2.c
++++ b/gcc/testsuite/gcc.target/arm/bfloat16_simd_1_2.c
+@@ -2,7 +2,7 @@
+ /* { dg-require-effective-target arm_softfp_ok } */
+ /* { dg-require-effective-target arm_v8_neon_ok } */
+ /* { dg-require-effective-target arm_v8_2a_bf16_neon_ok } */
+-/* { dg-additional-options "-march=armv8.2-a+bf16 -mfloat-abi=softfp -mfpu=auto" } */
++/* { dg-additional-options "-mcpu=unset -march=armv8.2-a+bf16 -mfloat-abi=softfp -mfpu=auto" } */
+ /* { dg-additional-options "-O3 --save-temps -std=gnu90" } */
+ /* { dg-final { check-function-bodies "**" "" } } */
+ 
+diff --git a/gcc/testsuite/gcc.target/arm/bfloat16_simd_2_2.c b/gcc/testsuite/gcc.target/arm/bfloat16_simd_2_2.c
+index 175bfa5c2273..9b1ff2780417 100644
+--- a/gcc/testsuite/gcc.target/arm/bfloat16_simd_2_2.c
++++ b/gcc/testsuite/gcc.target/arm/bfloat16_simd_2_2.c
+@@ -2,7 +2,7 @@
+ /* { dg-require-effective-target arm_softfp_ok } */
+ /* { dg-require-effective-target arm_v8_neon_ok } */
+ /* { dg-require-effective-target arm_v8_2a_bf16_neon_ok } */
+-/* { dg-additional-options "-march=armv8.2-a -mfloat-abi=softfp -mfpu=neon-fp-armv8" } */
++/* { dg-additional-options "-mcpu=unset -march=armv8.2-a -mfloat-abi=softfp -mfpu=neon-fp-armv8" } */
+ /* { dg-additional-options "-O3 --save-temps -std=gnu90" } */
+ /* { dg-final { check-function-bodies "**" "" } } */
+ 
+diff --git a/gcc/testsuite/gcc.target/arm/bfloat16_simd_3_2.c b/gcc/testsuite/gcc.target/arm/bfloat16_simd_3_2.c
+index 346253b8a47d..ec9f4a0d690b 100644
+--- a/gcc/testsuite/gcc.target/arm/bfloat16_simd_3_2.c
++++ b/gcc/testsuite/gcc.target/arm/bfloat16_simd_3_2.c
+@@ -2,7 +2,7 @@
+ /* { dg-require-effective-target arm_softfp_ok } */
+ /* { dg-require-effective-target arm_v8_neon_ok } */
+ /* { dg-require-effective-target arm_v8_2a_bf16_neon_ok } */
+-/* { dg-additional-options "-march=armv8.2-a -mfloat-abi=softfp -mfpu=neon-fp-armv8" } */
++/* { dg-additional-options "-mcpu=unset -march=armv8.2-a -mfloat-abi=softfp -mfpu=neon-fp-armv8" } */
+ /* { dg-additional-options "-O3 --save-temps -std=gnu90" } */
+ /* { dg-final { check-function-bodies "**" "" } } */
+ 
+-- 
+2.43.7
+
+

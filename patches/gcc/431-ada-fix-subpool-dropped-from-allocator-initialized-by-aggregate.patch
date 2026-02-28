@@ -1,0 +1,181 @@
+From 5dd4b922bb341aa3b821e600ff2e46aa6ed6e850 Mon Sep 17 00:00:00 2001
+From: Eric Botcazou <ebotcazou@adacore.com>
+Date: Mon, 16 Feb 2026 10:17:30 +0100
+Subject: [PATCH] Ada: Fix subpool dropped from allocator initialized by
+ aggregate
+
+This plugs an annoying loophole, whereby the subpool indication present
+in an allocator is dropped in some circumstances, most notably when the
+allocator is initialized by an aggregate with defaulted components.
+
+gcc/ada/
+	PR ada/124106
+	* exp_ch4.adb (Expand_N_Allocator): Minor fix in commentary.
+	(Expand_Allocator_Expression): Propagate the Subpool_Handle_Name
+	of the original allocator onto the newly built allocators.
+	* exp_ch6.adb (Make_Build_In_Place_Call_In_Allocator): Likewise.
+	Use Preserve_Comes_From_Source to propagate Comes_From_Source.
+	(Make_CPP_Constructor_Call_In_Allocator): Likewise.
+
+gcc/testsuite/
+	* gnat.dg/subpools2.adb: New test.
+---
+ gcc/ada/exp_ch4.adb                 | 11 +++++---
+ gcc/ada/exp_ch6.adb                 | 38 +++++++++++++++++---------
+ gcc/testsuite/gnat.dg/subpools2.adb | 41 +++++++++++++++++++++++++++++
+ 3 files changed, 74 insertions(+), 16 deletions(-)
+ create mode 100644 gcc/testsuite/gnat.dg/subpools2.adb
+
+diff --git a/gcc/ada/exp_ch4.adb b/gcc/ada/exp_ch4.adb
+index c6b8526590f7..7a000db05d97 100644
+--- a/gcc/ada/exp_ch4.adb
++++ b/gcc/ada/exp_ch4.adb
+@@ -659,7 +659,9 @@ package body Exp_Ch4 is
+              Object_Definition   => New_Occurrence_Of (Typ, Loc),
+              Expression          =>
+                Make_Allocator (Loc,
+-                 Expression => New_Occurrence_Of (Etype (Exp), Loc)));
++                 Subpool_Handle_Name =>
++                   Relocate_Node (Subpool_Handle_Name (N)),
++                 Expression          => New_Occurrence_Of (Etype (Exp), Loc)));
+ 
+       begin
+          --  Prevent default initialization of the allocator
+@@ -698,7 +700,9 @@ package body Exp_Ch4 is
+              Object_Definition   => New_Occurrence_Of (Typ, Loc),
+              Expression          =>
+                Make_Allocator (Loc,
+-                 Expression => New_Occurrence_Of (Etype (Exp), Loc)));
++                 Subpool_Handle_Name =>
++                   Relocate_Node (Subpool_Handle_Name (N)),
++                 Expression          => New_Occurrence_Of (Etype (Exp), Loc)));
+ 
+       begin
+          --  Prevent default initialization of the allocator
+@@ -4559,8 +4563,7 @@ package body Exp_Ch4 is
+ 
+       --  Set the storage pool and find the appropriate version of Allocate to
+       --  call. Do not overwrite the storage pool if it is already set, which
+-      --  can happen for build-in-place function returns (see
+-      --  Exp_Ch4.Expand_N_Extended_Return_Statement).
++      --  can occur for BIP function returns (see Expand_N_Object_Declaration).
+ 
+       if No (Storage_Pool (N)) then
+          Pool := Associated_Storage_Pool (Root_Type (PtrT));
+diff --git a/gcc/ada/exp_ch6.adb b/gcc/ada/exp_ch6.adb
+index 6f3621c423ee..131f64178bbe 100644
+--- a/gcc/ada/exp_ch6.adb
++++ b/gcc/ada/exp_ch6.adb
+@@ -8404,17 +8404,24 @@ package body Exp_Ch6 is
+ 
+          New_Allocator :=
+            Make_Allocator (Loc,
+-             Expression => New_Occurrence_Of (Result_Subt, Loc));
++             Subpool_Handle_Name =>
++               Relocate_Node (Subpool_Handle_Name (Allocator)),
++             Expression          => New_Occurrence_Of (Result_Subt, Loc));
++
++         --  Prevent default initialization of the allocator
++
+          Set_No_Initialization (New_Allocator);
+ 
+-         --  Copy attributes to new allocator. Note that the new allocator
+-         --  logically comes from source if the original one did, so copy the
+-         --  relevant flag. This ensures proper treatment of the restriction
+-         --  No_Implicit_Heap_Allocations in this case.
++         --  Copy the Comes_From_Source flag onto the allocator since logically
++         --  this allocator is a replacement of the original allocator. This is
++         --  for proper handling of restriction No_Implicit_Heap_Allocations.
++
++         Preserve_Comes_From_Source (New_Allocator, Allocator);
++
++         --  Copy the attributes set by Expand_N_Allocator
+ 
+          Set_Storage_Pool      (New_Allocator, Storage_Pool      (Allocator));
+          Set_Procedure_To_Call (New_Allocator, Procedure_To_Call (Allocator));
+-         Set_Comes_From_Source (New_Allocator, Comes_From_Source (Allocator));
+ 
+          Rewrite (Allocator, New_Allocator);
+ 
+@@ -9393,17 +9400,24 @@ package body Exp_Ch6 is
+ 
+       New_Allocator :=
+         Make_Allocator (Loc,
+-          Expression => New_Occurrence_Of (Result_Subt, Loc));
++          Subpool_Handle_Name =>
++            Relocate_Node (Subpool_Handle_Name (Allocator)),
++          Expression          => New_Occurrence_Of (Result_Subt, Loc));
++
++      --  Prevent default initialization of the allocator
++
+       Set_No_Initialization (New_Allocator);
+ 
+-      --  Copy attributes to new allocator. Note that the new allocator
+-      --  logically comes from source if the original one did, so copy the
+-      --  relevant flag. This ensures proper treatment of the restriction
+-      --  No_Implicit_Heap_Allocations in this case.
++      --  Copy the Comes_From_Source flag onto the allocator since logically
++      --  this allocator is a replacement of the original allocator. This is
++      --  for proper handling of restriction No_Implicit_Heap_Allocations.
++
++      Preserve_Comes_From_Source (New_Allocator, Allocator);
++
++      --  Copy the attributes set by Expand_N_Allocator
+ 
+       Set_Storage_Pool      (New_Allocator, Storage_Pool      (Allocator));
+       Set_Procedure_To_Call (New_Allocator, Procedure_To_Call (Allocator));
+-      Set_Comes_From_Source (New_Allocator, Comes_From_Source (Allocator));
+ 
+       Rewrite (Allocator, New_Allocator);
+ 
+diff --git a/gcc/testsuite/gnat.dg/subpools2.adb b/gcc/testsuite/gnat.dg/subpools2.adb
+new file mode 100644
+index 000000000000..8c0d27fb5e81
+--- /dev/null
++++ b/gcc/testsuite/gnat.dg/subpools2.adb
+@@ -0,0 +1,41 @@
++-- { dg-do run }
++
++with System.Storage_Elements;       use System.Storage_Elements;
++with System.Storage_Pools.Subpools; use System.Storage_Pools.Subpools;
++
++procedure Subpools2 is
++
++   B : Storage_Array (1 .. 128) with Alignment => Standard'Maximum_Alignment;
++
++   type Pool_T    is new Root_Storage_Pool_With_Subpools with null record;
++   type Subpool_T is new Root_Subpool with null record;
++   type Rec       is record I : Integer := 0; end record;
++
++   overriding function Create_Subpool
++     (Pool : in out Pool_T) return not null Subpool_Handle is
++     (raise Constraint_Error);
++
++   overriding procedure Deallocate_Subpool
++     (Pool : in out Pool_T; Subpool : in out Subpool_Handle) is null;
++
++   overriding procedure Allocate_From_Subpool
++     (Pool                     : in out Pool_T;
++      Storage_Address          : out System.Address;
++      Size_In_Storage_Elements : Storage_Count;
++      Alignment                : Storage_Count;
++      Subpool                  : not null Subpool_Handle) is
++   begin
++      Storage_Address := B'Address;
++   end;
++
++   Pool    : Pool_T;
++   Subpool : aliased Subpool_T;
++   Handle  : Subpool_Handle := Subpool'Unchecked_Access;
++
++   type Subpool_A is access Rec with Storage_Pool => Pool;
++   Ptr : Subpool_A;
++
++begin
++   Set_Pool_Of_Subpool (Handle, Pool);
++   Ptr := new (Handle) Rec'(I => <>);
++end;
+-- 
+2.43.7
+
+

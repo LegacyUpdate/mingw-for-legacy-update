@@ -1,0 +1,52 @@
+From 1f9e423f771cfa4e2290b506ac3f0aa925eecb34 Mon Sep 17 00:00:00 2001
+From: Xi Ruoyao <xry111@xry111.site>
+Date: Sun, 1 Feb 2026 00:04:23 +0800
+Subject: [PATCH] Revert "LoongArch: Fix PR122097 (2)."
+
+This reverts commit e753fa38bb612a3bebe0fc596a44a104bbd2739b.
+
+The commit is no longer needed with the new copysign/xorsign
+implementaton.
+
+(cherry picked from commit c88be070dcec3b8c6ea996f79466f24fe65c798f)
+---
+ gcc/config/loongarch/loongarch.cc | 22 +---------------------
+ 1 file changed, 1 insertion(+), 21 deletions(-)
+
+diff --git a/gcc/config/loongarch/loongarch.cc b/gcc/config/loongarch/loongarch.cc
+index 51aa1b2aa3e4..7ecb8761bdc9 100644
+--- a/gcc/config/loongarch/loongarch.cc
++++ b/gcc/config/loongarch/loongarch.cc
+@@ -1814,27 +1814,7 @@ loongarch_const_vector_same_bytes_p (rtx op, machine_mode mode)
+ 
+   first = CONST_VECTOR_ELT (op, 0);
+   bytes = GET_MODE_UNIT_SIZE (mode);
+-
+-  if (GET_MODE_CLASS (mode) == MODE_VECTOR_FLOAT)
+-    {
+-      rtx val_s = CONST_VECTOR_ELT (op, 0);
+-      const REAL_VALUE_TYPE *x = CONST_DOUBLE_REAL_VALUE (val_s);
+-      if (GET_MODE (val_s) == DFmode)
+-	{
+-	  long tmp[2];
+-	  REAL_VALUE_TO_TARGET_DOUBLE (*x, tmp);
+-	  val = (unsigned HOST_WIDE_INT) tmp[1] << 32 | tmp[0];
+-	}
+-      else
+-	{
+-	  long tmp;
+-	  REAL_VALUE_TO_TARGET_SINGLE (*x, tmp);
+-	  val = (unsigned HOST_WIDE_INT) tmp;
+-	}
+-    }
+-  else
+-    val = UINTVAL (first);
+-
++  val = INTVAL (first);
+   first_byte = val & 0xff;
+   for (i = 1; i < bytes; i++)
+     {
+-- 
+2.43.7
+
+

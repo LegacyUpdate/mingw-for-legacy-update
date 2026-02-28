@@ -1,0 +1,74 @@
+From 4886dd899bbbcf1da7399e6bdf64cab861f34928 Mon Sep 17 00:00:00 2001
+From: Michal Jires <mjires@suse.cz>
+Date: Fri, 19 Dec 2025 17:09:16 +0100
+Subject: [PATCH] lto: Fix SegFault in ICF caused by missing body
+
+During LTO symbol merging, weak symbols may be resolved to external
+definition.
+We reset the symbol, so the body might be released in unreachability
+pass. But we didn't mark the symbol with body_removed, so ICF assumed
+the body was still there causing SegFault.
+
+	PR lto/121588
+
+gcc/lto/ChangeLog:
+
+	* lto-symtab.cc (lto_symtab_merge_symbols): Set body_removed
+	for symbols resolved outside of IR.
+
+gcc/testsuite/ChangeLog:
+
+	* gcc.dg/lto/attr-weakref-2_0.c: New test.
+	* gcc.dg/lto/attr-weakref-2_1.c: New test.
+
+(cherry picked from commit 8e4107a1b3d430f5d3938c8068c6cd512f661e95)
+---
+ gcc/lto/lto-symtab.cc                       |  1 +
+ gcc/testsuite/gcc.dg/lto/attr-weakref-2_0.c | 11 +++++++++++
+ gcc/testsuite/gcc.dg/lto/attr-weakref-2_1.c |  3 +++
+ 3 files changed, 15 insertions(+)
+ create mode 100644 gcc/testsuite/gcc.dg/lto/attr-weakref-2_0.c
+ create mode 100644 gcc/testsuite/gcc.dg/lto/attr-weakref-2_1.c
+
+diff --git a/gcc/lto/lto-symtab.cc b/gcc/lto/lto-symtab.cc
+index 66674a4415f8..b4e934fc564e 100644
+--- a/gcc/lto/lto-symtab.cc
++++ b/gcc/lto/lto-symtab.cc
+@@ -1040,6 +1040,7 @@ lto_symtab_merge_symbols (void)
+ 		      node->analyzed = node->definition = false;
+ 		      node->remove_all_references ();
+ 		    }
++		  node->body_removed = true;
+ 		}
+ 	      DECL_EXTERNAL (node->decl) = 1;
+ 	    }
+diff --git a/gcc/testsuite/gcc.dg/lto/attr-weakref-2_0.c b/gcc/testsuite/gcc.dg/lto/attr-weakref-2_0.c
+new file mode 100644
+index 000000000000..a55ef28bd131
+--- /dev/null
++++ b/gcc/testsuite/gcc.dg/lto/attr-weakref-2_0.c
+@@ -0,0 +1,11 @@
++/* { dg-lto-do link } */
++/* { dg-lto-options {{-O2 -flto}} } */
++
++#define __weak __attribute__((__weak__))
++void __weak other() {}
++void __weak fn() {}
++
++int main() {
++  fn();
++  other();
++}
+diff --git a/gcc/testsuite/gcc.dg/lto/attr-weakref-2_1.c b/gcc/testsuite/gcc.dg/lto/attr-weakref-2_1.c
+new file mode 100644
+index 000000000000..639093fba466
+--- /dev/null
++++ b/gcc/testsuite/gcc.dg/lto/attr-weakref-2_1.c
+@@ -0,0 +1,3 @@
++/* { dg-options {{-fno-lto}} } */
++
++void fn() {}
+-- 
+2.43.7
+
+

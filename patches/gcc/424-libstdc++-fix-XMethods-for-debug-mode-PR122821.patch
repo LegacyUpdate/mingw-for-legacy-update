@@ -1,0 +1,57 @@
+From 0baadffd1699340a36dea98c1f2d36446d8baff9 Mon Sep 17 00:00:00 2001
+From: Jonathan Wakely <jwakely@redhat.com>
+Date: Mon, 24 Nov 2025 12:36:32 +0000
+Subject: [PATCH] libstdc++: Fix XMethods for debug mode [PR122821]
+
+The Python GDB XMethods were not matching the debug mode containers,
+because the is_specialization_of helper function matches std::(__\d::)?
+and so fails to match std::__debug::deque etc.
+
+This makes it match std::__debug:: as well as std:: and std::__8::.
+
+Since the regex already handles the versioned namespace with (__\d::)?
+we don't need to also include the _versioned_namespace variable
+explicitly. This means we now match std::(__\d::|__debug::)?name<.*>
+instead of matching std::(__\d::)?(__8::)?name<.*> which redundantly
+included two ways to match the __8 versioned namespace.
+
+libstdc++-v3/ChangeLog:
+
+	PR libstdc++/122821
+	* python/libstdcxx/v6/xmethods.py (_versioned_namespace): Remove
+	global variable.
+	(is_specialization_of): Do not use _versioned_namespace. Add
+	__debug:: to regex.
+
+(cherry picked from commit ca948ee810949179aac598a14a714ec9550dd9c6)
+---
+ libstdc++-v3/python/libstdcxx/v6/xmethods.py | 5 +----
+ 1 file changed, 1 insertion(+), 4 deletions(-)
+
+diff --git a/libstdc++-v3/python/libstdcxx/v6/xmethods.py b/libstdc++-v3/python/libstdcxx/v6/xmethods.py
+index 109ca10956ab..30359c50b6f9 100644
+--- a/libstdc++-v3/python/libstdcxx/v6/xmethods.py
++++ b/libstdc++-v3/python/libstdcxx/v6/xmethods.py
+@@ -28,8 +28,6 @@ def get_bool_type():
+ def get_std_size_type():
+     return gdb.lookup_type('std::size_t')
+ 
+-_versioned_namespace = '__8::'
+-
+ def is_specialization_of(x, template_name):
+     """
+     Test whether a type is a specialization of the named class template.
+@@ -39,8 +37,7 @@ def is_specialization_of(x, template_name):
+     """
+     if isinstance(x, gdb.Type):
+         x = x.tag
+-    template_name = '(%s)?%s' % (_versioned_namespace, template_name)
+-    return re.match(r'^std::(__\d::)?%s<.*>$' % template_name, x) is not None
++    return re.match(r'^std::(__\d::|__debug::)?%s<.*>$' % template_name, x) is not None
+ 
+ class LibStdCxxXMethod(gdb.xmethod.XMethod):
+     def __init__(self, name, worker_class):
+-- 
+2.43.7
+
+

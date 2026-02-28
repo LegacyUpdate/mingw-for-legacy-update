@@ -1,0 +1,172 @@
+From 771dfe6e2427cb06c5046b06e7342485b6fd6e51 Mon Sep 17 00:00:00 2001
+From: Alice Carlotti <alice.carlotti@arm.com>
+Date: Wed, 14 Jan 2026 13:48:35 +0000
+Subject: [PATCH] aarch64: Disable shrink-wrap for locally-streaming functions
+ [PR 123624]
+
+The meaning of poly_int values changes depending on whether we are in
+streaming or non-streaming mode, but this dependency is not explicitly
+tracked.  Locally-streaming functions can change streaming state in the
+prologue and epilogue, so it is unsafe to apply shrink wrapping to these
+functions, as doing so could change the mode seen by instructions like
+cntd.
+
+gcc/ChangeLog:
+
+	PR target/123624
+	* config/aarch64/aarch64-protos.h
+	(aarch64_use_simple_return_insn_p): New.
+	* config/aarch64/aarch64.cc
+	(aarch64_use_simple_return_insn_p): New, used...
+	* config/aarch64/aarch64.md (simple_return): ...here.
+
+gcc/testsuite/ChangeLog:
+
+	PR target/123624
+	* gcc.target/aarch64/sme/sme-shrinkwrap.c: New test.
+---
+ gcc/config/aarch64/aarch64-protos.h           |  1 +
+ gcc/config/aarch64/aarch64.cc                 | 14 ++++
+ gcc/config/aarch64/aarch64.md                 |  2 +-
+ .../gcc.target/aarch64/sme/sme-shrinkwrap.c   | 78 +++++++++++++++++++
+ 4 files changed, 94 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/gcc.target/aarch64/sme/sme-shrinkwrap.c
+
+diff --git a/gcc/config/aarch64/aarch64-protos.h b/gcc/config/aarch64/aarch64-protos.h
+index 8f44aea2367a..e1caf802d661 100644
+--- a/gcc/config/aarch64/aarch64-protos.h
++++ b/gcc/config/aarch64/aarch64-protos.h
+@@ -970,6 +970,7 @@ bool aarch64_uimm12_shift (unsigned HOST_WIDE_INT);
+ int aarch64_movk_shift (const wide_int_ref &, const wide_int_ref &);
+ bool aarch64_is_mov_xn_imm (unsigned HOST_WIDE_INT);
+ bool aarch64_use_return_insn_p (void);
++bool aarch64_use_simple_return_insn_p (void);
+ const char *aarch64_output_casesi (rtx *);
+ const char *aarch64_output_load_tp (rtx);
+ const char *aarch64_output_sme_zero_za (rtx);
+diff --git a/gcc/config/aarch64/aarch64.cc b/gcc/config/aarch64/aarch64.cc
+index 21be53d2ee80..a39e7c0eaef6 100644
+--- a/gcc/config/aarch64/aarch64.cc
++++ b/gcc/config/aarch64/aarch64.cc
+@@ -10110,6 +10110,20 @@ aarch64_use_return_insn_p (void)
+   return known_eq (cfun->machine->frame.frame_size, 0);
+ }
+ 
++/* Return false for locally streaming functions in order to avoid
++   shrink-wrapping them.  Shrink-wrapping is unsafe when the function prologue
++   and epilogue contain streaming state change, because these implicitly change
++   the meaning of poly_int values.  */
++
++bool
++aarch64_use_simple_return_insn_p (void)
++{
++  if (aarch64_cfun_enables_pstate_sm ())
++    return false;
++
++  return true;
++}
++
+ /* Generate the epilogue instructions for returning from a function.
+    This is almost exactly the reverse of the prolog sequence, except
+    that we need to insert barriers to avoid scheduling loads that read
+diff --git a/gcc/config/aarch64/aarch64.md b/gcc/config/aarch64/aarch64.md
+index 87d6e443717e..7dbbfb668a73 100644
+--- a/gcc/config/aarch64/aarch64.md
++++ b/gcc/config/aarch64/aarch64.md
+@@ -1116,7 +1116,7 @@
+ 
+ (define_insn "simple_return"
+   [(simple_return)]
+-  ""
++  "aarch64_use_simple_return_insn_p ()"
+   {
+     output_asm_insn ("ret", operands);
+     return aarch64_sls_barrier (aarch64_harden_sls_retbr_p ());
+diff --git a/gcc/testsuite/gcc.target/aarch64/sme/sme-shrinkwrap.c b/gcc/testsuite/gcc.target/aarch64/sme/sme-shrinkwrap.c
+new file mode 100644
+index 000000000000..b8dfd5f92f62
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/aarch64/sme/sme-shrinkwrap.c
+@@ -0,0 +1,78 @@
++/* { dg-options "-O3 -fshrink-wrap" } */
++/* { dg-do run { target { aarch64_sme_hw && aarch64_sve_hw } } } */
++/* { dg-do compile { target { ! { aarch64_sme_hw && aarch64_sve_hw } } } } */
++/* { dg-final { check-function-bodies "**" "" } } */
++
++#include <arm_sme.h>
++
++#pragma GCC target "+sve"
++
++[[gnu::noipa]]
++__arm_streaming
++int callee (int x)
++{
++  return 0;
++}
++
++/*
++** foo:
++**	cbnz	w0, [^\n]*
++**	cntd	x0
++**	ret
++**	...
++*/
++__arm_streaming
++int foo(int x)
++{
++    if (x)
++        return callee(3);
++    return svcntd();
++}
++
++/*
++** bar:
++**	...
++**	smstart	[^\n]*
++**	...
++** (
++**	cntd	[^\n]*
++**	...
++**	cbn?z	[^\n]*
++** |
++**	cbn?z	[^\n]*
++**	...
++**	cntd	[^\n]*
++** )
++**	...
++*/
++
++__arm_locally_streaming
++int bar(int x)
++{
++    if (x)
++        return callee(3);
++    return svcntd();
++}
++
++/*
++** baz:
++**	cbnz	w0, [^\n]*
++**	cntd	x0
++**	ret
++**	...
++*/
++__arm_streaming
++int baz(int x)
++{
++    if (x)
++        return callee(3);
++    return svcntd();
++}
++
++[[gnu::noipa]]
++int main()
++{
++  if (bar(0) != svcntsd())
++    __builtin_abort();
++  return 0;
++}
+-- 
+2.43.7
+
+

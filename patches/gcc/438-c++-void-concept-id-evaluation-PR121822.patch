@@ -1,0 +1,70 @@
+From 7f7101cdc372c47e070e356e3e8fe980f5a1676e Mon Sep 17 00:00:00 2001
+From: Patrick Palka <ppalka@redhat.com>
+Date: Tue, 17 Feb 2026 11:21:45 -0500
+Subject: [PATCH] c++: void(concept-id) evaluation [PR121822]
+
+Similar to r16-7056-g22f51c0f5e62a4, here the expression within
+the decltype void(Derived<T>) is non-dependent enough that we
+instantiate/fold it immediately, during which however convert_to_void
+tries to evaluate the concept-id, which fails.  When in an
+unevaluated context such as decltype I don't think convert_to_void
+should be evaluating concept-ids.
+
+	PR c++/121822
+
+gcc/cp/ChangeLog:
+
+	* cvt.cc (convert_to_void): Don't evaluate a concept-id
+	in an unevaluated context.
+
+gcc/testsuite/ChangeLog:
+
+	* g++.dg/cpp2a/concepts-decltype6.C: New test.
+
+Reviewed-by: Jason Merrill <jason@redhat.com>
+(cherry picked from commit 44a51e8c7037eacd4315df0e84bf51e6e4021088)
+---
+ gcc/cp/cvt.cc                                   |  2 +-
+ gcc/testsuite/g++.dg/cpp2a/concepts-decltype6.C | 16 ++++++++++++++++
+ 2 files changed, 17 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/g++.dg/cpp2a/concepts-decltype6.C
+
+diff --git a/gcc/cp/cvt.cc b/gcc/cp/cvt.cc
+index f663a6d08c89..e3a15b900a19 100644
+--- a/gcc/cp/cvt.cc
++++ b/gcc/cp/cvt.cc
+@@ -1204,7 +1204,7 @@ convert_to_void (tree expr, impl_conv_void implicit, tsubst_flags_t complain)
+ 
+   /* Explicitly evaluate void-converted concept checks since their
+      satisfaction may produce ill-formed programs.  */
+-   if (concept_check_p (expr))
++   if (concept_check_p (expr) && !cp_unevaluated_operand)
+      expr = evaluate_concept_check (expr);
+ 
+   if (VOID_TYPE_P (TREE_TYPE (expr)))
+diff --git a/gcc/testsuite/g++.dg/cpp2a/concepts-decltype6.C b/gcc/testsuite/g++.dg/cpp2a/concepts-decltype6.C
+new file mode 100644
+index 000000000000..03ecc7b0a07c
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/cpp2a/concepts-decltype6.C
+@@ -0,0 +1,16 @@
++// PR c++/121822
++// { dg-do compile { target c++20 } }
++
++template<class...>
++using void_t = void;
++
++template<class T>
++concept Derived = requires { typename T::derived_type; };
++
++template<class T, class = void>
++struct Wrapper;
++
++template<class T>
++struct Wrapper<T, void_t<decltype(void(Derived<T>))>> { };
++
++Wrapper<int> x;
+-- 
+2.43.7
+
+

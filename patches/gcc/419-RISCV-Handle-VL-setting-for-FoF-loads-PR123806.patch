@@ -1,0 +1,600 @@
+From 832e7a4c9ad5aea2ad79a0f49065455eb92ee82f Mon Sep 17 00:00:00 2001
+From: Robin Dapp <rdapp@oss.qualcomm.com>
+Date: Mon, 26 Jan 2026 15:24:10 +0100
+Subject: [PATCH] RISC-V: Handle VL-setting FoF loads. [PR123806]
+
+For PR122869 I thought I fixed the issue of VL-spills clobbering
+explicit VL reads after fault-only-first (FoF) loads but it turns
+out the fix is insufficient.  Even though it avoided the original
+issue, we can still have spills that clobber VL before the read_vl
+RTL pattern.  That's mostly due to us hiding the VL data flow from
+the optimizers so a regular spill to memory can and will introduce
+a VL clobber.  In vsetvl we catch all the regular cases but not the
+FoF-load case of PR123806 and PR122869.
+
+This patch adds specific FoF patterns that emit the same instruction but
+have a register-setting VL pattern inside the insn's PARALLEL.
+It serves as a marker for the vsetvl pass that can recognize that we
+clobber VL before reading its value.  In that case we now emit an
+explicit csrr ..,vl.
+
+After vsetvl it's safe to emit the read_vls because at that point the
+VL dataflow has been established and we can be sure to not clobber VL
+anymore.
+
+Thus, the main changes are:
+ - Unify read_vl si and di and make it an UNSPEC.  We don't optimize
+   it anyway so a unified one is easier to include in the new FoF
+   VL-setter variants.
+ - Introduce VL-setting variants of FoF loads and handle them like
+   read_vl()s in the vsetvl pass.
+ - Emit read_vl()s after vsetvl insertion is done.
+
+What this doesn't get rid of is the XFAIL in ff-load-3.c that I
+introduced for PR122869.  The code is still "good" at -O1 and
+"bad" at -O2 upwards.
+
+	PR target/123806
+
+gcc/ChangeLog:
+
+	* config/riscv/riscv-string.cc (expand_rawmemchr): Use unified
+	vl_read.
+	(expand_strcmp): Ditto.
+	* config/riscv/riscv-vector-builtins-bases.cc:
+	* config/riscv/riscv-vector-builtins.cc (function_expander::use_fof_load_insn):
+	Only emit the store and not the VL read.
+	* config/riscv/riscv-vsetvl.cc (get_fof_set_vl_reg): New
+	function.
+	(init_rtl_ssa): New wrapper.
+	(finish_rtl_ssa): Ditto.
+	(emit_fof_read_vls): Emit read_vl after each fault-only-first
+	load.
+	(pass_vsetvl::simple_vsetvl): Call emit_fof_read_vls ().
+	(pass_vsetvl::lazy_vsetvl): Ditto.
+	* config/riscv/vector-iterators.md: Add read_vl unspec.
+	* config/riscv/vector.md (read_vlsi): Unify.
+	(@read_vl<mode>): Ditto.
+	(read_vldi_zero_extend): Ditto.
+	(@pred_fault_load_set_vl<V_VLS:mode><P:mode>): New FoF variant
+	that saves VL in a register.
+	(@pred_fault_load_set_vl<VT:mode><P:mode>): Ditto.
+
+gcc/testsuite/ChangeLog:
+
+	* g++.target/riscv/rvv/base/pr123806.C: New test.
+	* g++.target/riscv/rvv/base/pr123808.C: New test.
+	* g++.target/riscv/rvv/base/pr123808-2.C: New test.
+
+(cherry picked from commit 6a1578c1f6745b8b6cc09f83d26ac1333786e6a1)
+---
+ gcc/config/riscv/riscv-string.cc              |  10 +-
+ .../riscv/riscv-vector-builtins-bases.cc      |   5 +-
+ gcc/config/riscv/riscv-vector-builtins.cc     |  30 ++---
+ gcc/config/riscv/riscv-vsetvl.cc              | 115 ++++++++++++++++--
+ gcc/config/riscv/vector-iterators.md          |   1 +
+ gcc/config/riscv/vector.md                    |  79 ++++++++++--
+ .../g++.target/riscv/rvv/base/pr123806.C      |  25 ++++
+ .../g++.target/riscv/rvv/base/pr123808-2.C    |  51 ++++++++
+ .../g++.target/riscv/rvv/base/pr123808.C      |  50 ++++++++
+ 9 files changed, 314 insertions(+), 52 deletions(-)
+ create mode 100644 gcc/testsuite/g++.target/riscv/rvv/base/pr123806.C
+ create mode 100644 gcc/testsuite/g++.target/riscv/rvv/base/pr123808-2.C
+ create mode 100644 gcc/testsuite/g++.target/riscv/rvv/base/pr123808.C
+
+diff --git a/gcc/config/riscv/riscv-string.cc b/gcc/config/riscv/riscv-string.cc
+index 90801899ec8e..eb119dceeab9 100644
+--- a/gcc/config/riscv/riscv-string.cc
++++ b/gcc/config/riscv/riscv-string.cc
+@@ -1377,10 +1377,7 @@ expand_rawmemchr (machine_mode mode, rtx dst, rtx haystack, rtx needle,
+ 		   riscv_vector::UNARY_OP, vlops);
+ 
+   /* Read how far we read.  */
+-  if (Pmode == SImode)
+-    emit_insn (gen_read_vlsi (cnt));
+-  else
+-    emit_insn (gen_read_vldi_zero_extend (cnt));
++  emit_insn (gen_read_vl (Pmode, cnt));
+ 
+   /* Compare needle with haystack and store in a mask.  */
+   rtx eq = gen_rtx_EQ (mask_mode, gen_const_vec_duplicate (vmode, needle), vec);
+@@ -1493,10 +1490,7 @@ expand_strcmp (rtx result, rtx src1, rtx src2, rtx nbytes,
+     }
+ 
+   /* Read the vl for the next pointer bump.  */
+-  if (Pmode == SImode)
+-    emit_insn (gen_read_vlsi (cnt));
+-  else
+-    emit_insn (gen_read_vldi_zero_extend (cnt));
++  emit_insn (gen_read_vl (Pmode, cnt));
+ 
+   if (with_length)
+     {
+diff --git a/gcc/config/riscv/riscv-vector-builtins-bases.cc b/gcc/config/riscv/riscv-vector-builtins-bases.cc
+index 72916ea1b93d..7925447602ad 100644
+--- a/gcc/config/riscv/riscv-vector-builtins-bases.cc
++++ b/gcc/config/riscv/riscv-vector-builtins-bases.cc
+@@ -1877,10 +1877,7 @@ public:
+ 
+   rtx expand (function_expander &e) const override
+   {
+-    if (Pmode == SImode)
+-      emit_insn (gen_read_vlsi (e.target));
+-    else
+-      emit_insn (gen_read_vldi_zero_extend (e.target));
++    emit_insn (gen_read_vl (Pmode, e.target));
+     return e.target;
+   }
+ };
+diff --git a/gcc/config/riscv/riscv-vector-builtins.cc b/gcc/config/riscv/riscv-vector-builtins.cc
+index 43102d422d4b..a1159f3451de 100644
+--- a/gcc/config/riscv/riscv-vector-builtins.cc
++++ b/gcc/config/riscv/riscv-vector-builtins.cc
+@@ -4317,24 +4317,24 @@ function_expander::use_fof_load_insn ()
+   tree arg = CALL_EXPR_ARG (exp, vl_dest_arg);
+ 
+   /* Use a regular FoF load if the user does not want to store VL.  */
+-  insn_code icode = code_for_pred_fault_load (mode);
+-  rtx result = generate_insn (icode);
+-
+-  /* If user wants VL stored, emit a read_vl and store to memory.  */
+-  if (!integer_zerop (arg))
++  if (integer_zerop (arg))
+     {
+-      rtx vl_reg = gen_reg_rtx (Pmode);
+-      if (Pmode == SImode)
+-	emit_insn (gen_read_vlsi (vl_reg));
+-      else
+-	emit_insn (gen_read_vldi_zero_extend (vl_reg));
+-
+-      rtx addr = expand_normal (arg);
+-      rtx mem = gen_rtx_MEM (Pmode, memory_address (Pmode, addr));
+-      emit_move_insn (mem, vl_reg);
++      insn_code icode = code_for_pred_fault_load (mode);
++      return generate_insn (icode);
+     }
+ 
+-  return result;
++  /* The VL-setting FoF load writes the new VL to VL_REG.
++     Store it to memory.  */
++  rtx vl_reg = gen_reg_rtx (Pmode);
++  add_output_operand (Pmode, vl_reg);
++  insn_code icode = code_for_pred_fault_load_set_vl (mode, Pmode);
++  rtx res = generate_insn (icode);
++
++  rtx addr = expand_normal (arg);
++  rtx mem = gen_rtx_MEM (Pmode, memory_address (Pmode, addr));
++  emit_move_insn (mem, vl_reg);
++
++  return res;
+ }
+ 
+ /* Use contiguous store INSN.  */
+diff --git a/gcc/config/riscv/riscv-vsetvl.cc b/gcc/config/riscv/riscv-vsetvl.cc
+index ffb7193c0ed8..9d863903e231 100644
+--- a/gcc/config/riscv/riscv-vsetvl.cc
++++ b/gcc/config/riscv/riscv-vsetvl.cc
+@@ -294,6 +294,87 @@ fault_first_load_p (rtx_insn *rinsn)
+ 	     || get_attr_type (rinsn) == TYPE_VLSEGDFF);
+ }
+ 
++/* Return the VL output register from a fault-only-first load with VL
++   output (pred_fault_load_set_vl pattern) if RINSN is such an insn
++   or NULL_RTX otherwise.
++   The pattern has: (set vl_output (unspec:P [(reg:SI VL_REGNUM)]
++					     UNSPEC_READ_VL))  */
++static rtx
++get_fof_set_vl_reg (rtx_insn *rinsn)
++{
++  if (!fault_first_load_p (rinsn))
++    return NULL_RTX;
++
++  rtx pat = PATTERN (rinsn);
++  if (GET_CODE (pat) != PARALLEL)
++    return NULL_RTX;
++
++  if (XVECLEN (pat, 0) != 3)
++    return NULL_RTX;
++
++  rtx sub = XVECEXP (pat, 0, 2);
++  if (GET_CODE (sub) == SET
++      && GET_CODE (SET_SRC (sub)) == UNSPEC
++      && XINT (SET_SRC (sub), 1) == UNSPEC_READ_VL)
++    return SET_DEST (sub);
++
++  return NULL_RTX;
++}
++
++/* Initialize RTL SSA and related infrastructure for vsetvl analysis.  */
++static void
++init_rtl_ssa ()
++{
++  calculate_dominance_info (CDI_DOMINATORS);
++  loop_optimizer_init (AVOID_CFG_MODIFICATIONS);
++  connect_infinite_loops_to_exit ();
++  df_analyze ();
++  crtl->ssa = new function_info (cfun);
++}
++
++/* Finalize RTL SSA and cleanup.  */
++static void
++finish_rtl_ssa ()
++{
++  free_dominance_info (CDI_DOMINATORS);
++  loop_optimizer_finalize ();
++  if (crtl->ssa->perform_pending_updates ())
++    cleanup_cfg (0);
++  delete crtl->ssa;
++  crtl->ssa = nullptr;
++}
++
++/* Emit read_vl instructions after fault-only-first loads that have
++   a VL output register.
++   This needs to happen last, i.e. when we made the VL dataflow
++   explicit by inserting vsetvls.  */
++
++static void
++emit_fof_read_vls ()
++{
++  basic_block bb;
++  rtx_insn *rinsn;
++
++  FOR_EACH_BB_FN (bb, cfun)
++    FOR_BB_INSNS (bb, rinsn)
++      {
++	if (!NONDEBUG_INSN_P (rinsn))
++	  continue;
++
++	rtx vl_dest = get_fof_set_vl_reg (rinsn);
++	if (!vl_dest)
++	  continue;
++
++	if (dump_file)
++	  fprintf (dump_file,
++		   "  Inserting read_vl after FoF insn %d into r%d\n",
++		   INSN_UID (rinsn), REGNO (vl_dest));
++
++	rtx read_vl_pat = gen_read_vl (Pmode, vl_dest);
++	emit_insn_after (read_vl_pat, rinsn);
++      }
++}
++
+ /* Return true if the instruction is read vl instruction.  */
+ static bool
+ read_vl_insn_p (rtx_insn *rinsn)
+@@ -1188,6 +1269,13 @@ public:
+ 		break;
+ 	      }
+ 	  }
++	/* If no csrr found but this is a _set_vl style fault-only-first
++	   load, use the insn itself as the VL source.
++	   If we have two identical vector configs that just differ in
++	   AVL and the AVL is just "modified" by a read_vl we
++	   can consider them equal and elide the second one.  */
++	if (!m_read_vl_insn && get_fof_set_vl_reg (insn->rtl ()))
++	  m_read_vl_insn = insn;
+       }
+   }
+ 
+@@ -2422,13 +2510,7 @@ public:
+       m_avin (nullptr), m_avout (nullptr), m_kill (nullptr), m_antloc (nullptr),
+       m_transp (nullptr), m_insert (nullptr), m_del (nullptr), m_edges (nullptr)
+   {
+-    /* Initialization of RTL_SSA.  */
+-    calculate_dominance_info (CDI_DOMINATORS);
+-    loop_optimizer_init (AVOID_CFG_MODIFICATIONS);
+-    /* Create FAKE edges for infinite loops.  */
+-    connect_infinite_loops_to_exit ();
+-    df_analyze ();
+-    crtl->ssa = new function_info (cfun);
++    init_rtl_ssa ();
+     m_vector_block_infos.safe_grow_cleared (last_basic_block_for_fn (cfun));
+     compute_probabilities ();
+     m_unknown_info.set_unknown ();
+@@ -2436,12 +2518,7 @@ public:
+ 
+   void finish ()
+   {
+-    free_dominance_info (CDI_DOMINATORS);
+-    loop_optimizer_finalize ();
+-    if (crtl->ssa->perform_pending_updates ())
+-      cleanup_cfg (0);
+-    delete crtl->ssa;
+-    crtl->ssa = nullptr;
++    finish_rtl_ssa ();
+ 
+     if (m_reg_def_loc)
+       sbitmap_vector_free (m_reg_def_loc);
+@@ -3612,6 +3689,11 @@ pass_vsetvl::simple_vsetvl ()
+ 	    }
+ 	}
+     }
++
++  if (dump_file)
++    fprintf (dump_file, "\nEmit missing read_vl()s for fault-only-first "
++	     "loads\n");
++  emit_fof_read_vls ();
+ }
+ 
+ /* Lazy vsetvl insertion for optimize > 0. */
+@@ -3660,6 +3742,13 @@ pass_vsetvl::lazy_vsetvl ()
+ 	     "\nPhase 4: Insert, modify and remove vsetvl insns.\n\n");
+   pre.emit_vsetvl ();
+ 
++  /* Phase 4b: Emit read_vl for fault-only-first loads with VL output
++     register.  */
++  if (dump_file)
++    fprintf (dump_file, "\nPhase 4b: Emit missing read_vl()s for "
++	     "fault-only-first loads\n");
++  emit_fof_read_vls ();
++
+   /* Phase 5: Cleanup */
+   if (dump_file)
+     fprintf (dump_file, "\nPhase 5: Cleanup\n\n");
+diff --git a/gcc/config/riscv/vector-iterators.md b/gcc/config/riscv/vector-iterators.md
+index f8da71b1d657..f18c3081ccde 100644
+--- a/gcc/config/riscv/vector-iterators.md
++++ b/gcc/config/riscv/vector-iterators.md
+@@ -79,6 +79,7 @@
+   UNSPEC_VCOMPRESS
+   UNSPEC_VLEFF
+   UNSPEC_MODIFY_VL
++  UNSPEC_READ_VL
+ 
+   UNSPEC_VFFMA
+ 
+diff --git a/gcc/config/riscv/vector.md b/gcc/config/riscv/vector.md
+index e92a51b5aab5..64bea4ed8a82 100644
+--- a/gcc/config/riscv/vector.md
++++ b/gcc/config/riscv/vector.md
+@@ -8318,21 +8318,13 @@
+ ;; - 7.7. Unit-stride Fault-Only-First Loads
+ ;; -------------------------------------------------------------------------------
+ 
+-(define_insn "read_vlsi"
+-  [(set (match_operand:SI 0 "register_operand" "=r")
+-	(reg:SI VL_REGNUM))]
++(define_insn "@read_vl<mode>"
++  [(set (match_operand:P 0 "register_operand" "=r")
++	(unspec:P [(reg:SI VL_REGNUM)] UNSPEC_READ_VL))]
+   "TARGET_VECTOR"
+   "csrr\t%0,vl"
+   [(set_attr "type" "rdvl")
+-   (set_attr "mode" "SI")])
+-
+-(define_insn "read_vldi_zero_extend"
+-  [(set (match_operand:DI 0 "register_operand" "=r")
+-	(zero_extend:DI (reg:SI VL_REGNUM)))]
+-  "TARGET_VECTOR && TARGET_64BIT"
+-  "csrr\t%0,vl"
+-  [(set_attr "type" "rdvl")
+-   (set_attr "mode" "DI")])
++   (set_attr "mode" "<MODE>")])
+ 
+ (define_insn "@pred_fault_load<mode>"
+   [(set (match_operand:V 0 "register_operand"              "=vd,    vd,    vr,    vr")
+@@ -8362,6 +8354,36 @@
+   [(set_attr "type" "vldff")
+    (set_attr "mode" "<MODE>")])
+ 
++(define_insn "@pred_fault_load_set_vl<V_VLS:mode><P:mode>"
++  [(set (match_operand:V_VLS 0 "register_operand"	       "=  vd,    vd,    vr,    vr")
++	(if_then_else:V_VLS
++	  (unspec:<V_VLS:VM>
++	    [(match_operand:<V_VLS:VM> 1 "vector_mask_operand" "   vm,    vm,   Wc1,   Wc1")
++	     (match_operand 4 "vector_length_operand"          "  rvl,   rvl,   rvl,   rvl")
++	     (match_operand 5 "const_int_operand"              "    i,     i,     i,     i")
++	     (match_operand 6 "const_int_operand"              "    i,     i,     i,     i")
++	     (match_operand 7 "const_int_operand"              "    i,     i,     i,     i")
++	     (reg:SI VL_REGNUM)
++	     (reg:SI VTYPE_REGNUM)] UNSPEC_VPREDICATE)
++	  (unspec:V_VLS
++	    [(match_operand:V_VLS 3 "memory_operand"           "    m,     m,     m,     m")] UNSPEC_VLEFF)
++	  (match_operand:V_VLS 2 "vector_merge_operand"        "   vu,     0,    vu,     0")))
++   (set (reg:SI VL_REGNUM)
++	  (unspec:SI
++	    [(if_then_else:V_VLS
++	       (unspec:<V_VLS:VM>
++		[(match_dup 1) (match_dup 4) (match_dup 5)
++		 (match_dup 6) (match_dup 7)
++		 (reg:SI VL_REGNUM) (reg:SI VTYPE_REGNUM)] UNSPEC_VPREDICATE)
++	       (unspec:V_VLS [(match_dup 3)] UNSPEC_VLEFF)
++	       (match_dup 2))] UNSPEC_MODIFY_VL))
++   (set (match_operand:P 8 "register_operand"		       "=   r,     r,     r,     r")
++	(unspec:P [(reg:SI VL_REGNUM)] UNSPEC_READ_VL))]
++  "TARGET_VECTOR"
++  "vle<sew>ff.v\t%0,%3%p1"
++  [(set_attr "type" "vldff")
++   (set_attr "mode" "<V_VLS:MODE>")])
++
+ 
+ ;; -------------------------------------------------------------------------------
+ ;; ---- Predicated Segment loads/stores
+@@ -8479,6 +8501,39 @@
+   [(set_attr "type" "vlsegdff")
+    (set_attr "mode" "<MODE>")])
+ 
++(define_insn "@pred_fault_load_set_vl<VT:mode><P:mode>"
++  [(set (match_operand:VT 0 "register_operand"              "=  vr,    vr,    vd")
++	(if_then_else:VT
++	  (unspec:<VT:VM>
++	    [(match_operand:<VT:VM> 1 "vector_mask_operand" "vmWc1,   Wc1,    vm")
++	     (match_operand 4 "vector_length_operand"       "  rvl,   rvl,   rvl")
++	     (match_operand 5 "const_int_operand"           "    i,     i,     i")
++	     (match_operand 6 "const_int_operand"           "    i,     i,     i")
++	     (match_operand 7 "const_int_operand"           "    i,     i,     i")
++	     (reg:SI VL_REGNUM)
++	     (reg:SI VTYPE_REGNUM)] UNSPEC_VPREDICATE)
++	  (unspec:VT
++	    [(match_operand:VT 3 "memory_operand"	    "    m,     m,     m")
++	     (mem:BLK (scratch))] UNSPEC_VLEFF)
++	  (match_operand:VT 2 "vector_merge_operand"        "    0,    vu,    vu")))
++   (set (reg:SI VL_REGNUM)
++        (unspec:SI
++          [(if_then_else:VT
++	     (unspec:<VT:VM>
++	       [(match_dup 1) (match_dup 4) (match_dup 5)
++	        (match_dup 6) (match_dup 7)
++	        (reg:SI VL_REGNUM)
++	        (reg:SI VTYPE_REGNUM)] UNSPEC_VPREDICATE)
++	     (unspec:VT
++	        [(match_dup 3) (mem:BLK (scratch))] UNSPEC_VLEFF)
++	     (match_dup 2))] UNSPEC_MODIFY_VL))
++   (set (match_operand:P 8 "register_operand"		    "=   r,     r,     r")
++	(unspec:P [(reg:SI VL_REGNUM)] UNSPEC_READ_VL))]
++  "TARGET_VECTOR"
++  "vlseg<nf>e<sew>ff.v\t%0,%3%p1"
++  [(set_attr "type" "vlsegdff")
++   (set_attr "mode" "<VT:MODE>")])
++
+ (define_insn "@pred_indexed_<order>load<V1T:mode><RATIO64I:mode>"
+   [(set (match_operand:V1T 0 "register_operand"           "=&vr,  &vr")
+ 	(if_then_else:V1T
+diff --git a/gcc/testsuite/g++.target/riscv/rvv/base/pr123806.C b/gcc/testsuite/g++.target/riscv/rvv/base/pr123806.C
+new file mode 100644
+index 000000000000..b4c0d22a3264
+--- /dev/null
++++ b/gcc/testsuite/g++.target/riscv/rvv/base/pr123806.C
+@@ -0,0 +1,25 @@
++/* { dg-do run */
++/* { dg-require-effective-target riscv_v_ok } */
++/* { dg-add-options riscv_v } */
++
++#include <riscv_vector.h>
++#include <vector>
++
++int8_t a[5], d[5], c[5], b[5];
++int main() {
++  for (size_t e = 0, avl = 1; avl > 0;) {
++    size_t f = __riscv_vsetvl_e8m1(avl);
++    vint8m1_t g = __riscv_vle8_v_i8m1(&a[e], f);
++    vint8mf2_t i = __riscv_vle8ff(
++        __riscv_vlm_v_b16(std::vector<uint8_t>((f + 7) / 8, 5).data(), f),
++        &b[e], &f, f);
++    vint8m1_t j = __riscv_vle8_v_i8m1(&c[e], f);
++    vint8m1_t k = __riscv_vredxor_tu(g, i, j, f);
++    __riscv_vse8_v_i8m1(&d[e], k, f);
++    avl -= f;
++
++    if (f != 1 && avl != 0)
++      __builtin_abort ();
++    break;
++  }
++}
+diff --git a/gcc/testsuite/g++.target/riscv/rvv/base/pr123808-2.C b/gcc/testsuite/g++.target/riscv/rvv/base/pr123808-2.C
+new file mode 100644
+index 000000000000..c439b31800be
+--- /dev/null
++++ b/gcc/testsuite/g++.target/riscv/rvv/base/pr123808-2.C
+@@ -0,0 +1,51 @@
++/* { dg-do run } */
++/* { dg-require-effective-target riscv_v_ok } */
++/* { dg-add-options riscv_v } */
++/* { dg-additional-options "-O0" } */
++
++#include <riscv_vector.h>
++#include <vector>
++#define a 36
++
++uint8_t e[a], x[a];
++int64_t f[a], g[a], l[a];
++float j[a], k[a], m[a];
++
++int main() {
++  for (int i = 0; i < a; ++i) { e[i]=1; g[i] = 86; x[i] = 86; }
++  for (size_t n = 0, avl = a; avl;) {
++    size_t o = __riscv_vsetvl_e64m8(avl);
++    vuint8m1_t p = __riscv_vle8_v_u8m1(&e[n], o);
++    vbool8_t q = __riscv_vmseq_vx_u8m1_b8(p, 1, o);
++    vuint64m8_t r = __riscv_vsll_vx_u64m8(__riscv_vid_v_u64m8(o), 3, o);
++    vint64m8_t s = __riscv_vluxei64_v_i64m8_tum(
++        __riscv_vlm_v_b8(std::vector<uint8_t>(o + 7).data(), o),
++        __riscv_vmv_v_x_i64m8(0, __riscv_vsetvlmax_e16m2()), &f[n], r, o);
++    vuint32m4_t t = __riscv_vsll_vx_u32m4(__riscv_vid_v_u32m4(o), 3, o);
++    vint64m8_t u = __riscv_vluxei32(&g[n], t, o);
++    vbool8_t v = __riscv_vlm_v_b8(&x[n], o);
++    __riscv_vle32ff_v_f32m4_mu(q, __riscv_vfmv_v_f_f32m4(0, __riscv_vsetvlmax_e8m1()), &j[n], &o, o);
++    vfloat32m1_t w = __riscv_vfmv_v_f_f32m1(0, __riscv_vsetvlmax_e32m1());
++    vfloat32m1_t aa = __riscv_vle32_v_f32m1_tu(w, &k[n], o);
++    s = __riscv_vcompress_vm_i64m8_tu(s, u, v, o);
++    vfloat32mf2_t ab = __riscv_vlmul_trunc_v_f32m1_f32mf2(aa);
++    vuint64m8_t ac = __riscv_vsll_vx_u64m8(__riscv_vid_v_u64m8(o), 3, o);
++    __riscv_vsuxei64_v_i64m8(&l[n], ac, s, o);
++    __riscv_vse32_v_f32mf2(&m[n], ab, o);
++    avl -= o;
++  }
++
++  /* Results are inconsistent between different VLENs.
++     "n" never changes so we will always store into l[0...] with a length of
++     "o".  What differs is "s".
++     At zvl128b and zvl256b we have more than one loop iteration and
++     "s" will be {86, 86, -1, -1} or {86, 86, 0, 0} depending on the
++     tail/mask policy.
++     At zvl512b there is only one iteration and s = {86, 86, 86, ...}.
++     I cross checked with clang and this seems correct.
++     Therefore only check l's fifth element.
++     The actual PR is about fault-only-first loads and the wrong code
++     caused element 5 to be incorrect as well.  */
++  if (l[5] != 86)
++    __builtin_abort ();
++}
+diff --git a/gcc/testsuite/g++.target/riscv/rvv/base/pr123808.C b/gcc/testsuite/g++.target/riscv/rvv/base/pr123808.C
+new file mode 100644
+index 000000000000..f3bce35ed0c9
+--- /dev/null
++++ b/gcc/testsuite/g++.target/riscv/rvv/base/pr123808.C
+@@ -0,0 +1,50 @@
++/* { dg-do run } */
++/* { dg-require-effective-target riscv_v_ok } */
++/* { dg-add-options riscv_v } */
++
++#include <riscv_vector.h>
++#include <vector>
++#define a 36
++
++uint8_t e[a], x[a];
++int64_t f[a], g[a], l[a];
++float j[a], k[a], m[a];
++
++int main() {
++  for (int i = 0; i < a; ++i) { e[i]=1; g[i] = 86; x[i] = 86; }
++  for (size_t n = 0, avl = a; avl;) {
++    size_t o = __riscv_vsetvl_e64m8(avl);
++    vuint8m1_t p = __riscv_vle8_v_u8m1(&e[n], o);
++    vbool8_t q = __riscv_vmseq_vx_u8m1_b8(p, 1, o);
++    vuint64m8_t r = __riscv_vsll_vx_u64m8(__riscv_vid_v_u64m8(o), 3, o);
++    vint64m8_t s = __riscv_vluxei64_v_i64m8_tum(
++        __riscv_vlm_v_b8(std::vector<uint8_t>(o + 7).data(), o),
++        __riscv_vmv_v_x_i64m8(0, __riscv_vsetvlmax_e16m2()), &f[n], r, o);
++    vuint32m4_t t = __riscv_vsll_vx_u32m4(__riscv_vid_v_u32m4(o), 3, o);
++    vint64m8_t u = __riscv_vluxei32(&g[n], t, o);
++    vbool8_t v = __riscv_vlm_v_b8(&x[n], o);
++    __riscv_vle32ff_v_f32m4_mu(q, __riscv_vfmv_v_f_f32m4(0, __riscv_vsetvlmax_e8m1()), &j[n], &o, o);
++    vfloat32m1_t w = __riscv_vfmv_v_f_f32m1(0, __riscv_vsetvlmax_e32m1());
++    vfloat32m1_t aa = __riscv_vle32_v_f32m1_tu(w, &k[n], o);
++    s = __riscv_vcompress_vm_i64m8_tu(s, u, v, o);
++    vfloat32mf2_t ab = __riscv_vlmul_trunc_v_f32m1_f32mf2(aa);
++    vuint64m8_t ac = __riscv_vsll_vx_u64m8(__riscv_vid_v_u64m8(o), 3, o);
++    __riscv_vsuxei64_v_i64m8(&l[n], ac, s, o);
++    __riscv_vse32_v_f32mf2(&m[n], ab, o);
++    avl -= o;
++  }
++
++  /* Results are inconsistent between different VLENs.
++     "n" never changes so we will always store into l[0...] with a length of
++     "o".  What differs is "s".
++     At zvl128b and zvl256b we have more than one loop iteration and
++     "s" will be {86, 86, -1, -1} or {86, 86, 0, 0} depending on the
++     tail/mask policy.
++     At zvl512b there is only one iteration and s = {86, 86, 86, ...}.
++     I cross checked with clang and this seems correct.
++     Therefore only check l's fifth element.
++     The actual PR is about fault-only-first loads and the wrong code
++     caused element 5 to be incorrect as well.  */
++  if (l[5] != 86)
++    __builtin_abort ();
++}
+-- 
+2.43.7
+
+

@@ -1,0 +1,87 @@
+From 9f98c2eeaff40359521270d544e8ecea9534bbff Mon Sep 17 00:00:00 2001
+From: Robin Dapp <rdapp@oss.qualcomm.com>
+Date: Tue, 3 Feb 2026 21:24:33 +0100
+Subject: [PATCH] math-opts: Only build FMA when use is in addends. [PR123940]
+
+When looking for an FMA opportunity we can find a multiplication use in an
+else operand:
+
+  vect_pretmp_50.23_121 = MEM <vector(2) charD.2> [(charD.2 *)&dD.2916 + 14B];
+  vect__28.25_123 = vect_pretmp_50.23_121 * { 2, 2 };
+  vect_patt_99.26_124 = .COND_ADD ({ -1, -1 }, vect_pretmp_50.23_121, { 14, 15 }, vect__28.25_123);
+
+and build it:
+  vect_pretmp_50.23_121 = MEM <vector(2) charD.2> [(charD.2 *)&dD.2916 + 14B];
+  vect_patt_99.26_124 = .FMA (vect_pretmp_50.23_121, { 2, 2 }, vect_pretmp_50.23_121);
+
+This patch checks if the use is in one of the addends.
+
+	PR tree-optimization/123940
+
+gcc/ChangeLog:
+
+	* tree-ssa-math-opts.cc (convert_mult_to_fma): Check
+	multiplication result is an addend.
+
+gcc/testsuite/ChangeLog:
+
+	* gcc.target/riscv/rvv/autovec/pr123940.c: New test.
+
+Signed-off-by: Robin Dapp <rdapp@oss.qualcomm.com>
+(cherry picked from commit bd67b5a8c90194f7499981bbbc247fd45f8de6b9)
+---
+ .../gcc.target/riscv/rvv/autovec/pr123940.c   | 25 +++++++++++++++++++
+ gcc/tree-ssa-math-opts.cc                     |  4 +++
+ 2 files changed, 29 insertions(+)
+ create mode 100644 gcc/testsuite/gcc.target/riscv/rvv/autovec/pr123940.c
+
+diff --git a/gcc/testsuite/gcc.target/riscv/rvv/autovec/pr123940.c b/gcc/testsuite/gcc.target/riscv/rvv/autovec/pr123940.c
+new file mode 100644
+index 000000000000..329e598f0683
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/riscv/rvv/autovec/pr123940.c
+@@ -0,0 +1,25 @@
++/* { dg-do run } */
++/* { dg-options "-O3 -march=rv64gcv -mabi=lp64d -std=gnu99 -fdump-tree-widening_mul" } */
++
++long a;
++long long b;
++_Bool c[16];
++char d[16];
++char e = 0;
++int f = 1;
++
++int main ()
++{
++  for (long i = 0; i < 16; ++i)
++    c[i] = 40;
++  for (int j = 0; j < 16; j++)
++    {
++      e = (c[j] ? j : d[j]) + d[j];
++      a = f * c[j] ?: ~0;
++    }
++  b = (int) e;
++  if (b != 15)
++    __builtin_abort ();
++}
++
++/* { dg-final { scan-tree-dump-not "FMA" "widening_mul" } } */
+diff --git a/gcc/tree-ssa-math-opts.cc b/gcc/tree-ssa-math-opts.cc
+index 87eec0fb0d36..8a7da7546f21 100644
+--- a/gcc/tree-ssa-math-opts.cc
++++ b/gcc/tree-ssa-math-opts.cc
+@@ -3464,6 +3464,10 @@ convert_mult_to_fma (gimple *mul_stmt, tree op1, tree op2,
+ 					      &else_value, &len, &bias))
+ 	return false;
+ 
++      /* The multiplication result must be one of the addition operands.  */
++      if (ops[0] != result && ops[1] != result)
++	return false;
++
+       switch (code)
+ 	{
+ 	case MINUS_EXPR:
+-- 
+2.43.7
+
+

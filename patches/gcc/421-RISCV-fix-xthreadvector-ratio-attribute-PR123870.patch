@@ -1,0 +1,88 @@
+From 0cf6280a73bfee88a9d0bd5358070679d2ebc84c Mon Sep 17 00:00:00 2001
+From: Robin Dapp <rdapp@oss.qualcomm.com>
+Date: Wed, 4 Feb 2026 21:20:22 +0100
+Subject: [PATCH] RISC-V: Fix xtheadvector ratio attribute. [PR123870]
+
+As reported in PR123870 we miscompile an RVV-optimized jpeg-quantsmooth
+with xtheadvector.  The core issue is that we forget to emit a vsetvl
+before a -fschedule-insn induced spill restore.  Spills are usually
+handled by full-register loads and stores but xtheadvector doesn't have
+those.  Instead, the regular loads and stores are used which differ from
+full-register loads/store in the fact that they don't encode the LMUL
+in the instruction directly and thus require a proper SEW and LMUL in
+the vtype rather than just the ratio.
+
+This patch makes vlds have an SEW/LMUL demand instead of a "ratio only"
+demand for theadvector.
+
+I didn't manage to come up with a simple test case, though.
+PR123969 has a test but it won't fail without slight changes to the
+16 codebase.  I'm still adding it for documentation and backport
+reasons.
+
+Regtested on rv64gcv_zvl512b.
+
+	PR target/123870
+	PR target/123969
+
+gcc/ChangeLog:
+
+	* config/riscv/vector.md: Add vlds to "no ratio" for
+	theadvector.
+
+gcc/testsuite/ChangeLog:
+
+	* gcc.target/riscv/rvv/xtheadvector/pr123969.c: New test.
+
+Signed-off-by: Robin Dapp <rdapp@oss.qualcomm.com>
+(cherry picked from commit cca779f6b4cfc35c7c771e0604c915b2eecb6236)
+---
+ gcc/config/riscv/vector.md                    |  4 ++--
+ .../riscv/rvv/xtheadvector/pr123969.c         | 19 +++++++++++++++++++
+ 2 files changed, 21 insertions(+), 2 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.target/riscv/rvv/xtheadvector/pr123969.c
+
+diff --git a/gcc/config/riscv/vector.md b/gcc/config/riscv/vector.md
+index 64bea4ed8a82..9e6e9d5be2a1 100644
+--- a/gcc/config/riscv/vector.md
++++ b/gcc/config/riscv/vector.md
+@@ -491,8 +491,8 @@
+ 			  vaeskf1,vaeskf2,vaesz,vsha2ms,vsha2ch,vsha2cl,vsm4k,vsm4r,\
+ 			  vsm3me,vsm3c,vfncvtbf16,vfwcvtbf16,vfwmaccbf16")
+ 	   (const_int INVALID_ATTRIBUTE)
+-	(and (eq_attr "type" "vlde,vste,vlsegde,vssegte,vlsegds,vssegts,\
+-			       vlsegdff,vssegtux,vlsegdox,vlsegdux")
++	(and (eq_attr "type" "vlde,vste,vlds,vsts,vlsegde,vssegte,vlsegds,\
++			      vssegts,vlsegdff,vssegtux,vlsegdox,vlsegdux")
+ 	      (match_test "TARGET_XTHEADVECTOR"))
+ 	   (const_int INVALID_ATTRIBUTE)
+ 	 (eq_attr "mode" "RVVM8QI,RVVM1BI") (const_int 1)
+diff --git a/gcc/testsuite/gcc.target/riscv/rvv/xtheadvector/pr123969.c b/gcc/testsuite/gcc.target/riscv/rvv/xtheadvector/pr123969.c
+new file mode 100644
+index 000000000000..ede1a36491af
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/riscv/rvv/xtheadvector/pr123969.c
+@@ -0,0 +1,19 @@
++/* { dg-do compile } */
++/* { dg-options "-O3 -march=rv64gcxtheadvector -mabi=lp64d -mtune=rocket" } */
++
++/* In order to trigger the issue strided broadcast must be enabled
++   and we must broadcast integer memory operands via strided load.
++   This is disabled and there is currently no param to change it
++   so the test will pass either way.  */
++
++#include <riscv_vector.h>
++
++void test(int16_t *dst, long vl) {
++  vuint16m1_t v6 = __riscv_vmv_v_x_u16m1(*dst, vl);
++  vfloat32m2_t s0 = __riscv_vfmv_v_f_f32m2(0, vl);
++  __riscv_vse16_v_u16m1(dst, v6, vl);
++  __riscv_vse32_v_f32m2((float*)dst, s0, vl);
++}
++
++/* { dg-final { scan-assembler-times "th.vsetvli\tzero,a1,e16,m1" 2 } } */
++/* { dg-final { scan-assembler-times "th.vsetvli\tzero,a1,e32,m2" 2 } } */
+-- 
+2.43.7
+
+

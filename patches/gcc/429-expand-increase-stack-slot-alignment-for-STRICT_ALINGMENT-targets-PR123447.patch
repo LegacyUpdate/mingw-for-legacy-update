@@ -1,0 +1,112 @@
+From 73dfb2f1f1a1bfc531d7c338f4b577270169263a Mon Sep 17 00:00:00 2001
+From: Pengfei Li <Pengfei.Li2@arm.com>
+Date: Mon, 26 Jan 2026 16:09:42 +0000
+Subject: [PATCH] expand: Increase stack slot alignment for STRICT_ALIGNMENT
+ targets [PR123447]
+
+PR123447 reports an ICE on AArch64 with "-O2 -mstrict-align" in subreg
+lowering while decomposing the following multiword store RTL:
+
+(insn 12 11 13 2 (set (mem/c:XI (plus:DI (reg/f:DI 64 sfp)
+                (const_int -96 [0xffffffffffffffa0])) [0  S64 A8])
+        (reg:XI 103)) "a.c":14:6 4861 {*aarch64_movxi}
+
+This RTL originates from expanding the following GIMPLE statement:
+
+_1 = BIT_FIELD_REF <{ 9, -64497, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }, 256, 0>;
+
+The operand is a constant _Decimal64 vector with BLKmode, so expand has
+to materialize it in memory. Current get_object_alignment() returns a
+1-byte guaranteed alignment for this VECTOR_CST, as indicated by A8 in
+the RTL dump above. However, with "-mstrict-align" enabled, later subreg
+lowering pass expects at least 64-bit alignment when it constructs a new
+RTX to decompose the store into pieces. Because the original alignment
+is too small, simplify_gen_subreg() returns NULL_RTX and an assertion is
+hit.
+
+This patch increases the stack slot alignment for STRICT_ALIGNMENT
+targets, when the operand is forced into memory. The increased alignment
+is capped by MAX_SUPPORTED_STACK_ALIGNMENT so it won't be too large.
+
+Bootstrapped and tested on aarch64-linux-gnu and x86_64-linux-gnu.
+
+gcc/ChangeLog:
+
+	PR middle-end/123447
+	* expr.cc (expand_expr_real_1): Increase stack slot alignment
+	for STRICT_ALIGNMENT targets.
+
+gcc/testsuite/ChangeLog:
+
+	PR middle-end/123447
+	* gcc.dg/pr123447.c: New test.
+---
+ gcc/expr.cc                     | 21 +++++++++++++++++----
+ gcc/testsuite/gcc.dg/pr123447.c | 19 +++++++++++++++++++
+ 2 files changed, 36 insertions(+), 4 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.dg/pr123447.c
+
+diff --git a/gcc/expr.cc b/gcc/expr.cc
+index e76acdea77c8..c83c5616d9fd 100644
+--- a/gcc/expr.cc
++++ b/gcc/expr.cc
+@@ -12260,13 +12260,26 @@ expand_expr_real_1 (tree exp, rtx target, machine_mode tmode,
+ 	   and need be, put it there.  */
+ 	else if (CONSTANT_P (op0) || (!MEM_P (op0) && must_force_mem))
+ 	  {
++	    machine_mode tem_mode = TYPE_MODE (TREE_TYPE (tem));
+ 	    poly_int64 size;
+ 	    if (!poly_int_tree_p (TYPE_SIZE_UNIT (TREE_TYPE (tem)), &size))
+ 	      size = max_int_size_in_bytes (TREE_TYPE (tem));
+-	    memloc = assign_stack_local (TYPE_MODE (TREE_TYPE (tem)), size,
+-					 TREE_CODE (tem) == SSA_NAME
+-					 ? TYPE_ALIGN (TREE_TYPE (tem))
+-					 : get_object_alignment (tem));
++	    unsigned int align = TREE_CODE (tem) == SSA_NAME
++				 ? TYPE_ALIGN (TREE_TYPE (tem))
++				 : get_object_alignment (tem);
++	    if (STRICT_ALIGNMENT)
++	      {
++		/* For STRICT_ALIGNMENT targets, when we force the operand to
++		   memory, we may need to increase the alignment to meet the
++		   expectation in later RTL lowering passes.  The increased
++		   alignment is capped by MAX_SUPPORTED_STACK_ALIGNMENT.  */
++		if (tem_mode != BLKmode)
++		  align = MAX (align, GET_MODE_ALIGNMENT (tem_mode));
++		else
++		  align = MAX (align, TYPE_ALIGN (TREE_TYPE (tem)));
++		align = MIN (align, (unsigned) MAX_SUPPORTED_STACK_ALIGNMENT);
++	      }
++	    memloc = assign_stack_local (tem_mode, size, align);
+ 	    emit_move_insn (memloc, op0);
+ 	    op0 = memloc;
+ 	    clear_mem_expr = true;
+diff --git a/gcc/testsuite/gcc.dg/pr123447.c b/gcc/testsuite/gcc.dg/pr123447.c
+new file mode 100644
+index 000000000000..b2ee1473758f
+--- /dev/null
++++ b/gcc/testsuite/gcc.dg/pr123447.c
+@@ -0,0 +1,19 @@
++/* PR middle-end/123447 */
++/* { dg-do compile { target aarch64*-*-* } } */
++/* { dg-options "-O2 -mstrict-align" } */
++
++typedef __attribute__((__vector_size__(32))) _Decimal64 D;
++typedef __attribute__((__vector_size__(64))) int V;
++typedef __attribute__((__vector_size__(64))) _Decimal64 D64;
++
++D d;
++
++void foo1 () {
++  D _4;
++  D64 _5;
++  V _1;
++  _1 = (V) { 9, -64497, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
++  _5 = (D64) _1;
++  _4 = __builtin_shufflevector (_5, _5, 0, 1, 2, 3);
++  d = _4;
++}
+-- 
+2.43.7
+
+

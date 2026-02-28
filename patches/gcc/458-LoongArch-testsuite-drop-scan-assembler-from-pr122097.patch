@@ -1,0 +1,34 @@
+From d7e89271ec6dac05574200e1e9a2d11e0ff467e7 Mon Sep 17 00:00:00 2001
+From: Xi Ruoyao <xry111@xry111.site>
+Date: Fri, 27 Feb 2026 10:55:16 +0800
+Subject: [PATCH] LoongArch: testsuite: drop scan-assembler from pr122097.c
+
+This test case is backported from 16, but in 14/15 the tree optimization
+doesn't produce a .COPYSIGN from negative constant vector.  Thus
+scan-assembler fails in 14/15.
+
+Simply drop it for 14/15.
+
+gcc/testsuite/
+
+	PR target/122097
+	* gcc.target/loongarch/pr122097.c (dg-final): Remove.
+---
+ gcc/testsuite/gcc.target/loongarch/pr122097.c | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/gcc/testsuite/gcc.target/loongarch/pr122097.c b/gcc/testsuite/gcc.target/loongarch/pr122097.c
+index 5d32b191baf1..4ed0375bb619 100644
+--- a/gcc/testsuite/gcc.target/loongarch/pr122097.c
++++ b/gcc/testsuite/gcc.target/loongarch/pr122097.c
+@@ -1,6 +1,5 @@
+ /* { dg-do compile } */
+ /* { dg-options "-O3 -mabi=lp64d -mlsx" } */
+-/* { dg-final { scan-assembler "vbitseti\.d\t\\\$vr\[0-9\]+,\\\$vr\[0-9\]+,63" } } */
+ 
+ typedef long unsigned int size_t;
+ typedef unsigned char simde__mmask8;
+-- 
+2.43.7
+
+

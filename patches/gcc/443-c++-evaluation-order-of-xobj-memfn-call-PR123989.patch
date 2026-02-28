@@ -1,0 +1,77 @@
+From a918fbf3114d1663ac8d96c3fbcc29c790ad6350 Mon Sep 17 00:00:00 2001
+From: Patrick Palka <ppalka@redhat.com>
+Date: Thu, 12 Feb 2026 14:44:56 -0500
+Subject: [PATCH] c++: evaluation order of xobj memfn call [PR123989]
+
+The object argument of an xobj memfn call needs to be evaluated before its
+formal arguments, like with an iobj memfn call.  This patch generalizes the
+existing such handling in cp_gimplify_expr for METHOD_TYPE callees to also
+accept xobj memfn callees.
+
+	PR c++/123989
+
+gcc/cp/ChangeLog:
+
+	* cp-gimplify.cc (cp_gimplify_expr) <case CALL_EXPR>: Evaluate
+	the object argument of an xobj memfn call first too.
+
+gcc/testsuite/ChangeLog:
+
+	* g++.dg/cpp23/explicit-obj-eval-order.C: New test.
+
+Reviewed-by: Marek Polacek <polacek@redhat.com>
+Reviewed-by: Jason Merrill <jason@redhat.com>
+(cherry picked from commit 0d51ed19504bcaa540763423763bb97227ed6c1c)
+---
+ gcc/cp/cp-gimplify.cc                            | 10 +++++++++-
+ .../g++.dg/cpp23/explicit-obj-eval-order.C       | 16 ++++++++++++++++
+ 2 files changed, 25 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/g++.dg/cpp23/explicit-obj-eval-order.C
+
+diff --git a/gcc/cp/cp-gimplify.cc b/gcc/cp/cp-gimplify.cc
+index 5363ec83ff41..202a83eafb2f 100644
+--- a/gcc/cp/cp-gimplify.cc
++++ b/gcc/cp/cp-gimplify.cc
+@@ -845,7 +845,15 @@ cp_gimplify_expr (tree *expr_p, gimple_seq *pre_p, gimple_seq *post_p)
+ 	  tree fntype = TREE_TYPE (CALL_EXPR_FN (*expr_p));
+ 	  if (INDIRECT_TYPE_P (fntype))
+ 	    fntype = TREE_TYPE (fntype);
+-	  if (TREE_CODE (fntype) == METHOD_TYPE)
++	  tree decl = cp_get_callee_fndecl_nofold (*expr_p);
++	  /* We can't just rely on 'decl' because virtual function callees
++	     are expressed as OBJ_TYPE_REF.  Note that the xobj memfn check
++	     will also hold for calls of the form (&A::f)(a, ...) which does
++	     not require such sequencing, though it's allowed under
++	     "indeterminately sequenced".  */
++	  if (TREE_CODE (fntype) == METHOD_TYPE
++	      || (decl && DECL_LANG_SPECIFIC (decl)
++		  && DECL_XOBJ_MEMBER_FUNCTION_P (decl)))
+ 	    {
+ 	      int nargs = call_expr_nargs (*expr_p);
+ 	      bool side_effects = false;
+diff --git a/gcc/testsuite/g++.dg/cpp23/explicit-obj-eval-order.C b/gcc/testsuite/g++.dg/cpp23/explicit-obj-eval-order.C
+new file mode 100644
+index 000000000000..7ce81f32cc4b
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/cpp23/explicit-obj-eval-order.C
+@@ -0,0 +1,16 @@
++// PR c++/123989
++// { dg-do run { target c++23 } }
++
++struct A {
++  int m = 42;
++
++  void f(this A self, int n) {
++    if (self.m != 42 || n != 43)
++      __builtin_abort();
++  }
++};
++
++int main() {
++  A a;
++  a.f(++a.m);
++}
+-- 
+2.43.7
+
+
