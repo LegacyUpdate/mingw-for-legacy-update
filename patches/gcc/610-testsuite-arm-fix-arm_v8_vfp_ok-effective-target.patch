@@ -1,0 +1,204 @@
+From c49ebbab249a6216af5399c003324cc00a1a68fb Mon Sep 17 00:00:00 2001
+From: Christophe Lyon <christophe.lyon@linaro.org>
+Date: Mon, 13 Oct 2025 20:56:36 +0000
+Subject: [PATCH] testsuite: arm: fix arm_v8_vfp_ok effective-target
+
+This effective-target does not need to check for arm32, but needs to
+force -march=armv8-a, otherwise -mfpu=fp-armv8 has no useful meaning.
+
+While fixing that, introduce
+check_effective_target_arm_v8_vfp_ok_nocache, so that arm_v8_vfp_ok
+behaves like arm_v8_neon_ok and many other effective-targets.
+
+Without this patch, gcc.target/arm/attr-neon.c fails with a toolchain
+configured with --with-mode=thumb --with-cpu=cortex-m0
+--with-float=soft because arm_v8_vfp returns "" because arm32 is
+false.  As a result, the testcase is compiled with the options needed
+for arm_neon_ok, which generates an extra ".fpu neon" directive
+compared to what is expected.
+
+The patch removes -march=armv8-a from dg-options in lceil-vcvt_1.c,
+lfloor-vcvt_1.c lround-vcvt_1.c and vrinta-ce.c, because this could
+override what arm_v8_vfp_ok detected (and lead to 'error: selected
+architecture lacks an FPU').
+
+With this patch, the test passes, and several others are enabled:
+gcc.target/arm/lceil-vcvt_1.c
+gcc.target/arm/lfloor-vcvt_1.c
+gcc.target/arm/lround-vcvt_1.c
+gcc.target/arm/pr69135_1.c
+gcc.target/arm/vmaxnmdf.c
+gcc.target/arm/vmaxnmsf.c
+gcc.target/arm/vminnmdf.c
+gcc.target/arm/vminnmsf.c
+gcc.target/arm/vrinta-ce.c
+gcc.target/arm/vrintaf32.c
+gcc.target/arm/vrintaf64.c
+gcc.target/arm/vrintmf32.c
+gcc.target/arm/vrintmf64.c
+gcc.target/arm/vrintpf32.c
+gcc.target/arm/vrintpf64.c
+gcc.target/arm/vrintrf32.c
+gcc.target/arm/vrintrf64.c
+gcc.target/arm/vrintxf32.c
+gcc.target/arm/vrintxf64.c
+gcc.target/arm/vrintzf32.c
+gcc.target/arm/vrintzf64.c
+gcc.target/arm/vseleqdf.c
+gcc.target/arm/vseleqsf.c
+gcc.target/arm/vselgedf.c
+gcc.target/arm/vselgesf.c
+gcc.target/arm/vselgtdf.c
+gcc.target/arm/vselgtsf.c
+gcc.target/arm/vselledf.c
+gcc.target/arm/vsellesf.c
+gcc.target/arm/vselltdf.c
+gcc.target/arm/vselltsf.c
+gcc.target/arm/vselnedf.c
+gcc.target/arm/vselnesf.c
+gcc.target/arm/vselvcdf.c
+gcc.target/arm/vselvcsf.c
+gcc.target/arm/vselvsdf.c
+gcc.target/arm/vselvssf.c
+
+gcc/testsuite/ChangeLog:
+	* lib/target-supports.exp
+	(check_effective_target_arm_v8_vfp_ok_nocache): New.
+	(check_effective_target_arm_v8_vfp_ok): Call the above helper, and
+	use global flags.
+	(add_options_for_arm_v8_vfp): Use et_arm_v8_vfp_flags.
+	* gcc.target/arm/lceil-vcvt_1.c: Remove -march=armv8-a.
+	* gcc.target/arm/lfloor-vcvt_1.c: Likewise.
+	* gcc.target/arm/lround-vcvt_1.c: Likewise.
+	* gcc.target/arm/vrinta-ce.c: Likewise.
+
+(cherry picked from commit c35bab08191134ada941191d95693597af71270a)
+---
+ gcc/testsuite/gcc.target/arm/lceil-vcvt_1.c  |  2 +-
+ gcc/testsuite/gcc.target/arm/lfloor-vcvt_1.c |  2 +-
+ gcc/testsuite/gcc.target/arm/lround-vcvt_1.c |  2 +-
+ gcc/testsuite/gcc.target/arm/vrinta-ce.c     |  2 +-
+ gcc/testsuite/lib/target-supports.exp        | 46 +++++++++++++++-----
+ 5 files changed, 38 insertions(+), 16 deletions(-)
+
+diff --git a/gcc/testsuite/gcc.target/arm/lceil-vcvt_1.c b/gcc/testsuite/gcc.target/arm/lceil-vcvt_1.c
+index a8afab1a23f1..a8f3729bb892 100644
+--- a/gcc/testsuite/gcc.target/arm/lceil-vcvt_1.c
++++ b/gcc/testsuite/gcc.target/arm/lceil-vcvt_1.c
+@@ -1,7 +1,7 @@
+ /* { dg-do compile } */
+ /* { dg-skip-if "-mpure-code supports M-profile only" { *-*-* } { "-mpure-code" } } */
+ /* { dg-require-effective-target arm_v8_vfp_ok } */
+-/* { dg-options "-O2 -march=armv8-a" } */
++/* { dg-options "-O2" } */
+ /* { dg-add-options arm_v8_vfp } */
+ 
+ int
+diff --git a/gcc/testsuite/gcc.target/arm/lfloor-vcvt_1.c b/gcc/testsuite/gcc.target/arm/lfloor-vcvt_1.c
+index b8eb1b079bfe..5655fbbb2696 100644
+--- a/gcc/testsuite/gcc.target/arm/lfloor-vcvt_1.c
++++ b/gcc/testsuite/gcc.target/arm/lfloor-vcvt_1.c
+@@ -1,7 +1,7 @@
+ /* { dg-do compile } */
+ /* { dg-skip-if "-mpure-code supports M-profile only" { *-*-* } { "-mpure-code" } } */
+ /* { dg-require-effective-target arm_v8_vfp_ok } */
+-/* { dg-options "-O2 -march=armv8-a" } */
++/* { dg-options "-O2" } */
+ /* { dg-add-options arm_v8_vfp } */
+ 
+ int
+diff --git a/gcc/testsuite/gcc.target/arm/lround-vcvt_1.c b/gcc/testsuite/gcc.target/arm/lround-vcvt_1.c
+index 4c52a8320222..799cb8b413a6 100644
+--- a/gcc/testsuite/gcc.target/arm/lround-vcvt_1.c
++++ b/gcc/testsuite/gcc.target/arm/lround-vcvt_1.c
+@@ -1,7 +1,7 @@
+ /* { dg-do compile } */
+ /* { dg-skip-if "-mpure-code supports M-profile only" { *-*-* } { "-mpure-code" } } */
+ /* { dg-require-effective-target arm_v8_vfp_ok } */
+-/* { dg-options "-O2 -march=armv8-a -ffast-math" } */
++/* { dg-options "-O2 -ffast-math" } */
+ /* { dg-add-options arm_v8_vfp } */
+ 
+ int
+diff --git a/gcc/testsuite/gcc.target/arm/vrinta-ce.c b/gcc/testsuite/gcc.target/arm/vrinta-ce.c
+index 092d914b66a3..60da9ec2cbed 100644
+--- a/gcc/testsuite/gcc.target/arm/vrinta-ce.c
++++ b/gcc/testsuite/gcc.target/arm/vrinta-ce.c
+@@ -1,7 +1,7 @@
+ /* { dg-do compile } */
+ /* { dg-skip-if "-mpure-code supports M-profile only" { *-*-* } { "-mpure-code" } } */
+ /* { dg-require-effective-target arm_v8_vfp_ok } */
+-/* { dg-options "-O2 -marm -march=armv8-a" } */
++/* { dg-options "-O2 -marm" } */
+ /* { dg-add-options arm_v8_vfp } */
+ 
+ double foo (double a)
+diff --git a/gcc/testsuite/lib/target-supports.exp b/gcc/testsuite/lib/target-supports.exp
+index a72a78180d5b..b75d41e7e20d 100644
+--- a/gcc/testsuite/lib/target-supports.exp
++++ b/gcc/testsuite/lib/target-supports.exp
+@@ -5062,18 +5062,39 @@ proc check_effective_target_arm_vfp3_ok { } {
+ 
+ # Return 1 if this is an ARM target supporting -mfpu=fp-armv8
+ # -mfloat-abi=softfp.
+-proc check_effective_target_arm_v8_vfp_ok {} {
+-    if { [check_effective_target_arm32] } {
+-	return [check_no_compiler_messages arm_v8_vfp_ok object {
+-	  int foo (void)
+-	  {
+-	     __asm__ volatile ("vrinta.f32.f32 s0, s0");
+-	     return 0;
+-	  }
+-	} "-mfpu=fp-armv8 -mfloat-abi=softfp"]
+-    } else {
+-	return 0
++proc check_effective_target_arm_v8_vfp_ok_nocache {} {
++    global et_arm_v8_vfp_flags
++    set et_arm_v8_vfp_flags ""
++    foreach flags {
++	""
++	"-mfloat-abi=softfp"
++	"-mcpu=unset -march=armv8-a+simd -mfpu=auto"
++	"-mcpu=unset -march=armv8-a+simd -mfpu=auto -mfloat-abi=softfp"
++    } {
++	if { [check_no_compiler_messages_nocache arm_v8_vfp_ok object {
++	    #if __ARM_ARCH < 8
++	    #error not armv8 or later
++	    #endif
++	    #if __ARM_ARCH_PROFILE == 'M'
++	    #error incompatible profile
++	    #endif
++	    int foo (void)
++	    {
++		__asm__ volatile ("vrinta.f32.f32 s0, s0");
++		return 0;
++	    }
++	} "$flags"] } {
++	    set et_arm_v8_vfp_flags "$flags"
++	    return 1
++	}
+     }
++
++    return 0
++}
++
++proc check_effective_target_arm_v8_vfp_ok { } {
++    return [check_cached_effective_target arm_v8_vfp_ok \
++		check_effective_target_arm_v8_vfp_ok_nocache]
+ }
+ 
+ # Return 1 if this is an ARM target supporting -mfpu=vfp
+@@ -5348,7 +5369,8 @@ proc add_options_for_arm_v8_vfp { flags } {
+     if { ! [check_effective_target_arm_v8_vfp_ok] } {
+ 	return "$flags"
+     }
+-    return "$flags -mfpu=fp-armv8 -mfloat-abi=softfp"
++    global et_arm_v8_vfp_flags
++    return "$flags $et_arm_v8_vfp_flags"
+ }
+ 
+ proc add_options_for_arm_v8_neon { flags } {
+-- 
+2.43.7
+
+

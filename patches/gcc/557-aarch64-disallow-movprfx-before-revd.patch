@@ -1,0 +1,1017 @@
+From 60e2819a2a16a08526061557d7a69f4ac17a8ff2 Mon Sep 17 00:00:00 2001
+From: Alice Carlotti <alice.carlotti@arm.com>
+Date: Thu, 12 Mar 2026 17:45:37 +0000
+Subject: [PATCH] aarch64: Disallow movprfx before revd
+
+An architectural relaxation in 2024 (listed in the "Known issues in
+Issue K.a" of the Arm ARM) removed support for revd to be prefixed by a
+movprfx instruction.  This patch removes this (now invalid) codegen.
+
+The patch also makes identical changes to each revd* testsuite file.
+Interestingly, this actually improves codegen for one of the three
+functions.
+
+gcc/ChangeLog:
+
+	* config/aarch64/aarch64-sve2.md (@aarch64_pred_revd<mode>):
+	Remove movprfx alternative.
+	(@cond_revd<mode>): Likewise.
+
+gcc/testsuite/ChangeLog:
+
+	* gcc.target/aarch64/sme/acle-asm/revd_bf16.c: Update checks.
+	* gcc.target/aarch64/sme/acle-asm/revd_f16.c: Likewise.
+	* gcc.target/aarch64/sme/acle-asm/revd_f32.c: Likewise.
+	* gcc.target/aarch64/sme/acle-asm/revd_f64.c: Likewise.
+	* gcc.target/aarch64/sme/acle-asm/revd_s16.c: Likewise.
+	* gcc.target/aarch64/sme/acle-asm/revd_s32.c: Likewise.
+	* gcc.target/aarch64/sme/acle-asm/revd_s64.c: Likewise.
+	* gcc.target/aarch64/sme/acle-asm/revd_s8.c: Likewise.
+	* gcc.target/aarch64/sme/acle-asm/revd_u16.c: Likewise.
+	* gcc.target/aarch64/sme/acle-asm/revd_u32.c: Likewise.
+	* gcc.target/aarch64/sme/acle-asm/revd_u64.c: Likewise.
+	* gcc.target/aarch64/sme/acle-asm/revd_u8.c: Likewise.
+	* gcc.target/aarch64/sve2/acle/asm/revd_bf16.c: Likewise.
+	* gcc.target/aarch64/sve2/acle/asm/revd_f16.c: Likewise.
+	* gcc.target/aarch64/sve2/acle/asm/revd_f32.c: Likewise.
+	* gcc.target/aarch64/sve2/acle/asm/revd_f64.c: Likewise.
+	* gcc.target/aarch64/sve2/acle/asm/revd_s16.c: Likewise.
+	* gcc.target/aarch64/sve2/acle/asm/revd_s32.c: Likewise.
+	* gcc.target/aarch64/sve2/acle/asm/revd_s64.c: Likewise.
+	* gcc.target/aarch64/sve2/acle/asm/revd_s8.c: Likewise.
+	* gcc.target/aarch64/sve2/acle/asm/revd_u16.c: Likewise.
+	* gcc.target/aarch64/sve2/acle/asm/revd_u32.c: Likewise.
+	* gcc.target/aarch64/sve2/acle/asm/revd_u64.c: Likewise.
+	* gcc.target/aarch64/sve2/acle/asm/revd_u8.c: Likewise.
+---
+ gcc/config/aarch64/aarch64-sve2.md                  | 10 ++++------
+ .../gcc.target/aarch64/sme/acle-asm/revd_bf16.c     | 13 ++++++-------
+ .../gcc.target/aarch64/sme/acle-asm/revd_f16.c      | 13 ++++++-------
+ .../gcc.target/aarch64/sme/acle-asm/revd_f32.c      | 13 ++++++-------
+ .../gcc.target/aarch64/sme/acle-asm/revd_f64.c      | 13 ++++++-------
+ .../gcc.target/aarch64/sme/acle-asm/revd_s16.c      | 13 ++++++-------
+ .../gcc.target/aarch64/sme/acle-asm/revd_s32.c      | 13 ++++++-------
+ .../gcc.target/aarch64/sme/acle-asm/revd_s64.c      | 13 ++++++-------
+ .../gcc.target/aarch64/sme/acle-asm/revd_s8.c       | 13 ++++++-------
+ .../gcc.target/aarch64/sme/acle-asm/revd_u16.c      | 13 ++++++-------
+ .../gcc.target/aarch64/sme/acle-asm/revd_u32.c      | 13 ++++++-------
+ .../gcc.target/aarch64/sme/acle-asm/revd_u64.c      | 13 ++++++-------
+ .../gcc.target/aarch64/sme/acle-asm/revd_u8.c       | 13 ++++++-------
+ .../gcc.target/aarch64/sve2/acle/asm/revd_bf16.c    | 13 ++++++-------
+ .../gcc.target/aarch64/sve2/acle/asm/revd_f16.c     | 13 ++++++-------
+ .../gcc.target/aarch64/sve2/acle/asm/revd_f32.c     | 13 ++++++-------
+ .../gcc.target/aarch64/sve2/acle/asm/revd_f64.c     | 13 ++++++-------
+ .../gcc.target/aarch64/sve2/acle/asm/revd_s16.c     | 13 ++++++-------
+ .../gcc.target/aarch64/sve2/acle/asm/revd_s32.c     | 13 ++++++-------
+ .../gcc.target/aarch64/sve2/acle/asm/revd_s64.c     | 13 ++++++-------
+ .../gcc.target/aarch64/sve2/acle/asm/revd_s8.c      | 13 ++++++-------
+ .../gcc.target/aarch64/sve2/acle/asm/revd_u16.c     | 13 ++++++-------
+ .../gcc.target/aarch64/sve2/acle/asm/revd_u32.c     | 13 ++++++-------
+ .../gcc.target/aarch64/sve2/acle/asm/revd_u64.c     | 13 ++++++-------
+ .../gcc.target/aarch64/sve2/acle/asm/revd_u8.c      | 13 ++++++-------
+ 25 files changed, 148 insertions(+), 174 deletions(-)
+
+diff --git a/gcc/config/aarch64/aarch64-sve2.md b/gcc/config/aarch64/aarch64-sve2.md
+index fb9c0fcc39ee..390a0a7f99a7 100644
+--- a/gcc/config/aarch64/aarch64-sve2.md
++++ b/gcc/config/aarch64/aarch64-sve2.md
+@@ -3774,9 +3774,8 @@
+ 	     UNSPEC_REVD_ONLY)]
+ 	  UNSPEC_PRED_X))]
+   "TARGET_SVE2p1_OR_SME"
+-  {@ [ cons: =0 , 1   , 2 ; attrs: movprfx ]
+-     [ w        , Upl , 0 ; *              ] revd\t%0.q, %1/m, %2.q
+-     [ ?&w      , Upl , w ; yes            ] movprfx\t%0, %2\;revd\t%0.q, %1/m, %2.q
++  {@ [ cons: =0 , 1   , 2 ]
++     [ w        , Upl , 0 ] revd\t%0.q, %1/m, %2.q
+   }
+ )
+ 
+@@ -3790,9 +3789,8 @@
+ 	   (match_operand:SVE_FULL 3 "register_operand")]
+ 	  UNSPEC_SEL))]
+   "TARGET_SVE2p1_OR_SME"
+-  {@ [ cons: =0 , 1   , 2 , 3  ; attrs: movprfx ]
+-     [ w        , Upl , w , 0  ; *              ] revd\t%0.q, %1/m, %2.q
+-     [ ?&w      , Upl , w , w  ; yes            ] movprfx\t%0, %3\;revd\t%0.q, %1/m, %2.q
++  {@ [ cons: =0 , 1   , 2 , 3 ]
++     [ w        , Upl , w , 0 ] revd\t%0.q, %1/m, %2.q
+   }
+ )
+ 
+diff --git a/gcc/testsuite/gcc.target/aarch64/sme/acle-asm/revd_bf16.c b/gcc/testsuite/gcc.target/aarch64/sme/acle-asm/revd_bf16.c
+index c8f0dc5f02b1..fce67e77ef60 100644
+--- a/gcc/testsuite/gcc.target/aarch64/sme/acle-asm/revd_bf16.c
++++ b/gcc/testsuite/gcc.target/aarch64/sme/acle-asm/revd_bf16.c
+@@ -22,9 +22,8 @@ TEST_UNIFORM_Z (revd_bf16_m_tied1, svbfloat16_t,
+ 
+ /*
+ ** revd_bf16_m_tied2:
+-**	mov	(z[0-9]+)\.d, z0\.d
+-**	movprfx	z0, z1
+-**	revd	z0\.q, p0/m, \1\.q
++**	revd	z1\.q, p0/m, z0\.q
++**	mov	z0.d, z1.d
+ **	ret
+ */
+ TEST_UNIFORM_Z (revd_bf16_m_tied2, svbfloat16_t,
+@@ -33,8 +32,8 @@ TEST_UNIFORM_Z (revd_bf16_m_tied2, svbfloat16_t,
+ 
+ /*
+ ** revd_bf16_m_untied:
+-**	movprfx	z0, z2
+-**	revd	z0\.q, p0/m, z1\.q
++**	revd	z2\.q, p0/m, z1\.q
++**	mov	z0.d, z2.d
+ **	ret
+ */
+ TEST_UNIFORM_Z (revd_bf16_m_untied, svbfloat16_t,
+@@ -67,8 +66,8 @@ TEST_UNIFORM_Z (revd_bf16_x_tied1, svbfloat16_t,
+ 
+ /*
+ ** revd_bf16_x_untied:
+-**	movprfx	z0, z1
+-**	revd	z0\.q, p0/m, z1\.q
++**	revd	z1\.q, p0/m, z1\.q
++**	mov	z0.d, z1.d
+ **	ret
+ */
+ TEST_UNIFORM_Z (revd_bf16_x_untied, svbfloat16_t,
+diff --git a/gcc/testsuite/gcc.target/aarch64/sme/acle-asm/revd_f16.c b/gcc/testsuite/gcc.target/aarch64/sme/acle-asm/revd_f16.c
+index a02e2d47f2a3..3df01eb1030e 100644
+--- a/gcc/testsuite/gcc.target/aarch64/sme/acle-asm/revd_f16.c
++++ b/gcc/testsuite/gcc.target/aarch64/sme/acle-asm/revd_f16.c
+@@ -22,9 +22,8 @@ TEST_UNIFORM_Z (revd_f16_m_tied1, svfloat16_t,
+ 
+ /*
+ ** revd_f16_m_tied2:
+-**	mov	(z[0-9]+)\.d, z0\.d
+-**	movprfx	z0, z1
+-**	revd	z0\.q, p0/m, \1\.q
++**	revd	z1\.q, p0/m, z0\.q
++**	mov	z0.d, z1.d
+ **	ret
+ */
+ TEST_UNIFORM_Z (revd_f16_m_tied2, svfloat16_t,
+@@ -33,8 +32,8 @@ TEST_UNIFORM_Z (revd_f16_m_tied2, svfloat16_t,
+ 
+ /*
+ ** revd_f16_m_untied:
+-**	movprfx	z0, z2
+-**	revd	z0\.q, p0/m, z1\.q
++**	revd	z2\.q, p0/m, z1\.q
++**	mov	z0.d, z2.d
+ **	ret
+ */
+ TEST_UNIFORM_Z (revd_f16_m_untied, svfloat16_t,
+@@ -67,8 +66,8 @@ TEST_UNIFORM_Z (revd_f16_x_tied1, svfloat16_t,
+ 
+ /*
+ ** revd_f16_x_untied:
+-**	movprfx	z0, z1
+-**	revd	z0\.q, p0/m, z1\.q
++**	revd	z1\.q, p0/m, z1\.q
++**	mov	z0.d, z1.d
+ **	ret
+ */
+ TEST_UNIFORM_Z (revd_f16_x_untied, svfloat16_t,
+diff --git a/gcc/testsuite/gcc.target/aarch64/sme/acle-asm/revd_f32.c b/gcc/testsuite/gcc.target/aarch64/sme/acle-asm/revd_f32.c
+index 28cdba50a891..40cc7f94cef2 100644
+--- a/gcc/testsuite/gcc.target/aarch64/sme/acle-asm/revd_f32.c
++++ b/gcc/testsuite/gcc.target/aarch64/sme/acle-asm/revd_f32.c
+@@ -22,9 +22,8 @@ TEST_UNIFORM_Z (revd_f32_m_tied1, svfloat32_t,
+ 
+ /*
+ ** revd_f32_m_tied2:
+-**	mov	(z[0-9]+)\.d, z0\.d
+-**	movprfx	z0, z1
+-**	revd	z0\.q, p0/m, \1\.q
++**	revd	z1\.q, p0/m, z0\.q
++**	mov	z0.d, z1.d
+ **	ret
+ */
+ TEST_UNIFORM_Z (revd_f32_m_tied2, svfloat32_t,
+@@ -33,8 +32,8 @@ TEST_UNIFORM_Z (revd_f32_m_tied2, svfloat32_t,
+ 
+ /*
+ ** revd_f32_m_untied:
+-**	movprfx	z0, z2
+-**	revd	z0\.q, p0/m, z1\.q
++**	revd	z2\.q, p0/m, z1\.q
++**	mov	z0.d, z2.d
+ **	ret
+ */
+ TEST_UNIFORM_Z (revd_f32_m_untied, svfloat32_t,
+@@ -67,8 +66,8 @@ TEST_UNIFORM_Z (revd_f32_x_tied1, svfloat32_t,
+ 
+ /*
+ ** revd_f32_x_untied:
+-**	movprfx	z0, z1
+-**	revd	z0\.q, p0/m, z1\.q
++**	revd	z1\.q, p0/m, z1\.q
++**	mov	z0.d, z1.d
+ **	ret
+ */
+ TEST_UNIFORM_Z (revd_f32_x_untied, svfloat32_t,
+diff --git a/gcc/testsuite/gcc.target/aarch64/sme/acle-asm/revd_f64.c b/gcc/testsuite/gcc.target/aarch64/sme/acle-asm/revd_f64.c
+index 3f949b87e1c8..b91982c761f2 100644
+--- a/gcc/testsuite/gcc.target/aarch64/sme/acle-asm/revd_f64.c
++++ b/gcc/testsuite/gcc.target/aarch64/sme/acle-asm/revd_f64.c
+@@ -22,9 +22,8 @@ TEST_UNIFORM_Z (revd_f64_m_tied1, svfloat64_t,
+ 
+ /*
+ ** revd_f64_m_tied2:
+-**	mov	(z[0-9]+)\.d, z0\.d
+-**	movprfx	z0, z1
+-**	revd	z0\.q, p0/m, \1\.q
++**	revd	z1\.q, p0/m, z0\.q
++**	mov	z0.d, z1.d
+ **	ret
+ */
+ TEST_UNIFORM_Z (revd_f64_m_tied2, svfloat64_t,
+@@ -33,8 +32,8 @@ TEST_UNIFORM_Z (revd_f64_m_tied2, svfloat64_t,
+ 
+ /*
+ ** revd_f64_m_untied:
+-**	movprfx	z0, z2
+-**	revd	z0\.q, p0/m, z1\.q
++**	revd	z2\.q, p0/m, z1\.q
++**	mov	z0.d, z2.d
+ **	ret
+ */
+ TEST_UNIFORM_Z (revd_f64_m_untied, svfloat64_t,
+@@ -67,8 +66,8 @@ TEST_UNIFORM_Z (revd_f64_x_tied1, svfloat64_t,
+ 
+ /*
+ ** revd_f64_x_untied:
+-**	movprfx	z0, z1
+-**	revd	z0\.q, p0/m, z1\.q
++**	revd	z1\.q, p0/m, z1\.q
++**	mov	z0.d, z1.d
+ **	ret
+ */
+ TEST_UNIFORM_Z (revd_f64_x_untied, svfloat64_t,
+diff --git a/gcc/testsuite/gcc.target/aarch64/sme/acle-asm/revd_s16.c b/gcc/testsuite/gcc.target/aarch64/sme/acle-asm/revd_s16.c
+index 621ae022592e..cdf27aad4b05 100644
+--- a/gcc/testsuite/gcc.target/aarch64/sme/acle-asm/revd_s16.c
++++ b/gcc/testsuite/gcc.target/aarch64/sme/acle-asm/revd_s16.c
+@@ -22,9 +22,8 @@ TEST_UNIFORM_Z (revd_s16_m_tied1, svint16_t,
+ 
+ /*
+ ** revd_s16_m_tied2:
+-**	mov	(z[0-9]+)\.d, z0\.d
+-**	movprfx	z0, z1
+-**	revd	z0\.q, p0/m, \1\.q
++**	revd	z1\.q, p0/m, z0\.q
++**	mov	z0.d, z1.d
+ **	ret
+ */
+ TEST_UNIFORM_Z (revd_s16_m_tied2, svint16_t,
+@@ -33,8 +32,8 @@ TEST_UNIFORM_Z (revd_s16_m_tied2, svint16_t,
+ 
+ /*
+ ** revd_s16_m_untied:
+-**	movprfx	z0, z2
+-**	revd	z0\.q, p0/m, z1\.q
++**	revd	z2\.q, p0/m, z1\.q
++**	mov	z0.d, z2.d
+ **	ret
+ */
+ TEST_UNIFORM_Z (revd_s16_m_untied, svint16_t,
+@@ -67,8 +66,8 @@ TEST_UNIFORM_Z (revd_s16_x_tied1, svint16_t,
+ 
+ /*
+ ** revd_s16_x_untied:
+-**	movprfx	z0, z1
+-**	revd	z0\.q, p0/m, z1\.q
++**	revd	z1\.q, p0/m, z1\.q
++**	mov	z0.d, z1.d
+ **	ret
+ */
+ TEST_UNIFORM_Z (revd_s16_x_untied, svint16_t,
+diff --git a/gcc/testsuite/gcc.target/aarch64/sme/acle-asm/revd_s32.c b/gcc/testsuite/gcc.target/aarch64/sme/acle-asm/revd_s32.c
+index d388108a8c9a..33a52291a7af 100644
+--- a/gcc/testsuite/gcc.target/aarch64/sme/acle-asm/revd_s32.c
++++ b/gcc/testsuite/gcc.target/aarch64/sme/acle-asm/revd_s32.c
+@@ -22,9 +22,8 @@ TEST_UNIFORM_Z (revd_s32_m_tied1, svint32_t,
+ 
+ /*
+ ** revd_s32_m_tied2:
+-**	mov	(z[0-9]+)\.d, z0\.d
+-**	movprfx	z0, z1
+-**	revd	z0\.q, p0/m, \1\.q
++**	revd	z1\.q, p0/m, z0\.q
++**	mov	z0.d, z1.d
+ **	ret
+ */
+ TEST_UNIFORM_Z (revd_s32_m_tied2, svint32_t,
+@@ -33,8 +32,8 @@ TEST_UNIFORM_Z (revd_s32_m_tied2, svint32_t,
+ 
+ /*
+ ** revd_s32_m_untied:
+-**	movprfx	z0, z2
+-**	revd	z0\.q, p0/m, z1\.q
++**	revd	z2\.q, p0/m, z1\.q
++**	mov	z0.d, z2.d
+ **	ret
+ */
+ TEST_UNIFORM_Z (revd_s32_m_untied, svint32_t,
+@@ -67,8 +66,8 @@ TEST_UNIFORM_Z (revd_s32_x_tied1, svint32_t,
+ 
+ /*
+ ** revd_s32_x_untied:
+-**	movprfx	z0, z1
+-**	revd	z0\.q, p0/m, z1\.q
++**	revd	z1\.q, p0/m, z1\.q
++**	mov	z0.d, z1.d
+ **	ret
+ */
+ TEST_UNIFORM_Z (revd_s32_x_untied, svint32_t,
+diff --git a/gcc/testsuite/gcc.target/aarch64/sme/acle-asm/revd_s64.c b/gcc/testsuite/gcc.target/aarch64/sme/acle-asm/revd_s64.c
+index f5dbbaa44228..5d0bd19512ac 100644
+--- a/gcc/testsuite/gcc.target/aarch64/sme/acle-asm/revd_s64.c
++++ b/gcc/testsuite/gcc.target/aarch64/sme/acle-asm/revd_s64.c
+@@ -22,9 +22,8 @@ TEST_UNIFORM_Z (revd_s64_m_tied1, svint64_t,
+ 
+ /*
+ ** revd_s64_m_tied2:
+-**	mov	(z[0-9]+)\.d, z0\.d
+-**	movprfx	z0, z1
+-**	revd	z0\.q, p0/m, \1\.q
++**	revd	z1\.q, p0/m, z0\.q
++**	mov	z0.d, z1.d
+ **	ret
+ */
+ TEST_UNIFORM_Z (revd_s64_m_tied2, svint64_t,
+@@ -33,8 +32,8 @@ TEST_UNIFORM_Z (revd_s64_m_tied2, svint64_t,
+ 
+ /*
+ ** revd_s64_m_untied:
+-**	movprfx	z0, z2
+-**	revd	z0\.q, p0/m, z1\.q
++**	revd	z2\.q, p0/m, z1\.q
++**	mov	z0.d, z2.d
+ **	ret
+ */
+ TEST_UNIFORM_Z (revd_s64_m_untied, svint64_t,
+@@ -67,8 +66,8 @@ TEST_UNIFORM_Z (revd_s64_x_tied1, svint64_t,
+ 
+ /*
+ ** revd_s64_x_untied:
+-**	movprfx	z0, z1
+-**	revd	z0\.q, p0/m, z1\.q
++**	revd	z1\.q, p0/m, z1\.q
++**	mov	z0.d, z1.d
+ **	ret
+ */
+ TEST_UNIFORM_Z (revd_s64_x_untied, svint64_t,
+diff --git a/gcc/testsuite/gcc.target/aarch64/sme/acle-asm/revd_s8.c b/gcc/testsuite/gcc.target/aarch64/sme/acle-asm/revd_s8.c
+index 663cd418b16c..b4557926fa09 100644
+--- a/gcc/testsuite/gcc.target/aarch64/sme/acle-asm/revd_s8.c
++++ b/gcc/testsuite/gcc.target/aarch64/sme/acle-asm/revd_s8.c
+@@ -22,9 +22,8 @@ TEST_UNIFORM_Z (revd_s8_m_tied1, svint8_t,
+ 
+ /*
+ ** revd_s8_m_tied2:
+-**	mov	(z[0-9]+)\.d, z0\.d
+-**	movprfx	z0, z1
+-**	revd	z0\.q, p0/m, \1\.q
++**	revd	z1\.q, p0/m, z0\.q
++**	mov	z0.d, z1.d
+ **	ret
+ */
+ TEST_UNIFORM_Z (revd_s8_m_tied2, svint8_t,
+@@ -33,8 +32,8 @@ TEST_UNIFORM_Z (revd_s8_m_tied2, svint8_t,
+ 
+ /*
+ ** revd_s8_m_untied:
+-**	movprfx	z0, z2
+-**	revd	z0\.q, p0/m, z1\.q
++**	revd	z2\.q, p0/m, z1\.q
++**	mov	z0.d, z2.d
+ **	ret
+ */
+ TEST_UNIFORM_Z (revd_s8_m_untied, svint8_t,
+@@ -67,8 +66,8 @@ TEST_UNIFORM_Z (revd_s8_x_tied1, svint8_t,
+ 
+ /*
+ ** revd_s8_x_untied:
+-**	movprfx	z0, z1
+-**	revd	z0\.q, p0/m, z1\.q
++**	revd	z1\.q, p0/m, z1\.q
++**	mov	z0.d, z1.d
+ **	ret
+ */
+ TEST_UNIFORM_Z (revd_s8_x_untied, svint8_t,
+diff --git a/gcc/testsuite/gcc.target/aarch64/sme/acle-asm/revd_u16.c b/gcc/testsuite/gcc.target/aarch64/sme/acle-asm/revd_u16.c
+index 83a414d020d3..b4b6a149845c 100644
+--- a/gcc/testsuite/gcc.target/aarch64/sme/acle-asm/revd_u16.c
++++ b/gcc/testsuite/gcc.target/aarch64/sme/acle-asm/revd_u16.c
+@@ -22,9 +22,8 @@ TEST_UNIFORM_Z (revd_u16_m_tied1, svuint16_t,
+ 
+ /*
+ ** revd_u16_m_tied2:
+-**	mov	(z[0-9]+)\.d, z0\.d
+-**	movprfx	z0, z1
+-**	revd	z0\.q, p0/m, \1\.q
++**	revd	z1\.q, p0/m, z0\.q
++**	mov	z0.d, z1.d
+ **	ret
+ */
+ TEST_UNIFORM_Z (revd_u16_m_tied2, svuint16_t,
+@@ -33,8 +32,8 @@ TEST_UNIFORM_Z (revd_u16_m_tied2, svuint16_t,
+ 
+ /*
+ ** revd_u16_m_untied:
+-**	movprfx	z0, z2
+-**	revd	z0\.q, p0/m, z1\.q
++**	revd	z2\.q, p0/m, z1\.q
++**	mov	z0.d, z2.d
+ **	ret
+ */
+ TEST_UNIFORM_Z (revd_u16_m_untied, svuint16_t,
+@@ -67,8 +66,8 @@ TEST_UNIFORM_Z (revd_u16_x_tied1, svuint16_t,
+ 
+ /*
+ ** revd_u16_x_untied:
+-**	movprfx	z0, z1
+-**	revd	z0\.q, p0/m, z1\.q
++**	revd	z1\.q, p0/m, z1\.q
++**	mov	z0.d, z1.d
+ **	ret
+ */
+ TEST_UNIFORM_Z (revd_u16_x_untied, svuint16_t,
+diff --git a/gcc/testsuite/gcc.target/aarch64/sme/acle-asm/revd_u32.c b/gcc/testsuite/gcc.target/aarch64/sme/acle-asm/revd_u32.c
+index 5ba00cb80653..6066600b8732 100644
+--- a/gcc/testsuite/gcc.target/aarch64/sme/acle-asm/revd_u32.c
++++ b/gcc/testsuite/gcc.target/aarch64/sme/acle-asm/revd_u32.c
+@@ -22,9 +22,8 @@ TEST_UNIFORM_Z (revd_u32_m_tied1, svuint32_t,
+ 
+ /*
+ ** revd_u32_m_tied2:
+-**	mov	(z[0-9]+)\.d, z0\.d
+-**	movprfx	z0, z1
+-**	revd	z0\.q, p0/m, \1\.q
++**	revd	z1\.q, p0/m, z0\.q
++**	mov	z0.d, z1.d
+ **	ret
+ */
+ TEST_UNIFORM_Z (revd_u32_m_tied2, svuint32_t,
+@@ -33,8 +32,8 @@ TEST_UNIFORM_Z (revd_u32_m_tied2, svuint32_t,
+ 
+ /*
+ ** revd_u32_m_untied:
+-**	movprfx	z0, z2
+-**	revd	z0\.q, p0/m, z1\.q
++**	revd	z2\.q, p0/m, z1\.q
++**	mov	z0.d, z2.d
+ **	ret
+ */
+ TEST_UNIFORM_Z (revd_u32_m_untied, svuint32_t,
+@@ -67,8 +66,8 @@ TEST_UNIFORM_Z (revd_u32_x_tied1, svuint32_t,
+ 
+ /*
+ ** revd_u32_x_untied:
+-**	movprfx	z0, z1
+-**	revd	z0\.q, p0/m, z1\.q
++**	revd	z1\.q, p0/m, z1\.q
++**	mov	z0.d, z1.d
+ **	ret
+ */
+ TEST_UNIFORM_Z (revd_u32_x_untied, svuint32_t,
+diff --git a/gcc/testsuite/gcc.target/aarch64/sme/acle-asm/revd_u64.c b/gcc/testsuite/gcc.target/aarch64/sme/acle-asm/revd_u64.c
+index 0c016c7c398c..1f7915e739ed 100644
+--- a/gcc/testsuite/gcc.target/aarch64/sme/acle-asm/revd_u64.c
++++ b/gcc/testsuite/gcc.target/aarch64/sme/acle-asm/revd_u64.c
+@@ -22,9 +22,8 @@ TEST_UNIFORM_Z (revd_u64_m_tied1, svuint64_t,
+ 
+ /*
+ ** revd_u64_m_tied2:
+-**	mov	(z[0-9]+)\.d, z0\.d
+-**	movprfx	z0, z1
+-**	revd	z0\.q, p0/m, \1\.q
++**	revd	z1\.q, p0/m, z0\.q
++**	mov	z0.d, z1.d
+ **	ret
+ */
+ TEST_UNIFORM_Z (revd_u64_m_tied2, svuint64_t,
+@@ -33,8 +32,8 @@ TEST_UNIFORM_Z (revd_u64_m_tied2, svuint64_t,
+ 
+ /*
+ ** revd_u64_m_untied:
+-**	movprfx	z0, z2
+-**	revd	z0\.q, p0/m, z1\.q
++**	revd	z2\.q, p0/m, z1\.q
++**	mov	z0.d, z2.d
+ **	ret
+ */
+ TEST_UNIFORM_Z (revd_u64_m_untied, svuint64_t,
+@@ -67,8 +66,8 @@ TEST_UNIFORM_Z (revd_u64_x_tied1, svuint64_t,
+ 
+ /*
+ ** revd_u64_x_untied:
+-**	movprfx	z0, z1
+-**	revd	z0\.q, p0/m, z1\.q
++**	revd	z1\.q, p0/m, z1\.q
++**	mov	z0.d, z1.d
+ **	ret
+ */
+ TEST_UNIFORM_Z (revd_u64_x_untied, svuint64_t,
+diff --git a/gcc/testsuite/gcc.target/aarch64/sme/acle-asm/revd_u8.c b/gcc/testsuite/gcc.target/aarch64/sme/acle-asm/revd_u8.c
+index b9f5935873ac..d2cf360d0ee9 100644
+--- a/gcc/testsuite/gcc.target/aarch64/sme/acle-asm/revd_u8.c
++++ b/gcc/testsuite/gcc.target/aarch64/sme/acle-asm/revd_u8.c
+@@ -22,9 +22,8 @@ TEST_UNIFORM_Z (revd_u8_m_tied1, svuint8_t,
+ 
+ /*
+ ** revd_u8_m_tied2:
+-**	mov	(z[0-9]+)\.d, z0\.d
+-**	movprfx	z0, z1
+-**	revd	z0\.q, p0/m, \1\.q
++**	revd	z1\.q, p0/m, z0\.q
++**	mov	z0.d, z1.d
+ **	ret
+ */
+ TEST_UNIFORM_Z (revd_u8_m_tied2, svuint8_t,
+@@ -33,8 +32,8 @@ TEST_UNIFORM_Z (revd_u8_m_tied2, svuint8_t,
+ 
+ /*
+ ** revd_u8_m_untied:
+-**	movprfx	z0, z2
+-**	revd	z0\.q, p0/m, z1\.q
++**	revd	z2\.q, p0/m, z1\.q
++**	mov	z0.d, z2.d
+ **	ret
+ */
+ TEST_UNIFORM_Z (revd_u8_m_untied, svuint8_t,
+@@ -67,8 +66,8 @@ TEST_UNIFORM_Z (revd_u8_x_tied1, svuint8_t,
+ 
+ /*
+ ** revd_u8_x_untied:
+-**	movprfx	z0, z1
+-**	revd	z0\.q, p0/m, z1\.q
++**	revd	z1\.q, p0/m, z1\.q
++**	mov	z0.d, z1.d
+ **	ret
+ */
+ TEST_UNIFORM_Z (revd_u8_x_untied, svuint8_t,
+diff --git a/gcc/testsuite/gcc.target/aarch64/sve2/acle/asm/revd_bf16.c b/gcc/testsuite/gcc.target/aarch64/sve2/acle/asm/revd_bf16.c
+index 93d60cbe7d14..01fd94904332 100644
+--- a/gcc/testsuite/gcc.target/aarch64/sve2/acle/asm/revd_bf16.c
++++ b/gcc/testsuite/gcc.target/aarch64/sve2/acle/asm/revd_bf16.c
+@@ -26,9 +26,8 @@ TEST_UNIFORM_Z (revd_bf16_m_tied1, svbfloat16_t,
+ 
+ /*
+ ** revd_bf16_m_tied2:
+-**	mov	(z[0-9]+)\.d, z0\.d
+-**	movprfx	z0, z1
+-**	revd	z0\.q, p0/m, \1\.q
++**	revd	z1\.q, p0/m, z0\.q
++**	mov	z0.d, z1.d
+ **	ret
+ */
+ TEST_UNIFORM_Z (revd_bf16_m_tied2, svbfloat16_t,
+@@ -37,8 +36,8 @@ TEST_UNIFORM_Z (revd_bf16_m_tied2, svbfloat16_t,
+ 
+ /*
+ ** revd_bf16_m_untied:
+-**	movprfx	z0, z2
+-**	revd	z0\.q, p0/m, z1\.q
++**	revd	z2\.q, p0/m, z1\.q
++**	mov	z0.d, z2.d
+ **	ret
+ */
+ TEST_UNIFORM_Z (revd_bf16_m_untied, svbfloat16_t,
+@@ -71,8 +70,8 @@ TEST_UNIFORM_Z (revd_bf16_x_tied1, svbfloat16_t,
+ 
+ /*
+ ** revd_bf16_x_untied:
+-**	movprfx	z0, z1
+-**	revd	z0\.q, p0/m, z1\.q
++**	revd	z1\.q, p0/m, z1\.q
++**	mov	z0.d, z1.d
+ **	ret
+ */
+ TEST_UNIFORM_Z (revd_bf16_x_untied, svbfloat16_t,
+diff --git a/gcc/testsuite/gcc.target/aarch64/sve2/acle/asm/revd_f16.c b/gcc/testsuite/gcc.target/aarch64/sve2/acle/asm/revd_f16.c
+index b8a5f7b8e772..ac2acf36ced2 100644
+--- a/gcc/testsuite/gcc.target/aarch64/sve2/acle/asm/revd_f16.c
++++ b/gcc/testsuite/gcc.target/aarch64/sve2/acle/asm/revd_f16.c
+@@ -26,9 +26,8 @@ TEST_UNIFORM_Z (revd_f16_m_tied1, svfloat16_t,
+ 
+ /*
+ ** revd_f16_m_tied2:
+-**	mov	(z[0-9]+)\.d, z0\.d
+-**	movprfx	z0, z1
+-**	revd	z0\.q, p0/m, \1\.q
++**	revd	z1\.q, p0/m, z0\.q
++**	mov	z0.d, z1.d
+ **	ret
+ */
+ TEST_UNIFORM_Z (revd_f16_m_tied2, svfloat16_t,
+@@ -37,8 +36,8 @@ TEST_UNIFORM_Z (revd_f16_m_tied2, svfloat16_t,
+ 
+ /*
+ ** revd_f16_m_untied:
+-**	movprfx	z0, z2
+-**	revd	z0\.q, p0/m, z1\.q
++**	revd	z2\.q, p0/m, z1\.q
++**	mov	z0.d, z2.d
+ **	ret
+ */
+ TEST_UNIFORM_Z (revd_f16_m_untied, svfloat16_t,
+@@ -71,8 +70,8 @@ TEST_UNIFORM_Z (revd_f16_x_tied1, svfloat16_t,
+ 
+ /*
+ ** revd_f16_x_untied:
+-**	movprfx	z0, z1
+-**	revd	z0\.q, p0/m, z1\.q
++**	revd	z1\.q, p0/m, z1\.q
++**	mov	z0.d, z1.d
+ **	ret
+ */
+ TEST_UNIFORM_Z (revd_f16_x_untied, svfloat16_t,
+diff --git a/gcc/testsuite/gcc.target/aarch64/sve2/acle/asm/revd_f32.c b/gcc/testsuite/gcc.target/aarch64/sve2/acle/asm/revd_f32.c
+index d89eb5f5e39e..03134374a410 100644
+--- a/gcc/testsuite/gcc.target/aarch64/sve2/acle/asm/revd_f32.c
++++ b/gcc/testsuite/gcc.target/aarch64/sve2/acle/asm/revd_f32.c
+@@ -26,9 +26,8 @@ TEST_UNIFORM_Z (revd_f32_m_tied1, svfloat32_t,
+ 
+ /*
+ ** revd_f32_m_tied2:
+-**	mov	(z[0-9]+)\.d, z0\.d
+-**	movprfx	z0, z1
+-**	revd	z0\.q, p0/m, \1\.q
++**	revd	z1\.q, p0/m, z0\.q
++**	mov	z0.d, z1.d
+ **	ret
+ */
+ TEST_UNIFORM_Z (revd_f32_m_tied2, svfloat32_t,
+@@ -37,8 +36,8 @@ TEST_UNIFORM_Z (revd_f32_m_tied2, svfloat32_t,
+ 
+ /*
+ ** revd_f32_m_untied:
+-**	movprfx	z0, z2
+-**	revd	z0\.q, p0/m, z1\.q
++**	revd	z2\.q, p0/m, z1\.q
++**	mov	z0.d, z2.d
+ **	ret
+ */
+ TEST_UNIFORM_Z (revd_f32_m_untied, svfloat32_t,
+@@ -71,8 +70,8 @@ TEST_UNIFORM_Z (revd_f32_x_tied1, svfloat32_t,
+ 
+ /*
+ ** revd_f32_x_untied:
+-**	movprfx	z0, z1
+-**	revd	z0\.q, p0/m, z1\.q
++**	revd	z1\.q, p0/m, z1\.q
++**	mov	z0.d, z1.d
+ **	ret
+ */
+ TEST_UNIFORM_Z (revd_f32_x_untied, svfloat32_t,
+diff --git a/gcc/testsuite/gcc.target/aarch64/sve2/acle/asm/revd_f64.c b/gcc/testsuite/gcc.target/aarch64/sve2/acle/asm/revd_f64.c
+index 0d80375a8605..a1499a675b95 100644
+--- a/gcc/testsuite/gcc.target/aarch64/sve2/acle/asm/revd_f64.c
++++ b/gcc/testsuite/gcc.target/aarch64/sve2/acle/asm/revd_f64.c
+@@ -26,9 +26,8 @@ TEST_UNIFORM_Z (revd_f64_m_tied1, svfloat64_t,
+ 
+ /*
+ ** revd_f64_m_tied2:
+-**	mov	(z[0-9]+)\.d, z0\.d
+-**	movprfx	z0, z1
+-**	revd	z0\.q, p0/m, \1\.q
++**	revd	z1\.q, p0/m, z0\.q
++**	mov	z0.d, z1.d
+ **	ret
+ */
+ TEST_UNIFORM_Z (revd_f64_m_tied2, svfloat64_t,
+@@ -37,8 +36,8 @@ TEST_UNIFORM_Z (revd_f64_m_tied2, svfloat64_t,
+ 
+ /*
+ ** revd_f64_m_untied:
+-**	movprfx	z0, z2
+-**	revd	z0\.q, p0/m, z1\.q
++**	revd	z2\.q, p0/m, z1\.q
++**	mov	z0.d, z2.d
+ **	ret
+ */
+ TEST_UNIFORM_Z (revd_f64_m_untied, svfloat64_t,
+@@ -71,8 +70,8 @@ TEST_UNIFORM_Z (revd_f64_x_tied1, svfloat64_t,
+ 
+ /*
+ ** revd_f64_x_untied:
+-**	movprfx	z0, z1
+-**	revd	z0\.q, p0/m, z1\.q
++**	revd	z1\.q, p0/m, z1\.q
++**	mov	z0.d, z1.d
+ **	ret
+ */
+ TEST_UNIFORM_Z (revd_f64_x_untied, svfloat64_t,
+diff --git a/gcc/testsuite/gcc.target/aarch64/sve2/acle/asm/revd_s16.c b/gcc/testsuite/gcc.target/aarch64/sve2/acle/asm/revd_s16.c
+index e12690461bba..db3a660830cf 100644
+--- a/gcc/testsuite/gcc.target/aarch64/sve2/acle/asm/revd_s16.c
++++ b/gcc/testsuite/gcc.target/aarch64/sve2/acle/asm/revd_s16.c
+@@ -26,9 +26,8 @@ TEST_UNIFORM_Z (revd_s16_m_tied1, svint16_t,
+ 
+ /*
+ ** revd_s16_m_tied2:
+-**	mov	(z[0-9]+)\.d, z0\.d
+-**	movprfx	z0, z1
+-**	revd	z0\.q, p0/m, \1\.q
++**	revd	z1\.q, p0/m, z0\.q
++**	mov	z0.d, z1.d
+ **	ret
+ */
+ TEST_UNIFORM_Z (revd_s16_m_tied2, svint16_t,
+@@ -37,8 +36,8 @@ TEST_UNIFORM_Z (revd_s16_m_tied2, svint16_t,
+ 
+ /*
+ ** revd_s16_m_untied:
+-**	movprfx	z0, z2
+-**	revd	z0\.q, p0/m, z1\.q
++**	revd	z2\.q, p0/m, z1\.q
++**	mov	z0.d, z2.d
+ **	ret
+ */
+ TEST_UNIFORM_Z (revd_s16_m_untied, svint16_t,
+@@ -71,8 +70,8 @@ TEST_UNIFORM_Z (revd_s16_x_tied1, svint16_t,
+ 
+ /*
+ ** revd_s16_x_untied:
+-**	movprfx	z0, z1
+-**	revd	z0\.q, p0/m, z1\.q
++**	revd	z1\.q, p0/m, z1\.q
++**	mov	z0.d, z1.d
+ **	ret
+ */
+ TEST_UNIFORM_Z (revd_s16_x_untied, svint16_t,
+diff --git a/gcc/testsuite/gcc.target/aarch64/sve2/acle/asm/revd_s32.c b/gcc/testsuite/gcc.target/aarch64/sve2/acle/asm/revd_s32.c
+index 86bb08de8491..e4c00d6869ed 100644
+--- a/gcc/testsuite/gcc.target/aarch64/sve2/acle/asm/revd_s32.c
++++ b/gcc/testsuite/gcc.target/aarch64/sve2/acle/asm/revd_s32.c
+@@ -26,9 +26,8 @@ TEST_UNIFORM_Z (revd_s32_m_tied1, svint32_t,
+ 
+ /*
+ ** revd_s32_m_tied2:
+-**	mov	(z[0-9]+)\.d, z0\.d
+-**	movprfx	z0, z1
+-**	revd	z0\.q, p0/m, \1\.q
++**	revd	z1\.q, p0/m, z0\.q
++**	mov	z0.d, z1.d
+ **	ret
+ */
+ TEST_UNIFORM_Z (revd_s32_m_tied2, svint32_t,
+@@ -37,8 +36,8 @@ TEST_UNIFORM_Z (revd_s32_m_tied2, svint32_t,
+ 
+ /*
+ ** revd_s32_m_untied:
+-**	movprfx	z0, z2
+-**	revd	z0\.q, p0/m, z1\.q
++**	revd	z2\.q, p0/m, z1\.q
++**	mov	z0.d, z2.d
+ **	ret
+ */
+ TEST_UNIFORM_Z (revd_s32_m_untied, svint32_t,
+@@ -71,8 +70,8 @@ TEST_UNIFORM_Z (revd_s32_x_tied1, svint32_t,
+ 
+ /*
+ ** revd_s32_x_untied:
+-**	movprfx	z0, z1
+-**	revd	z0\.q, p0/m, z1\.q
++**	revd	z1\.q, p0/m, z1\.q
++**	mov	z0.d, z1.d
+ **	ret
+ */
+ TEST_UNIFORM_Z (revd_s32_x_untied, svint32_t,
+diff --git a/gcc/testsuite/gcc.target/aarch64/sve2/acle/asm/revd_s64.c b/gcc/testsuite/gcc.target/aarch64/sve2/acle/asm/revd_s64.c
+index e6bcab893b71..37fc77933ef8 100644
+--- a/gcc/testsuite/gcc.target/aarch64/sve2/acle/asm/revd_s64.c
++++ b/gcc/testsuite/gcc.target/aarch64/sve2/acle/asm/revd_s64.c
+@@ -26,9 +26,8 @@ TEST_UNIFORM_Z (revd_s64_m_tied1, svint64_t,
+ 
+ /*
+ ** revd_s64_m_tied2:
+-**	mov	(z[0-9]+)\.d, z0\.d
+-**	movprfx	z0, z1
+-**	revd	z0\.q, p0/m, \1\.q
++**	revd	z1\.q, p0/m, z0\.q
++**	mov	z0.d, z1.d
+ **	ret
+ */
+ TEST_UNIFORM_Z (revd_s64_m_tied2, svint64_t,
+@@ -37,8 +36,8 @@ TEST_UNIFORM_Z (revd_s64_m_tied2, svint64_t,
+ 
+ /*
+ ** revd_s64_m_untied:
+-**	movprfx	z0, z2
+-**	revd	z0\.q, p0/m, z1\.q
++**	revd	z2\.q, p0/m, z1\.q
++**	mov	z0.d, z2.d
+ **	ret
+ */
+ TEST_UNIFORM_Z (revd_s64_m_untied, svint64_t,
+@@ -71,8 +70,8 @@ TEST_UNIFORM_Z (revd_s64_x_tied1, svint64_t,
+ 
+ /*
+ ** revd_s64_x_untied:
+-**	movprfx	z0, z1
+-**	revd	z0\.q, p0/m, z1\.q
++**	revd	z1\.q, p0/m, z1\.q
++**	mov	z0.d, z1.d
+ **	ret
+ */
+ TEST_UNIFORM_Z (revd_s64_x_untied, svint64_t,
+diff --git a/gcc/testsuite/gcc.target/aarch64/sve2/acle/asm/revd_s8.c b/gcc/testsuite/gcc.target/aarch64/sve2/acle/asm/revd_s8.c
+index 07925ed783b6..dba6197a59e0 100644
+--- a/gcc/testsuite/gcc.target/aarch64/sve2/acle/asm/revd_s8.c
++++ b/gcc/testsuite/gcc.target/aarch64/sve2/acle/asm/revd_s8.c
+@@ -26,9 +26,8 @@ TEST_UNIFORM_Z (revd_s8_m_tied1, svint8_t,
+ 
+ /*
+ ** revd_s8_m_tied2:
+-**	mov	(z[0-9]+)\.d, z0\.d
+-**	movprfx	z0, z1
+-**	revd	z0\.q, p0/m, \1\.q
++**	revd	z1\.q, p0/m, z0\.q
++**	mov	z0.d, z1.d
+ **	ret
+ */
+ TEST_UNIFORM_Z (revd_s8_m_tied2, svint8_t,
+@@ -37,8 +36,8 @@ TEST_UNIFORM_Z (revd_s8_m_tied2, svint8_t,
+ 
+ /*
+ ** revd_s8_m_untied:
+-**	movprfx	z0, z2
+-**	revd	z0\.q, p0/m, z1\.q
++**	revd	z2\.q, p0/m, z1\.q
++**	mov	z0.d, z2.d
+ **	ret
+ */
+ TEST_UNIFORM_Z (revd_s8_m_untied, svint8_t,
+@@ -71,8 +70,8 @@ TEST_UNIFORM_Z (revd_s8_x_tied1, svint8_t,
+ 
+ /*
+ ** revd_s8_x_untied:
+-**	movprfx	z0, z1
+-**	revd	z0\.q, p0/m, z1\.q
++**	revd	z1\.q, p0/m, z1\.q
++**	mov	z0.d, z1.d
+ **	ret
+ */
+ TEST_UNIFORM_Z (revd_s8_x_untied, svint8_t,
+diff --git a/gcc/testsuite/gcc.target/aarch64/sve2/acle/asm/revd_u16.c b/gcc/testsuite/gcc.target/aarch64/sve2/acle/asm/revd_u16.c
+index 0617a3db9eca..e93bf5b257e9 100644
+--- a/gcc/testsuite/gcc.target/aarch64/sve2/acle/asm/revd_u16.c
++++ b/gcc/testsuite/gcc.target/aarch64/sve2/acle/asm/revd_u16.c
+@@ -26,9 +26,8 @@ TEST_UNIFORM_Z (revd_u16_m_tied1, svuint16_t,
+ 
+ /*
+ ** revd_u16_m_tied2:
+-**	mov	(z[0-9]+)\.d, z0\.d
+-**	movprfx	z0, z1
+-**	revd	z0\.q, p0/m, \1\.q
++**	revd	z1\.q, p0/m, z0\.q
++**	mov	z0.d, z1.d
+ **	ret
+ */
+ TEST_UNIFORM_Z (revd_u16_m_tied2, svuint16_t,
+@@ -37,8 +36,8 @@ TEST_UNIFORM_Z (revd_u16_m_tied2, svuint16_t,
+ 
+ /*
+ ** revd_u16_m_untied:
+-**	movprfx	z0, z2
+-**	revd	z0\.q, p0/m, z1\.q
++**	revd	z2\.q, p0/m, z1\.q
++**	mov	z0.d, z2.d
+ **	ret
+ */
+ TEST_UNIFORM_Z (revd_u16_m_untied, svuint16_t,
+@@ -71,8 +70,8 @@ TEST_UNIFORM_Z (revd_u16_x_tied1, svuint16_t,
+ 
+ /*
+ ** revd_u16_x_untied:
+-**	movprfx	z0, z1
+-**	revd	z0\.q, p0/m, z1\.q
++**	revd	z1\.q, p0/m, z1\.q
++**	mov	z0.d, z1.d
+ **	ret
+ */
+ TEST_UNIFORM_Z (revd_u16_x_untied, svuint16_t,
+diff --git a/gcc/testsuite/gcc.target/aarch64/sve2/acle/asm/revd_u32.c b/gcc/testsuite/gcc.target/aarch64/sve2/acle/asm/revd_u32.c
+index 2de978e3070f..a846359aeca6 100644
+--- a/gcc/testsuite/gcc.target/aarch64/sve2/acle/asm/revd_u32.c
++++ b/gcc/testsuite/gcc.target/aarch64/sve2/acle/asm/revd_u32.c
+@@ -26,9 +26,8 @@ TEST_UNIFORM_Z (revd_u32_m_tied1, svuint32_t,
+ 
+ /*
+ ** revd_u32_m_tied2:
+-**	mov	(z[0-9]+)\.d, z0\.d
+-**	movprfx	z0, z1
+-**	revd	z0\.q, p0/m, \1\.q
++**	revd	z1\.q, p0/m, z0\.q
++**	mov	z0.d, z1.d
+ **	ret
+ */
+ TEST_UNIFORM_Z (revd_u32_m_tied2, svuint32_t,
+@@ -37,8 +36,8 @@ TEST_UNIFORM_Z (revd_u32_m_tied2, svuint32_t,
+ 
+ /*
+ ** revd_u32_m_untied:
+-**	movprfx	z0, z2
+-**	revd	z0\.q, p0/m, z1\.q
++**	revd	z2\.q, p0/m, z1\.q
++**	mov	z0.d, z2.d
+ **	ret
+ */
+ TEST_UNIFORM_Z (revd_u32_m_untied, svuint32_t,
+@@ -71,8 +70,8 @@ TEST_UNIFORM_Z (revd_u32_x_tied1, svuint32_t,
+ 
+ /*
+ ** revd_u32_x_untied:
+-**	movprfx	z0, z1
+-**	revd	z0\.q, p0/m, z1\.q
++**	revd	z1\.q, p0/m, z1\.q
++**	mov	z0.d, z1.d
+ **	ret
+ */
+ TEST_UNIFORM_Z (revd_u32_x_untied, svuint32_t,
+diff --git a/gcc/testsuite/gcc.target/aarch64/sve2/acle/asm/revd_u64.c b/gcc/testsuite/gcc.target/aarch64/sve2/acle/asm/revd_u64.c
+index 112d381d9d83..729d8fa7dbda 100644
+--- a/gcc/testsuite/gcc.target/aarch64/sve2/acle/asm/revd_u64.c
++++ b/gcc/testsuite/gcc.target/aarch64/sve2/acle/asm/revd_u64.c
+@@ -26,9 +26,8 @@ TEST_UNIFORM_Z (revd_u64_m_tied1, svuint64_t,
+ 
+ /*
+ ** revd_u64_m_tied2:
+-**	mov	(z[0-9]+)\.d, z0\.d
+-**	movprfx	z0, z1
+-**	revd	z0\.q, p0/m, \1\.q
++**	revd	z1\.q, p0/m, z0\.q
++**	mov	z0.d, z1.d
+ **	ret
+ */
+ TEST_UNIFORM_Z (revd_u64_m_tied2, svuint64_t,
+@@ -37,8 +36,8 @@ TEST_UNIFORM_Z (revd_u64_m_tied2, svuint64_t,
+ 
+ /*
+ ** revd_u64_m_untied:
+-**	movprfx	z0, z2
+-**	revd	z0\.q, p0/m, z1\.q
++**	revd	z2\.q, p0/m, z1\.q
++**	mov	z0.d, z2.d
+ **	ret
+ */
+ TEST_UNIFORM_Z (revd_u64_m_untied, svuint64_t,
+@@ -71,8 +70,8 @@ TEST_UNIFORM_Z (revd_u64_x_tied1, svuint64_t,
+ 
+ /*
+ ** revd_u64_x_untied:
+-**	movprfx	z0, z1
+-**	revd	z0\.q, p0/m, z1\.q
++**	revd	z1\.q, p0/m, z1\.q
++**	mov	z0.d, z1.d
+ **	ret
+ */
+ TEST_UNIFORM_Z (revd_u64_x_untied, svuint64_t,
+diff --git a/gcc/testsuite/gcc.target/aarch64/sve2/acle/asm/revd_u8.c b/gcc/testsuite/gcc.target/aarch64/sve2/acle/asm/revd_u8.c
+index 5f29eecc0242..7d08d577bdc8 100644
+--- a/gcc/testsuite/gcc.target/aarch64/sve2/acle/asm/revd_u8.c
++++ b/gcc/testsuite/gcc.target/aarch64/sve2/acle/asm/revd_u8.c
+@@ -26,9 +26,8 @@ TEST_UNIFORM_Z (revd_u8_m_tied1, svuint8_t,
+ 
+ /*
+ ** revd_u8_m_tied2:
+-**	mov	(z[0-9]+)\.d, z0\.d
+-**	movprfx	z0, z1
+-**	revd	z0\.q, p0/m, \1\.q
++**	revd	z1\.q, p0/m, z0\.q
++**	mov	z0.d, z1.d
+ **	ret
+ */
+ TEST_UNIFORM_Z (revd_u8_m_tied2, svuint8_t,
+@@ -37,8 +36,8 @@ TEST_UNIFORM_Z (revd_u8_m_tied2, svuint8_t,
+ 
+ /*
+ ** revd_u8_m_untied:
+-**	movprfx	z0, z2
+-**	revd	z0\.q, p0/m, z1\.q
++**	revd	z2\.q, p0/m, z1\.q
++**	mov	z0.d, z2.d
+ **	ret
+ */
+ TEST_UNIFORM_Z (revd_u8_m_untied, svuint8_t,
+@@ -71,8 +70,8 @@ TEST_UNIFORM_Z (revd_u8_x_tied1, svuint8_t,
+ 
+ /*
+ ** revd_u8_x_untied:
+-**	movprfx	z0, z1
+-**	revd	z0\.q, p0/m, z1\.q
++**	revd	z1\.q, p0/m, z1\.q
++**	mov	z0.d, z1.d
+ **	ret
+ */
+ TEST_UNIFORM_Z (revd_u8_x_untied, svuint8_t,
+-- 
+2.43.7
+
+

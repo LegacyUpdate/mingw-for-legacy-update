@@ -1,0 +1,192 @@
+From 36d81ec717cbcf42fa06b4daa3f3f5f40174316f Mon Sep 17 00:00:00 2001
+From: Jonathan Wakely <jwakely@redhat.com>
+Date: Fri, 13 Mar 2026 17:11:04 +0000
+Subject: [PATCH] libstdc++: Optimize __uninitialized_copy_a for std::deque
+ iterators [PR124463]
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf8
+Content-Transfer-Encoding: 8bit
+
+I reimplemented uninitialized_copy and uninitialized_move in
+r15-4473-g3abe751ea86e34 so that they no longer delegate to std::copy,
+but that meant that they were no longer optimized for std::deque
+iterators, leading to performance regressions for operations on a
+std::deque with trivial element types. This adds new overloads of
+__uninitialized_copy_a and __uninitialized_move_a to handle std::deque
+iterators, restoring the lost performance.
+
+There are also overloads of std::fill for deque iterators which are no
+longer used for std::uninitialized_fill. This does not add replacements
+for those, so there will still be lost performance for std::deque
+operations that depend on std::uninitialized_fill. Similarly, inserting
+or assigning from istreambuf_iterator into a std::deque no longer uses
+the std::copy overloads for those types, and that isn't fixed by this
+patch either.
+
+libstdc++-v3/ChangeLog:
+
+	PR libstdc++/124463
+	* include/bits/deque.tcc (__uninitialized_copy_a): Define
+	overloads for input and output iterators being std::deque
+	iterators, and for only the output iterator being a std::deque
+	iterator.
+	(__uninitialized_move_a): Overload for input and output
+	iterators being std::deque iterators.
+	* include/bits/stl_uninitialized.h (__uninitialized_copy_a)
+	(__uninitialized_move_a): Declare overloads for std::deque
+	iterators.
+
+Reviewed-by: Tomasz KamiÅski <tkaminsk@redhat.com>
+(cherry picked from commit 892451e7b6aa50a19d094045c28d4d53d26d2929)
+---
+ libstdc++-v3/include/bits/deque.tcc           | 94 +++++++++++++++++++
+ libstdc++-v3/include/bits/stl_uninitialized.h | 27 ++++++
+ 2 files changed, 121 insertions(+)
+
+diff --git a/libstdc++-v3/include/bits/deque.tcc b/libstdc++-v3/include/bits/deque.tcc
+index dabb6ec53659..f7ee807fa340 100644
+--- a/libstdc++-v3/include/bits/deque.tcc
++++ b/libstdc++-v3/include/bits/deque.tcc
+@@ -1542,6 +1542,100 @@ _GLIBCXX_END_NAMESPACE_CONTAINER
+       return __last2 != __first2;
+     }
+ 
++#if __cplusplus >= 201103L
++#pragma GCC diagnostic push
++#pragma GCC diagnostic ignored "-Wc++17-extensions" // if constexpr
++  template<typename _ITp, typename _IRef, typename _IPtr, typename _OTp,
++	   typename _Tp>
++    _GLIBCXX_STD_C::_Deque_iterator<_OTp, _OTp&, _OTp*>
++    __uninitialized_copy_a(
++      _GLIBCXX_STD_C::_Deque_iterator<_ITp, _IRef, _IPtr> __first,
++      _GLIBCXX_STD_C::_Deque_iterator<_ITp, _IRef, _IPtr> __last,
++      _GLIBCXX_STD_C::_Deque_iterator<_OTp, _OTp&, _OTp*> __result,
++      allocator<_Tp>&)
++    {
++      // In order to unwind all initialized elements, we just use the default
++      // implementation if construction can throw.
++      if constexpr (!__is_nothrow_constructible(_OTp, _IRef))
++	return std::__do_uninit_copy(__first, __last, __result);
++      else
++	while (__first != __last)
++	  {
++	    auto __from = __first._M_cur;
++	    ptrdiff_t __n;
++	    if (__first._M_node == __last._M_node)
++	      __n = __last._M_cur - __from;
++	    else
++	      __n = __first._M_last - __from;
++	    _OTp* __sres = __result._M_cur;
++	    __n = std::min<ptrdiff_t>(__n, __result._M_last - __result._M_cur);
++	    std::uninitialized_copy(__from, __from + __n, __result._M_cur);
++	    __first += __n;
++	    __result += __n;
++	  }
++      return __result;
++    }
++
++  template<typename _Iter, typename _OTp, typename _Tp>
++    __enable_if_t<__is_random_access_iter<_Iter>::value,
++		  _GLIBCXX_STD_C::_Deque_iterator<_OTp, _OTp&, _OTp*>>
++    __uninitialized_copy_a(_Iter __first, _Iter __last,
++      _GLIBCXX_STD_C::_Deque_iterator<_OTp, _OTp&, _OTp*> __result,
++      allocator<_Tp>&)
++    {
++      // In order to unwind all initialized elements, we just use the default
++      // implementation if construction can throw.
++      if constexpr (!__is_nothrow_constructible(_OTp, decltype(*__first)))
++	return std::__do_uninit_copy(__first, __last, __result);
++      else
++	while (__first != __last)
++	  {
++	    auto __n = std::min<ptrdiff_t>(__last - __first,
++					   __result._M_last - __result._M_cur);
++	    std::uninitialized_copy(__first, __first + __n, __result._M_cur);
++	    __first += __n;
++	    __result += __n;
++	  }
++      return __result;
++    }
++
++  template<typename _ITp, typename _IRef, typename _IPtr, typename _OTp,
++	   typename _Tp>
++    _GLIBCXX_STD_C::_Deque_iterator<_OTp, _OTp&, _OTp*>
++    __uninitialized_move_a(
++      _GLIBCXX_STD_C::_Deque_iterator<_ITp, _IRef, _IPtr> __first,
++      _GLIBCXX_STD_C::_Deque_iterator<_ITp, _IRef, _IPtr> __last,
++      _GLIBCXX_STD_C::_Deque_iterator<_OTp, _OTp&, _OTp*> __result,
++      allocator<_Tp>&)
++    {
++      // In order to unwind all initialized elements, we just use the default
++      // implementation if construction can throw.
++      if constexpr (!__is_nothrow_constructible(_OTp,
++						decltype(std::move(*__first))))
++	return std::uninitialized_copy(std::make_move_iterator(__first),
++				       std::make_move_iterator(__last),
++				       __result);
++      else
++	while (__first != __last)
++	  {
++	    auto __from = __first._M_cur;
++	    ptrdiff_t __n;
++	    if (__first._M_node == __last._M_node)
++	      __n = __last._M_cur - __from;
++	    else
++	      __n = __first._M_last - __from;
++	    __n = std::min<ptrdiff_t>(__n, __result._M_last - __result._M_cur);
++	    std::uninitialized_copy(std::make_move_iterator(__from),
++				    std::make_move_iterator(__from + __n),
++				    __result._M_cur);
++	    __first += __n;
++	    __result += __n;
++	  }
++      return __result;
++    }
++#pragma GCC diagnostic pop
++#endif // C++11
++
+ _GLIBCXX_END_NAMESPACE_VERSION
+ } // namespace std
+ 
+diff --git a/libstdc++-v3/include/bits/stl_uninitialized.h b/libstdc++-v3/include/bits/stl_uninitialized.h
+index d90e6aaf3022..06216189079f 100644
+--- a/libstdc++-v3/include/bits/stl_uninitialized.h
++++ b/libstdc++-v3/include/bits/stl_uninitialized.h
+@@ -639,6 +639,33 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
+     }
+ #endif
+ 
++#if __cplusplus >= 201103L
++  template<typename _ITp, typename _IRef, typename _IPtr, typename _OTp,
++	   typename _Tp>
++    _GLIBCXX_STD_C::_Deque_iterator<_OTp, _OTp&, _OTp*>
++    __uninitialized_copy_a(
++      _GLIBCXX_STD_C::_Deque_iterator<_ITp, _IRef, _IPtr> __first,
++      _GLIBCXX_STD_C::_Deque_iterator<_ITp, _IRef, _IPtr> __last,
++      _GLIBCXX_STD_C::_Deque_iterator<_OTp, _OTp&, _OTp*> __result,
++      allocator<_Tp>&);
++
++  template<typename _Iter, typename _OTp, typename _Tp>
++    __enable_if_t<__is_random_access_iter<_Iter>::value,
++		  _GLIBCXX_STD_C::_Deque_iterator<_OTp, _OTp&, _OTp*>>
++    __uninitialized_copy_a(_Iter __first, _Iter __last,
++      _GLIBCXX_STD_C::_Deque_iterator<_OTp, _OTp&, _OTp*> __result,
++      allocator<_Tp>&);
++
++  template<typename _ITp, typename _IRef, typename _IPtr, typename _OTp,
++	   typename _Tp>
++    _GLIBCXX_STD_C::_Deque_iterator<_OTp, _OTp&, _OTp*>
++    __uninitialized_move_a(
++      _GLIBCXX_STD_C::_Deque_iterator<_ITp, _IRef, _IPtr> __first,
++      _GLIBCXX_STD_C::_Deque_iterator<_ITp, _IRef, _IPtr> __last,
++      _GLIBCXX_STD_C::_Deque_iterator<_OTp, _OTp&, _OTp*> __result,
++      allocator<_Tp>&);
++#endif
++
+   template<typename _InputIterator, typename _ForwardIterator,
+ 	   typename _Allocator>
+     _GLIBCXX20_CONSTEXPR
+-- 
+2.43.7
+
+

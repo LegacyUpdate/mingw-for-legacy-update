@@ -1,0 +1,133 @@
+From d040c9d904cca18c1da62e3728992793a39ec573 Mon Sep 17 00:00:00 2001
+From: Christopher Albert <albert@tugraz.at>
+Date: Fri, 20 Mar 2026 15:40:56 +0100
+Subject: [PATCH] fortran: Fix use-after-free in gfc_fixup_sibling_symbols
+ [PR95879]
+
+gfc_fixup_sibling_symbols replaces symbols in contained namespaces
+with their parent-namespace counterparts and frees the old symbol.
+However, if the old symbol is also referenced as a dummy argument of a
+statement function in the same namespace, the formal argument list
+retains a dangling pointer to the freed symbol.
+
+This leads to a heap-use-after-free when gfc_resolve_formal_arglist
+later traverses the statement function's formal argument list, as
+confirmed by AddressSanitizer on both the GCC 15 branch point and
+current trunk.  Whether the bug manifests as a visible crash depends
+on whether the freed memory has been reused, making it appear
+intermittently fixed without an actual code change.
+
+The fix adds fixup_st_func_formals which walks the namespace's
+symtree before the old symbol is released and updates any statement
+function formal argument references from old_sym to the replacement
+symbol.  Formal argument lists are non-owning pointers so no
+reference count adjustment is needed.
+
+	PR fortran/95879
+
+gcc/fortran/ChangeLog:
+
+	PR fortran/95879
+	* parse.cc (fixup_st_func_formals): New function to update
+	statement function formal argument lists referencing a symbol
+	about to be freed.
+	(gfc_fixup_sibling_symbols): Call fixup_st_func_formals before
+	gfc_release_symbol.
+
+gcc/testsuite/ChangeLog:
+
+	PR fortran/95879
+	* gfortran.dg/pr95879.f90: New test.
+
+Signed-off-by: Christopher Albert <albert@tugraz.at>
+---
+ gcc/fortran/parse.cc                  | 27 ++++++++++++++++++++++++
+ gcc/testsuite/gfortran.dg/pr95879.f90 | 30 +++++++++++++++++++++++++++
+ 2 files changed, 57 insertions(+)
+ create mode 100644 gcc/testsuite/gfortran.dg/pr95879.f90
+
+diff --git a/gcc/fortran/parse.cc b/gcc/fortran/parse.cc
+index 81c7e5869abd..8e60b6e5e3bf 100644
+--- a/gcc/fortran/parse.cc
++++ b/gcc/fortran/parse.cc
+@@ -6725,6 +6725,28 @@ parse_executable (gfc_statement st)
+ }
+ 
+ 
++/* Update statement function formal argument lists that reference OLD_SYM
++   to point to NEW_SYM instead.  This prevents use-after-free when
++   gfc_fixup_sibling_symbols replaces and frees a symbol that is also
++   used as a statement function dummy argument (PR95879).  */
++
++static void
++fixup_st_func_formals (gfc_symtree *st, gfc_symbol *old_sym,
++		       gfc_symbol *new_sym)
++{
++  if (st == NULL)
++    return;
++
++  fixup_st_func_formals (st->left, old_sym, new_sym);
++  fixup_st_func_formals (st->right, old_sym, new_sym);
++
++  if (st->n.sym && st->n.sym->attr.proc == PROC_ST_FUNCTION)
++    for (gfc_formal_arglist *fa = st->n.sym->formal; fa; fa = fa->next)
++      if (fa->sym == old_sym)
++	fa->sym = new_sym;
++}
++
++
+ /* Fix the symbols for sibling functions.  These are incorrectly added to
+    the child namespace as the parser didn't know about this procedure.  */
+ 
+@@ -6776,6 +6798,11 @@ gfc_fixup_sibling_symbols (gfc_symbol *sym, gfc_namespace *siblings)
+ 	  st->n.sym = sym;
+ 	  sym->refs++;
+ 
++	  /* Update statement function formal argument lists that still
++	     reference old_sym before releasing it (PR95879).  */
++	  fixup_st_func_formals (ns->sym_root, old_sym, sym);
++
++
+ 	  gfc_release_symbol (old_sym);
+ 	}
+ 
+diff --git a/gcc/testsuite/gfortran.dg/pr95879.f90 b/gcc/testsuite/gfortran.dg/pr95879.f90
+new file mode 100644
+index 000000000000..67c8af0de3bc
+--- /dev/null
++++ b/gcc/testsuite/gfortran.dg/pr95879.f90
+@@ -0,0 +1,30 @@
++! { dg-do compile }
++! { dg-options "-std=f2018" }
++! PR fortran/95879
++! Contributed by G. Steinmetz <gscfq@t-online.de>
++!
++! Use-after-free in gfc_resolve_formal_arglist when a contained subroutine
++! has a statement function whose dummy argument name matches a symbol
++! replaced by gfc_fixup_sibling_symbols.
++
++module m1
++contains
++   integer function f(x) bind(c)
++      use iso_c_binding
++   contains
++      subroutine s
++         c_funloc(f) = x  ! { dg-warning "Obsolescent feature: Statement function" }
++      end
++   end
++end
++
++module m2
++contains
++   integer function f(x)
++      use iso_c_binding
++   contains
++      subroutine s
++         c_funloc(f) = x  ! { dg-warning "Obsolescent feature: Statement function" }
++      end
++   end
++end
+-- 
+2.43.7
+
+

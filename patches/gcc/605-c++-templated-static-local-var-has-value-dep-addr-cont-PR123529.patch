@@ -1,0 +1,72 @@
+From 68f271c5cc30abacc08859752f0c47cd051486ea Mon Sep 17 00:00:00 2001
+From: Patrick Palka <ppalka@redhat.com>
+Date: Tue, 7 Apr 2026 12:28:42 -0400
+Subject: [PATCH] c++: templated static local var has value-dep addr, cont
+ [PR123529]
+
+has_value_dependent_address for a static local variable checks type
+dependence of its context, but that's too narrow and we need a more
+general dependence check that considers outer template arguments as
+well, so that in the testcase below we deem A<T>::g()::i to have a
+value-dependent address (making f<&i>() a dependent call).
+
+	PR c++/123529
+	PR c++/98930
+
+gcc/cp/ChangeLog:
+
+	* pt.cc (has_value_dependent_address): Correct context
+	dependence check for a static local variable.
+
+gcc/testsuite/ChangeLog:
+
+	* g++.dg/cpp1z/nontype9.C: New test.
+
+Reviewed-by: Jason Merrill <jason@redhat.com>
+(cherry picked from commit 6084b750085ae0de11b65df76b9e590b795afc74)
+---
+ gcc/cp/pt.cc                          |  3 ++-
+ gcc/testsuite/g++.dg/cpp1z/nontype9.C | 16 ++++++++++++++++
+ 2 files changed, 18 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/g++.dg/cpp1z/nontype9.C
+
+diff --git a/gcc/cp/pt.cc b/gcc/cp/pt.cc
+index 82589e7389e3..c9b529e81a58 100644
+--- a/gcc/cp/pt.cc
++++ b/gcc/cp/pt.cc
+@@ -7066,7 +7066,8 @@ has_value_dependent_address (tree op)
+       if (VAR_P (op)
+ 	  && TREE_STATIC (op)
+ 	  && TREE_CODE (ctx) == FUNCTION_DECL
+-	  && type_dependent_expression_p (ctx))
++	  && DECL_TEMPLATE_INFO (ctx)
++	  && any_dependent_template_arguments_p (DECL_TI_ARGS (ctx)))
+ 	return true;
+     }
+ 
+diff --git a/gcc/testsuite/g++.dg/cpp1z/nontype9.C b/gcc/testsuite/g++.dg/cpp1z/nontype9.C
+new file mode 100644
+index 000000000000..6f4d927eff39
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/cpp1z/nontype9.C
+@@ -0,0 +1,16 @@
++// PR c++/123529
++// { dg-do compile { target c++17 } }
++
++template<int* P>
++void f();
++
++template<class T>
++struct A {
++  static void g() {
++    static int i;
++    f<&i>();
++  }
++};
++
++template struct A<char>;
++template struct A<int>;
+-- 
+2.43.7
+
+

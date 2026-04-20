@@ -1,0 +1,48 @@
+From 6a1cd91742c481cc5cf21861a64d00006cd892d6 Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Thu, 12 Mar 2026 09:09:42 +0100
+Subject: [PATCH] openmp, c++: Fix up TREE_TYPE of OMP_TASK
+
+I've made a typo a few years ago and used void_node instead of void_type_node
+as TREE_TYPE of OMP_TASK in the taskwait depend case.  This got later
+on copied also for dispatch.
+With reflection this leads to ICEs (but guess except for the testcase
+we should also backport it to release branches).
+
+2026-03-12  Jakub Jelinek  <jakub@redhat.com>
+
+	* parser.cc (cp_parser_omp_taskwait): Set TREE_TYPE of OMP_TASK
+	to void_type_node rather than void_node.
+	(cp_parser_omp_dispatch): Likewise.
+
+(cherry picked from commit bc56ad604735d0b83f7019d44d832a06d843cf88)
+---
+ gcc/cp/parser.cc | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/gcc/cp/parser.cc b/gcc/cp/parser.cc
+index b777cad0ec3c..7118011134c7 100644
+--- a/gcc/cp/parser.cc
++++ b/gcc/cp/parser.cc
+@@ -48039,7 +48039,7 @@ cp_parser_omp_taskwait (cp_parser *parser, cp_token *pragma_tok)
+   if (clauses)
+     {
+       tree stmt = make_node (OMP_TASK);
+-      TREE_TYPE (stmt) = void_node;
++      TREE_TYPE (stmt) = void_type_node;
+       OMP_TASK_CLAUSES (stmt) = clauses;
+       OMP_TASK_BODY (stmt) = NULL_TREE;
+       SET_EXPR_LOCATION (stmt, pragma_tok->location);
+@@ -50344,7 +50344,7 @@ cp_parser_omp_dispatch (cp_parser *parser, cp_token *pragma_tok)
+   if (depend_clauses != NULL_TREE)
+     {
+       tree stmt = make_node (OMP_TASK);
+-      TREE_TYPE (stmt) = void_node;
++      TREE_TYPE (stmt) = void_type_node;
+       OMP_TASK_CLAUSES (stmt) = depend_clauses;
+       OMP_TASK_BODY (stmt) = NULL_TREE;
+       SET_EXPR_LOCATION (stmt, loc);
+-- 
+2.43.7
+
+

@@ -1,0 +1,204 @@
+From 8920d5da6d45940f7ef6672af8b0951ce732d79b Mon Sep 17 00:00:00 2001
+From: Jason Merrill <jason@redhat.com>
+Date: Wed, 15 Apr 2026 00:51:22 -0400
+Subject: [PATCH] c++: coro return proxy that destroys [PR121961]
+
+After the actor of simple() hits final_suspend and returns to the ramp, the
+ramp returns the Wrapper variable holding the result of get_return_object,
+which calls operator Result.  Then we destroy the Wrapper, which calls
+destroy() on the handle.  Then we return to the ramp, and run the rest of
+the cleanups.
+
+Before this patch there were two bugs causing us to clean up the frame too
+soon, in destroy(): First, the actor destroy() handling was unconditionally
+cleaning up the frame rather than checking the refcount.  Second, the ramp
+was decrementing the refcount too soon.
+
+	PR c++/121961
+
+gcc/cp/ChangeLog:
+
+	* coroutines.cc (build_actor_fn): Move the delete label before
+	the refcount handling.
+	(cp_coroutine_transform::build_ramp_function): Decrement refcount
+	after destroying gro.
+
+gcc/testsuite/ChangeLog:
+
+	* g++.dg/asan/coroutines1.C: New test.
+
+(cherry picked from commit 215cc0d494746ca80ef1c9d2f4a8930983070714)
+---
+ gcc/cp/coroutines.cc                    | 41 +++++++-------
+ gcc/testsuite/g++.dg/asan/coroutines1.C | 71 +++++++++++++++++++++++++
+ 2 files changed, 94 insertions(+), 18 deletions(-)
+ create mode 100644 gcc/testsuite/g++.dg/asan/coroutines1.C
+
+diff --git a/gcc/cp/coroutines.cc b/gcc/cp/coroutines.cc
+index 3fe22ac98024..7cc123f397e8 100644
+--- a/gcc/cp/coroutines.cc
++++ b/gcc/cp/coroutines.cc
+@@ -2624,7 +2624,7 @@ build_actor_fn (location_t loc, tree coro_frame_type, tree actor, tree fnbody,
+   /* The destroy point numbered #1 is special, in that it is reached from a
+      coroutine that is suspended after re-throwing from unhandled_exception().
+      This label just invokes the cleanup of promise, param copies and the
+-     frame itself.  */
++     frame itself, if the ramp isn't still keeping them alive.  */
+   tree del_promise_label
+     = create_named_label_with_ctx (loc, "coro.delete.promise", actor);
+   finish_case_label (loc, build_int_cst (short_unsigned_type_node, 1),
+@@ -2718,6 +2718,9 @@ build_actor_fn (location_t loc, tree coro_frame_type, tree actor, tree fnbody,
+   /* Add in our function body with the co_returns rewritten to final form.  */
+   add_stmt (fnbody);
+ 
++  tree r = build_stmt (loc, LABEL_EXPR, del_promise_label);
++  add_stmt (r);
++
+   /* We are done with the frame, but if the ramp still has a hold on it
+      we should not cleanup.  So decrement the refcount and then return to
+      the ramp if it is > 0.  */
+@@ -2727,7 +2730,7 @@ build_actor_fn (location_t loc, tree coro_frame_type, tree actor, tree fnbody,
+   tree released = build2_loc (loc, MINUS_EXPR, short_unsigned_type_node,
+ 			      coro_frame_refcount,
+ 			      build_int_cst (short_unsigned_type_node, 1));
+-  tree r = cp_build_modify_expr (loc, coro_frame_refcount, NOP_EXPR, released,
++  r = cp_build_modify_expr (loc, coro_frame_refcount, NOP_EXPR, released,
+ 				 tf_warning_or_error);
+   finish_expr_stmt (r);
+   tree cond = build2_loc (loc, NE_EXPR, short_unsigned_type_node,
+@@ -2740,8 +2743,6 @@ build_actor_fn (location_t loc, tree coro_frame_type, tree actor, tree fnbody,
+   finish_if_stmt (ramp_cu_if);
+ 
+   /* Otherwise, do the tail of the function; first cleanups.  */
+-  r = build_stmt (loc, LABEL_EXPR, del_promise_label);
+-  add_stmt (r);
+ 
+   /* Destructors for the things we built explicitly.
+      promise... */
+@@ -5255,6 +5256,23 @@ cp_coroutine_transform::build_ramp_function ()
+       push_cleanup (p, r, /*eh_only*/false);
+     }
+ 
++  /* Now that we've constructed everything in the frame, consider it
++     used...  */
++  r = cp_build_modify_expr (loc, coro_frame_refcount, NOP_EXPR,
++			    build_int_cst (short_unsigned_type_node, 1),
++			    tf_warning_or_error);
++  finish_expr_stmt (r);
++  /* ... but when we finish we want to release that, and we want to do that
++     before the frame cleanups run.  But after the gro cleanup, in case it
++     calls destroy (PR121961).  */
++  tree released
++    = build2_loc (loc, MINUS_EXPR, short_unsigned_type_node,
++		  coro_frame_refcount,
++		  build_int_cst (short_unsigned_type_node, 1));
++  released = cp_build_modify_expr (loc, coro_frame_refcount, NOP_EXPR, released,
++				 tf_warning_or_error);
++  push_cleanup (NULL_TREE, released, /*eh_only*/false);
++
+   tree get_ro
+     = coro_build_promise_expression (orig_fn_decl, p,
+ 				     coro_get_return_object_identifier,
+@@ -5316,20 +5334,7 @@ cp_coroutine_transform::build_ramp_function ()
+ 	push_cleanup (coro_gro, coro_gro_cleanup, /*eh_only*/false);
+     }
+ 
+-  /* Start the coroutine body, we now have a use of the frame...  */
+-  r = cp_build_modify_expr (loc, coro_frame_refcount, NOP_EXPR,
+-			    build_int_cst (short_unsigned_type_node, 1),
+-			    tf_warning_or_error);
+-  finish_expr_stmt (r);
+-  /* ... but when we finish we want to release that, and we want to do that
+-     before any of the other cleanups run.  */
+-  tree released
+-    = build2_loc (loc, MINUS_EXPR, short_unsigned_type_node, coro_frame_refcount,
+-		  build_int_cst (short_unsigned_type_node, 1));
+-  released = cp_build_modify_expr (loc, coro_frame_refcount, NOP_EXPR, released,
+-				 tf_warning_or_error);
+-  push_cleanup (NULL_TREE, released, /*eh_only*/false);
+-
++  /* Start the coroutine body.  */
+   r = build_call_expr_loc (fn_start, resumer, 1, coro_fp);
+   finish_expr_stmt (r);
+ 
+diff --git a/gcc/testsuite/g++.dg/asan/coroutines1.C b/gcc/testsuite/g++.dg/asan/coroutines1.C
+new file mode 100644
+index 000000000000..eb8909bdc832
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/asan/coroutines1.C
+@@ -0,0 +1,71 @@
++// PR c++/121961
++// { dg-additional-options "-fsanitize=address" }
++// { dg-do run { target c++20 } }
++
++#include <coroutine>
++
++struct Result
++{
++  int Value;
++};
++
++template<typename... Args>
++struct std::coroutine_traits<Result, Args...>
++{
++  struct promise_type;
++
++  struct Wrapper
++  {
++    std::coroutine_handle<promise_type> Handle_;
++    bool Own_ = false;
++
++    ~Wrapper ()
++    {
++      if (Own_)
++	Handle_.destroy ();
++    }
++
++    operator Result ()
++    {
++      Own_ = true;
++      return { Handle_.promise ().Value_ };
++    }
++  };
++
++  struct promise_type
++  {
++    int Value_ = 0;
++
++    std::suspend_never initial_suspend () noexcept { return {}; }
++    std::suspend_always final_suspend () noexcept { return {}; }
++    void unhandled_exception () {}
++
++    void return_value (int v) { Value_ = v; }
++
++    Wrapper get_return_object ()
++    {
++      return { std::coroutine_handle<promise_type>::from_promise (*this) };
++    }
++  };
++};
++
++struct Awaitable
++{
++  int V_;
++  bool await_ready () const noexcept { return true; }
++  void await_suspend (std::coroutine_handle<>) const noexcept {}
++  int await_resume () const noexcept { return V_; }
++};
++
++Result simple ()
++{
++  auto a = co_await Awaitable { 3 };
++  auto b = co_await Awaitable { 5 };
++  co_return a * b;
++}
++
++int main ()
++{
++  auto r = simple ();
++  return r.Value == 15 ? 0 : 1;
++}
+-- 
+2.43.7
+
+

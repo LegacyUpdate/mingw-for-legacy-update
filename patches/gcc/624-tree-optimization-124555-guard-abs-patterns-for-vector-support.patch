@@ -1,0 +1,128 @@
+From b98452de6a0b289cd1ae95246c1ad513f8fdb668 Mon Sep 17 00:00:00 2001
+From: Richard Biener <rguenther@suse.de>
+Date: Wed, 18 Mar 2026 10:15:00 +0100
+Subject: [PATCH] tree-optimization/124555 - guard abs patterns for vector
+ support
+
+The following adds missing vector support checks to abs producing
+match.pd patterns.  The g++.dg/absvect.C shows that we previously
+then lowered this to non-vector unless you add -msse4 on x86_64
+at least.
+
+	PR tree-optimization/124555
+	* match.pd ((A - B) >=/> 0 ? (A - B) : (B - A) -> abs (A - B)):
+	Guard the vector case with target_supports_op_p checks.
+	((A - B) <=/< 0 ? (A - B) : (B - A) -> -abs (A - B)): Likewise.
+	((type)A >=/> 0 ? A : -A -> abs (A)): Likewise.
+	((type)A <=/< 0 ? A : -A -> -abs (A)): Likewise.
+
+	* gcc.dg/torture/pr124555.c: New testcase.
+	* g++.dg/absvect.C: Restrict dump scan to x86-64 and force
+	-msse4 there.
+
+(cherry picked from commit c97e6d7be7d51cd812b2acde680cd9704bae3c70)
+---
+ gcc/match.pd                            | 18 ++++++++++++++----
+ gcc/testsuite/g++.dg/absvect.C          |  3 ++-
+ gcc/testsuite/gcc.dg/torture/pr124555.c | 25 +++++++++++++++++++++++++
+ 3 files changed, 41 insertions(+), 5 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.dg/torture/pr124555.c
+
+diff --git a/gcc/match.pd b/gcc/match.pd
+index 05325e1da1e7..52c7d9e44668 100644
+--- a/gcc/match.pd
++++ b/gcc/match.pd
+@@ -6738,7 +6738,9 @@ DEFINE_INT_AND_FLOAT_ROUND_FN (RINT)
+ 	 && !TYPE_UNSIGNED (TREE_TYPE (@1))
+ 	 && element_precision (@1)
+ 	      <= element_precision (@0)
+-	 && bitwise_equal_p (@1, @2))
++	 && bitwise_equal_p (@1, @2)
++	 && (!VECTOR_TYPE_P (type)
++	     || target_supports_op_p (type, ABS_EXPR, optab_vector)))
+     (if (TYPE_UNSIGNED (TREE_TYPE (@2)))
+       (with {
+ 	tree stype = signed_type_for (TREE_TYPE (@2));
+@@ -6756,7 +6758,10 @@ DEFINE_INT_AND_FLOAT_ROUND_FN (RINT)
+ 	 && !TYPE_UNSIGNED (TREE_TYPE (@1))
+ 	 && element_precision (@1)
+ 	      <= element_precision (@0)
+-	 && bitwise_equal_p (@1, @2))
++	 && bitwise_equal_p (@1, @2)
++	 && (!VECTOR_TYPE_P (type)
++	     || (target_supports_op_p (type, ABS_EXPR, optab_vector)
++		 && target_supports_op_p (type, NEGATE_EXPR, optab_vector))))
+       (if ((ANY_INTEGRAL_TYPE_P (TREE_TYPE (@2))
+ 	      && !TYPE_OVERFLOW_WRAPS (TREE_TYPE (@2)))
+ 	    || TYPE_UNSIGNED (TREE_TYPE (@2)))
+@@ -6795,7 +6800,9 @@ DEFINE_INT_AND_FLOAT_ROUND_FN (RINT)
+   (simplify
+    (cnd (cmp (minus@0 @1 @2) zerop) @0 (minus @2 @1))
+    (if (!HONOR_SIGNED_ZEROS (type)
+-	&& !TYPE_UNSIGNED (type))
++	&& !TYPE_UNSIGNED (type)
++	&& (!VECTOR_TYPE_P (type)
++	    || target_supports_op_p (type, ABS_EXPR, optab_vector)))
+     (abs @0))))
+  /* (A - B) <=/< 0 ? (A - B) : (B - A)    same as -abs (A - B) */
+  (for cmp (le lt)
+@@ -6804,7 +6811,10 @@ DEFINE_INT_AND_FLOAT_ROUND_FN (RINT)
+    (if (!HONOR_SIGNED_ZEROS (type)
+ 	&& !TYPE_UNSIGNED (type))
+     (if (ANY_INTEGRAL_TYPE_P (type)
+-	 && !TYPE_OVERFLOW_WRAPS (type))
++	 && !TYPE_OVERFLOW_WRAPS (type)
++	 && (!VECTOR_TYPE_P (type)
++	     || (target_supports_op_p (type, ABS_EXPR, optab_vector)
++		 && target_supports_op_p (type, NEGATE_EXPR, optab_vector))))
+      (with {
+         tree utype = unsigned_type_for (type);
+       }
+diff --git a/gcc/testsuite/g++.dg/absvect.C b/gcc/testsuite/g++.dg/absvect.C
+index 5cf2ca307f43..d28ea846d74d 100644
+--- a/gcc/testsuite/g++.dg/absvect.C
++++ b/gcc/testsuite/g++.dg/absvect.C
+@@ -1,6 +1,7 @@
+ /* { dg-do compile } */
+ /* { dg-options "-Ofast -fdump-tree-phiopt1" } */
+-/* { dg-final { scan-tree-dump-times " = ABS_EXPR <x_\[0-9]*\\\(D\\\)>;" 1 "phiopt1" } } */
++/* { dg-additional-options "-msse4" { target { x86_64-*-* i?86-*-* } } } */
++/* { dg-final { scan-tree-dump-times " = ABS_EXPR <x_\[0-9]*\\\(D\\\)>;" 1 "phiopt1" { target { x86_64-*-* i?86-*-* } } } } */
+ 
+ typedef int v2si __attribute__ ((vector_size (2 * sizeof(int))));
+ typedef short v2hi __attribute__ ((vector_size (2 * sizeof(short))));
+diff --git a/gcc/testsuite/gcc.dg/torture/pr124555.c b/gcc/testsuite/gcc.dg/torture/pr124555.c
+new file mode 100644
+index 000000000000..668ad7b904ba
+--- /dev/null
++++ b/gcc/testsuite/gcc.dg/torture/pr124555.c
+@@ -0,0 +1,25 @@
++/* { dg-additional-options "-fwrapv" } */
++
++int vsad8_c_y;
++char *vsad8_c_s1, *vsad8_c_s2;
++long vsad8_c_stride;
++int vsad8_c()
++{
++  int score, x;
++  for (; vsad8_c_y; vsad8_c_y++)
++    {
++      x = 0;
++      for (; x < 8; x++)
++	score += (vsad8_c_s1[x] - vsad8_c_s2[x] - vsad8_c_s1[x + vsad8_c_stride]
++	    + vsad8_c_s2[x + vsad8_c_stride]) >= 0
++	    ? vsad8_c_s1[x] - vsad8_c_s2[x] -
++	    vsad8_c_s1[x + vsad8_c_stride] +
++	    vsad8_c_s2[x + vsad8_c_stride]
++	    : -(vsad8_c_s1[x] - vsad8_c_s2[x] -
++		vsad8_c_s1[x + vsad8_c_stride] +
++		vsad8_c_s2[x + vsad8_c_stride]);
++      vsad8_c_s1 += vsad8_c_stride;
++      vsad8_c_s2 += vsad8_c_stride;
++    }
++  return score;
++}
+-- 
+2.43.7
+
+

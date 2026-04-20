@@ -1,0 +1,34 @@
+From b4ee7800bdc1cfd4e0d0f87627ee9ee73feae47a Mon Sep 17 00:00:00 2001
+From: Jonathan Wakely <jwakely@redhat.com>
+Date: Fri, 20 Mar 2026 11:35:14 +0000
+Subject: [PATCH] libstdc++: Disable PCH for failing test [PR124568]
+
+The diagnostic pragmas that suppress the warning in this test don't seem
+to work with PCH. Let's just disable PCH for that test.
+
+libstdc++-v3/ChangeLog:
+
+	PR libstdc++/124568
+	* testsuite/24_iterators/istreambuf_iterator/105580.cc: Add
+	no_pch option.
+
+(cherry picked from commit 017e0514a1d7f799d2fa8cfcf29d627e024297a8)
+---
+ .../testsuite/24_iterators/istreambuf_iterator/105580.cc         | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/libstdc++-v3/testsuite/24_iterators/istreambuf_iterator/105580.cc b/libstdc++-v3/testsuite/24_iterators/istreambuf_iterator/105580.cc
+index e1ef4b107396..757e6b7e8440 100644
+--- a/libstdc++-v3/testsuite/24_iterators/istreambuf_iterator/105580.cc
++++ b/libstdc++-v3/testsuite/24_iterators/istreambuf_iterator/105580.cc
+@@ -1,5 +1,6 @@
+ // { dg-compile }
+ // { dg-additional-options "-Wnull-dereference" }
++// { dg-add-options no_pch }
+ 
+ #include <string>
+ #include <sstream>
+-- 
+2.43.7
+
+

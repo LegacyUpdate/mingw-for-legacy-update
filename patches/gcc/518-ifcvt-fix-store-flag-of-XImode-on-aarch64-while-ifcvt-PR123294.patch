@@ -1,0 +1,101 @@
+From 1fbe552f9235d66499ad6a2a24ac6c642bb6ba59 Mon Sep 17 00:00:00 2001
+From: Andrew Pinski <andrew.pinski@oss.qualcomm.com>
+Date: Sun, 1 Feb 2026 15:41:52 -0800
+Subject: [PATCH] ifcvt: Fix store flag of XImode on aarch64 while ifcvt
+ [PR123294]
+
+In the testcase ifcvt is trying to do a emit_store_flag into a XImode.
+That will cause an ICE because XImode does not have any arithmetic optabs
+associated with it. This is because it is greater than MAX_FIXED_MODE_SIZE
+(along other things).
+noce_emit_store_flag already has code to reject non-scalar modes, so
+this adds a new check for modes that are greater than MAX_FIXED_MODE_SIZE.
+
+Bootstrapped and tested on aarch64-linux-gnu.
+
+	PR rtl-optimization/123294
+
+gcc/ChangeLog:
+
+	* ifcvt.cc (noce_emit_store_flag): Reject modes
+	greater than MAX_FIXED_MODE_SIZE.
+
+gcc/testsuite/ChangeLog:
+
+	* gcc.dg/pr123294-1.c: New test.
+	* gcc.target/aarch64/pr123294-1.c: New test.
+
+Signed-off-by: Andrew Pinski <andrew.pinski@oss.qualcomm.com>
+(cherry picked from commit e02eba0dc7d1aa62c5edf7108e641bcb5c5584b8)
+---
+ gcc/ifcvt.cc                                  |  4 ++++
+ gcc/testsuite/gcc.dg/pr123294-1.c             | 15 +++++++++++++++
+ gcc/testsuite/gcc.target/aarch64/pr123294-1.c | 18 ++++++++++++++++++
+ 3 files changed, 37 insertions(+)
+ create mode 100644 gcc/testsuite/gcc.dg/pr123294-1.c
+ create mode 100644 gcc/testsuite/gcc.target/aarch64/pr123294-1.c
+
+diff --git a/gcc/ifcvt.cc b/gcc/ifcvt.cc
+index 6d67bef41c88..da8631f3c59c 100644
+--- a/gcc/ifcvt.cc
++++ b/gcc/ifcvt.cc
+@@ -893,6 +893,10 @@ noce_emit_store_flag (struct noce_if_info *if_info, rtx x, bool reversep,
+   if (cond_complex || !SCALAR_INT_MODE_P (GET_MODE (x)))
+     return NULL_RTX;
+ 
++  /* Don't try if mode of X is more than the max fixed mode size.  */
++  if (known_le (MAX_FIXED_MODE_SIZE, GET_MODE_BITSIZE (GET_MODE (x))))
++    return NULL_RTX;
++
+   return emit_store_flag (x, code, XEXP (cond, 0),
+ 			  XEXP (cond, 1), VOIDmode,
+ 			  (code == LTU || code == LEU
+diff --git a/gcc/testsuite/gcc.dg/pr123294-1.c b/gcc/testsuite/gcc.dg/pr123294-1.c
+new file mode 100644
+index 000000000000..535207993b26
+--- /dev/null
++++ b/gcc/testsuite/gcc.dg/pr123294-1.c
+@@ -0,0 +1,15 @@
++/* { dg-do compile } */
++/* { dg-options "-O1 -fno-tree-dse -fno-tree-dce" } */
++/* PR rtl-optimization/123294 */
++
++typedef unsigned a;
++int b;
++void g(__attribute__((__vector_size__(4 * sizeof(a)))) a *);
++a d() {
++  __attribute__((__vector_size__(4 * sizeof(a)))) a e[5];
++  if (0 > b) {
++    __attribute__((__vector_size__(8 * sizeof(a)))) a f = {b, b};
++    e[0] = __builtin_shufflevector(f, f, 0, 1, 2, 3);
++  }
++  return 1;
++}
+diff --git a/gcc/testsuite/gcc.target/aarch64/pr123294-1.c b/gcc/testsuite/gcc.target/aarch64/pr123294-1.c
+new file mode 100644
+index 000000000000..1ad9c2305ac0
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/aarch64/pr123294-1.c
+@@ -0,0 +1,18 @@
++/* { dg-do compile } */
++/* { dg-options "-O1" } */
++/* PR rtl-optimization/123294 */
++
++#include <arm_neon.h>
++
++typedef unsigned a;
++int b;
++a d() {
++  __attribute__((__vector_size__(4 * sizeof(a)))) a e[5];
++  if (0 > b) {
++    __attribute__((__vector_size__(8 * sizeof(a)))) a f = {b, b};
++    e[0] = __builtin_shufflevector(f, f, 0, 1, 2, 3);
++  }
++  while (vqadd_u64((uint64x1_t){3}, (uint64x1_t){0})[0])
++    ;
++  return e[0][3];
++}
+-- 
+2.43.7
+
+

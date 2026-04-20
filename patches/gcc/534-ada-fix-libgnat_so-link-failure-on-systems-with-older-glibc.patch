@@ -1,0 +1,50 @@
+From d562563661045e5158507d57a94fbb3781dcf8c0 Mon Sep 17 00:00:00 2001
+From: Matthias Klose <doko@gcc.gnu.org>
+Date: Sat, 14 Mar 2026 13:23:47 +0100
+Subject: [PATCH] Ada: Fix libgnat.so link failure on systems with older glibc
+
+It's a regression present on all active branches for older glibc versions,
+where dladdr is still in the libdl.so library, and not included in libc.so
+as in newer glibc versions.
+
+gcc/ada/
+	PR ada/107475
+	* Makefile.rtl (s390% linux%): Define MISCLIB.
+	(arm% linux-gnueabi%): Likewise.
+	(%x32 linux%): Likewise.
+---
+ gcc/ada/Makefile.rtl | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/gcc/ada/Makefile.rtl b/gcc/ada/Makefile.rtl
+index f9ee2f6d1e55..bf3786df70ee 100644
+--- a/gcc/ada/Makefile.rtl
++++ b/gcc/ada/Makefile.rtl
+@@ -2030,6 +2030,7 @@ ifeq ($(strip $(filter-out s390% linux%,$(target_cpu) $(target_os))),)
+   EXTRA_GNATRTL_TASKING_OBJS=s-linux.o
+   EH_MECHANISM=-gcc
+   THREADSLIB = -lpthread
++  MISCLIB = -ldl
+   GNATLIB_SHARED = gnatlib-shared-dual
+   LIBRARY_VERSION := $(LIB_VERSION)
+ endif
+@@ -2524,6 +2525,7 @@ ifeq ($(strip $(filter-out arm% linux-gnueabi%,$(target_cpu) $(target_os))),)
+   EXTRA_GNATRTL_TASKING_OBJS=s-linux.o
+   EH_MECHANISM=-arm
+   THREADSLIB = -lpthread
++  MISCLIB = -ldl
+   GNATLIB_SHARED = gnatlib-shared-dual
+   GMEM_LIB = gmemlib
+   LIBRARY_VERSION := $(LIB_VERSION)
+@@ -2965,6 +2967,7 @@ ifeq ($(strip $(filter-out %x32 linux%,$(target_cpu) $(target_os))),)
+   EXTRA_GNATRTL_TASKING_OBJS=s-linux.o a-exetim.o
+   EH_MECHANISM=-gcc
+   THREADSLIB=-lpthread -lrt
++  MISCLIB = -ldl
+   GNATLIB_SHARED=gnatlib-shared-dual
+   GMEM_LIB = gmemlib
+   LIBRARY_VERSION := $(LIB_VERSION)
+-- 
+2.43.7
+
+

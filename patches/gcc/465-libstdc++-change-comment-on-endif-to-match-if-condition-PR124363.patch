@@ -1,0 +1,41 @@
+From 68e979bfe6b752c2568d7570dbf563a95514ebfc Mon Sep 17 00:00:00 2001
+From: Jonathan Wakely <jwakely@redhat.com>
+Date: Wed, 4 Mar 2026 11:58:37 +0000
+Subject: [PATCH] libstdc++: Change comment on #endif to match #if condition
+ [PR124363]
+
+I changed the #if in r8-3123-gc6888c62577671 but didn't make the
+corresponding change to the #endif.
+
+This backport also includes the fix for the #endif of the include guard,
+which was changed by r16-6038-g62c126db6b6017 to refer to the correct
+macro.
+
+libstdc++-v3/ChangeLog:
+
+	PR libstdc++/124363
+	* include/std/string_view: Adjust comment on #endif to match #if
+	condition. Likewise for header guard.
+
+(cherry picked from commit 47339c8f8a477464b6fe44992200bd2b840da8f4)
+---
+ libstdc++-v3/include/std/string_view | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/libstdc++-v3/include/std/string_view b/libstdc++-v3/include/std/string_view
+index 842f6ad89af1..35b7b0968fce 100644
+--- a/libstdc++-v3/include/std/string_view
++++ b/libstdc++-v3/include/std/string_view
+@@ -910,6 +910,6 @@ _GLIBCXX_END_NAMESPACE_VERSION
+ 
+ #include <bits/string_view.tcc>
+ 
+-#endif // __cplusplus <= 201402L
++#endif // C++17
+ 
+-#endif // _GLIBCXX_EXPERIMENTAL_STRING_VIEW
++#endif // _GLIBCXX_STRING_VIEW
+-- 
+2.43.7
+
+

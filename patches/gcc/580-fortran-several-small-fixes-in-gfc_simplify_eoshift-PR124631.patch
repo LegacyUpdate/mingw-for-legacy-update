@@ -1,0 +1,63 @@
+From d78a04afbb347e5c5abfcd41141bf9a1bd0e2cc3 Mon Sep 17 00:00:00 2001
+From: Harald Anlauf <anlauf@gmx.de>
+Date: Thu, 26 Mar 2026 21:35:11 +0100
+Subject: [PATCH] Fortran: several small fixes in gfc_simplify_eoshift
+ [PR124631]
+
+	PR fortran/124631
+
+gcc/fortran/ChangeLog:
+
+	* simplify.cc (gfc_simplify_eoshift): Initialize sstride[0] to
+	prevent pointer arithmetic with undefined offset.  Fix several
+	frontend memleaks.
+
+(cherry picked from commit 73933cdc44dea4b1bd5e1a2ef04d1df6edeb27c6)
+---
+ gcc/fortran/simplify.cc | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/gcc/fortran/simplify.cc b/gcc/fortran/simplify.cc
+index 92ab17b2b963..451d9de6ad59 100644
+--- a/gcc/fortran/simplify.cc
++++ b/gcc/fortran/simplify.cc
+@@ -2717,6 +2717,7 @@ gfc_simplify_eoshift (gfc_expr *array, gfc_expr *shift, gfc_expr *boundary,
+   /* Shut up compiler */
+   len = 1;
+   rsoffset = 1;
++  sstride[0] = 0;
+ 
+   n = 0;
+   for (d=0; d < array->rank; d++)
+@@ -2786,7 +2787,7 @@ gfc_simplify_eoshift (gfc_expr *array, gfc_expr *shift, gfc_expr *boundary,
+ 	{
+ 	  while (n--)
+ 	    {
+-	      *dest = gfc_copy_expr (bnd_ctor->expr);
++	      *dest = bnd_ctor->expr;
+ 	      dest += rsoffset;
+ 	    }
+ 	}
+@@ -2794,7 +2795,7 @@ gfc_simplify_eoshift (gfc_expr *array, gfc_expr *shift, gfc_expr *boundary,
+ 	{
+ 	  while (n--)
+ 	    {
+-	      *dest = gfc_copy_expr (bnd);
++	      *dest = bnd;
+ 	      dest += rsoffset;
+ 	    }
+ 	}
+@@ -2835,6 +2836,9 @@ gfc_simplify_eoshift (gfc_expr *array, gfc_expr *shift, gfc_expr *boundary,
+ 				   NULL);
+     }
+ 
++  free (arrayvec);
++  free (resultvec);
++
+  final:
+   if (temp_boundary)
+     gfc_free_expr (bnd);
+-- 
+2.43.7
+
+

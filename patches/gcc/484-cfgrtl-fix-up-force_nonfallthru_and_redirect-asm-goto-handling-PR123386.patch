@@ -1,0 +1,300 @@
+From e70e27dd76928cb8b92d4f64820a7844c7d541dd Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Wed, 11 Feb 2026 11:31:26 +0100
+Subject: [PATCH] cfgrtl: Fix up force_nonfallthru_and_redirect asm goto
+ handling [PR123386]
+
+force_nonfallthru_and_redirect has some extra code to handle asm gotos
+if we are forcing or redirecting the EDGE_FALLTHRU in case.  This was
+done for PR51767, PR53589, PR54127.
+It is done for the cases where some asm goto label points to the bb
+after the fallthru edge (i.e. there is edge sharing between the fallthru
+and the label, partly or fully degenerate asm goto) and/or if the label
+points to the TARGET bb (before/after).
+In such case it changes the label from e->dest's label to target's label
+and similarly to the case of 2+ successor e->src a new bb is created
+as new fallthru from e->src and in the asm goto case an additional edge
+is added, so there is
+ |
+asm goto -----+    maybe other edges
+ | fallthru    \
+ v              v
+ jumpblock -> target
+and the jumpblock -> target edge isn't EDGE_FALLTHRU.
+This was done that way to fix various ICEs with the degenerate asm gotos,
+see above for list.
+I believe it will still ICE if we decide to force_nonfallthru_and_redirect
+E bb5->bb6 to l2, because in that case there are already two+ edges, one
+pointing from bb5->l2 and we create another edge bb5->l2:
+bb5:
+asm goto ("" : : : : (l2));
+bb6:
+...
+l2:
+but maybe nothing tries that in that case.  Anyway, the reason why
+the following two (PR116600 and PR123386) testcases are miscompiled is
+that we try to (during shrink-wrapping) emit some insns on the bb3->bb7
+edge, and see bb7 predecessor edge is EDGE_FALLTHRU in:
+bb3:
+  __asm__ goto ("" : : : : d);
+  if (c)
+    bar (a);
+bb6:
+  __asm__ goto ("" : : : : d);
+d: // == bb7
+in rtl_split_edge:
+  /* We are going to place the new block in front of edge destination.
+     Avoid existence of fallthru predecessors.  */
+  if ((edge_in->flags & EDGE_FALLTHRU) == 0)
+    {
+      edge e = find_fallthru_edge (edge_in->dest->preds);
+
+      if (e)
+        force_nonfallthru (e);
+    }
+Now, the asm goto in bb6 is degenerate, so shrink-wrapping isn't aware
+that there would be multiple edges from it, there is just single one.
+But we still while splitting the bb3->bb7 edge in order to emit there
+pending insns on that edge turn the single successor asm goto bb into
+one with two successors (initially with two different ways to reach
+the same destination).  But unfortunately such change confuses the
+shrink-wrapping logic which isn't aware of such a change and so the
+separate shrink wrapping insns end up just on one of the paths instead
+of being on both, and we then ICE in dwarf2 pass because there is an
+disagreement on the CFI state (of course it is a wrong-code too).
+
+Note, force_nonfallthru calls force_nonfallthru_and_redirect with
+target set to e->dest.
+
+The following patch reworks this.
+Instead of creating that
+ |
+asm goto -----+    maybe other edges
+ | fallthru    \
+ v              v
+ jumpblock -> target
+for initially degenerate asm goto we now create
+ |
+asm goto    maybe other edges
+ | fallthru
+ v
+ jumpblock -> target
+i.e. the asm goto keeps being degenerate, all we've changed is adding
+a new bb on the fallthru edge and making the edge from that new bb
+non-fallthru.  Furthermore, for the case where there would be before
+an asm goto -> target edge before for the e->dest != target case,
+those edges are untouched.
+For the immediate effect after the operation, the asm goto keeps
+the existing behavior, if it falls through, it will reach target
+by hopping through jumpblock, if it jumps to that label, previously
+it jumped directly to target, now it jumps to jumpblock and from there
+to target.  But shrink-wrapping etc. then put the right fixups everywhere
+where it belongs.
+
+2026-02-11  Jakub Jelinek  <jakub@redhat.com>
+
+	PR rtl-optimization/116600
+	PR middle-end/123386
+	* cfgrtl.cc (force_nonfallthru_and_redirect): Don't do any
+	asm goto adjustments early, only note in asm_goto_edge if
+	any labels point originally to e->dest head.  After jumpblock
+	creation don't add an extra edge for asm_goto_edge, instead
+	adjust those labels pointing to former e->dest head to point
+	to jumpblock instead.
+
+	* gcc.c-torture/compile/pr116600.c: New test.
+	* gcc.c-torture/compile/pr123386.c: New test.
+
+(cherry picked from commit c158d510ee96158a4f90255148222fb1ce356832)
+---
+ gcc/cfgrtl.cc                                 | 92 +++++++++----------
+ .../gcc.c-torture/compile/pr116600.c          | 24 +++++
+ .../gcc.c-torture/compile/pr123386.c          | 25 +++++
+ 3 files changed, 93 insertions(+), 48 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.c-torture/compile/pr116600.c
+ create mode 100644 gcc/testsuite/gcc.c-torture/compile/pr123386.c
+
+diff --git a/gcc/cfgrtl.cc b/gcc/cfgrtl.cc
+index 310028f1719b..8f693cacac82 100644
+--- a/gcc/cfgrtl.cc
++++ b/gcc/cfgrtl.cc
+@@ -1594,54 +1594,20 @@ force_nonfallthru_and_redirect (edge e, basic_block target, rtx jump_label)
+     }
+ 
+   /* If e->src ends with asm goto, see if any of the ASM_OPERANDS_LABELs
+-     don't point to the target or fallthru label.  */
++     don't point to the fallthru label.  */
+   if (JUMP_P (BB_END (e->src))
+       && target != EXIT_BLOCK_PTR_FOR_FN (cfun)
+       && (e->flags & EDGE_FALLTHRU)
+       && (note = extract_asm_operands (PATTERN (BB_END (e->src)))))
+     {
+-      int i, n = ASM_OPERANDS_LABEL_LENGTH (note);
+-      bool adjust_jump_target = false;
++      int n = ASM_OPERANDS_LABEL_LENGTH (note);
+ 
+-      for (i = 0; i < n; ++i)
+-	{
+-	  if (XEXP (ASM_OPERANDS_LABEL (note, i), 0) == BB_HEAD (e->dest))
+-	    {
+-	      LABEL_NUSES (XEXP (ASM_OPERANDS_LABEL (note, i), 0))--;
+-	      XEXP (ASM_OPERANDS_LABEL (note, i), 0) = block_label (target);
+-	      LABEL_NUSES (XEXP (ASM_OPERANDS_LABEL (note, i), 0))++;
+-	      adjust_jump_target = true;
+-	    }
+-	  if (XEXP (ASM_OPERANDS_LABEL (note, i), 0) == BB_HEAD (target))
++      for (int i = 0; i < n; ++i)
++	if (XEXP (ASM_OPERANDS_LABEL (note, i), 0) == BB_HEAD (e->dest))
++	  {
+ 	    asm_goto_edge = true;
+-	}
+-      if (adjust_jump_target)
+-	{
+-	  rtx_insn *insn = BB_END (e->src);
+-	  rtx note;
+-	  rtx_insn *old_label = BB_HEAD (e->dest);
+-	  rtx_insn *new_label = BB_HEAD (target);
+-
+-	  if (JUMP_LABEL (insn) == old_label)
+-	    {
+-	      JUMP_LABEL (insn) = new_label;
+-	      note = find_reg_note (insn, REG_LABEL_TARGET, new_label);
+-	      if (note)
+-		remove_note (insn, note);
+-	    }
+-	  else
+-	    {
+-	      note = find_reg_note (insn, REG_LABEL_TARGET, old_label);
+-	      if (note)
+-		remove_note (insn, note);
+-	      if (JUMP_LABEL (insn) != new_label
+-		  && !find_reg_note (insn, REG_LABEL_TARGET, new_label))
+-		add_reg_note (insn, REG_LABEL_TARGET, new_label);
+-	    }
+-	  while ((note = find_reg_note (insn, REG_LABEL_OPERAND, old_label))
+-		 != NULL_RTX)
+-	    XEXP (note, 0) = new_label;
+-	}
++	    break;
++	  }
+     }
+ 
+   if (EDGE_COUNT (e->src->succs) >= 2 || abnormal_edge_flags || asm_goto_edge)
+@@ -1680,15 +1646,45 @@ force_nonfallthru_and_redirect (edge e, basic_block target, rtx jump_label)
+          and the reg crossing note should be removed.  */
+       fixup_partition_crossing (new_edge);
+ 
+-      /* If asm goto has any label refs to target's label,
+-	 add also edge from asm goto bb to target.  */
++      /* If asm goto has any label refs to e->dest, change them to point
++	 to jump_block instead.  */
+       if (asm_goto_edge)
+ 	{
+-	  new_edge->probability /= 2;
+-	  jump_block->count /= 2;
+-	  edge new_edge2 = make_edge (new_edge->src, target,
+-				      e->flags & ~EDGE_FALLTHRU);
+-	  new_edge2->probability = probability - new_edge->probability;
++	  int n = ASM_OPERANDS_LABEL_LENGTH (note);
++
++	  for (int i = 0; i < n; ++i)
++	    if (XEXP (ASM_OPERANDS_LABEL (note, i), 0) == BB_HEAD (e->dest))
++	      {
++		LABEL_NUSES (XEXP (ASM_OPERANDS_LABEL (note, i), 0))--;
++		XEXP (ASM_OPERANDS_LABEL (note, i), 0)
++		  = block_label (jump_block);
++		LABEL_NUSES (XEXP (ASM_OPERANDS_LABEL (note, i), 0))++;
++	      }
++
++	  rtx_insn *insn = BB_END (new_edge->src);
++	  rtx note;
++	  rtx_insn *old_label = BB_HEAD (e->dest);
++	  rtx_insn *new_label = BB_HEAD (jump_block);
++
++	  if (JUMP_LABEL (insn) == old_label)
++	    {
++	      JUMP_LABEL (insn) = new_label;
++	      note = find_reg_note (insn, REG_LABEL_TARGET, new_label);
++	      if (note)
++		remove_note (insn, note);
++	    }
++	  else
++	    {
++	      note = find_reg_note (insn, REG_LABEL_TARGET, old_label);
++	      if (note)
++		remove_note (insn, note);
++	      if (JUMP_LABEL (insn) != new_label
++		  && !find_reg_note (insn, REG_LABEL_TARGET, new_label))
++		add_reg_note (insn, REG_LABEL_TARGET, new_label);
++	    }
++	  while ((note = find_reg_note (insn, REG_LABEL_OPERAND, old_label))
++		 != NULL_RTX)
++	    XEXP (note, 0) = new_label;
+ 	}
+ 
+       new_bb = jump_block;
+diff --git a/gcc/testsuite/gcc.c-torture/compile/pr116600.c b/gcc/testsuite/gcc.c-torture/compile/pr116600.c
+new file mode 100644
+index 000000000000..590d4b4663a5
+--- /dev/null
++++ b/gcc/testsuite/gcc.c-torture/compile/pr116600.c
+@@ -0,0 +1,24 @@
++/* PR rtl-optimization/116600 */
++
++int a, b;
++int foo ();
++
++int
++bar ()
++{
++  int c = ({ int d = 0, e = foo ();
++	     b = __builtin_expect (e, 1); if (b) ; else d = 4; d; });
++  if (c)
++    return c;
++  foo ();
++  if (a)
++    __asm__ goto ("" : : : : l);
++l:
++  return 0;
++}
++
++void
++baz ()
++{
++  bar ();
++}
+diff --git a/gcc/testsuite/gcc.c-torture/compile/pr123386.c b/gcc/testsuite/gcc.c-torture/compile/pr123386.c
+new file mode 100644
+index 000000000000..3c6570929514
+--- /dev/null
++++ b/gcc/testsuite/gcc.c-torture/compile/pr123386.c
+@@ -0,0 +1,25 @@
++/* PR middle-end/123386 */
++
++char *a;
++int b;
++
++void
++foo (char *)
++{
++  if (b)
++    __builtin_abort ();
++}
++
++void
++bar (char *c)
++{
++  __asm__ goto ("" : : : : d);
++  foo (a);
++  __asm__ goto ("" : : : : d);
++  if (c)
++    bar (a);
++  __asm__ goto ("" : : : : d);
++d:
++  if (b)
++    __builtin_abort ();
++}
+-- 
+2.43.7
+
+

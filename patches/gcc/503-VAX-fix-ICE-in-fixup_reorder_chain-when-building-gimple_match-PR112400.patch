@@ -1,0 +1,189 @@
+From ad82d77973549268ae77cfcf6dc4edef2d3b53bc Mon Sep 17 00:00:00 2001
+From: Kalvis Duckmanton <kalvisd@gmail.com>
+Date: Mon, 9 Mar 2026 01:36:04 +0000
+Subject: [PATCH] VAX: Fix ICE in fixup_reorder_chain when building
+ gimple_match.cc [PR112400]
+
+When cross-compiling itself for VAX, GCC terminates abruptly with an ICE
+when compiling gimple_match.cc; the root cause seems to be an
+incompletely removed computed jump instruction, which causes the
+assertion in cfgrtl.cc around line 4083, to no longer hold.
+
+I have verified that the problem is present in GCC 15.2.0 and believe
+that it's also present in trunk (based on the fact that the patterns for
+the "casesi1" and "*casesi1" instructions in 15.2.0 and trunk are the
+same).
+
+To fix this issue wrap the limit operand in a USE, to allow `single_set'
+to identify it as an RTL expression setting PC.  This allows the
+optimizer to optimize away case statements branching only to a basic
+block, removing the ICE.
+
+Include a test case reduced from gimple_match.cc, which demonstrates the
+problem in GCC 15.2.0 on NetBSD/amd64 cross-compiling for VAX.
+
+Signed-off-by: Kalvis Duckmanton <kalvisd@gmail.com>
+
+	gcc/
+	PR target/112400
+	* config/vax/vax.md (casesi1): Wrap naked operand 1 with a USE
+	where used with the insn split to.
+	(*casesi1): Likewise naked incoming operand 1.
+
+	gcc/testsuite/
+	PR target/112400
+	* g++.dg/torture/pr112400.C: New file.
+
+(cherry picked from commit 8a9490979b97d6ce3498fde891b04597a48925ed)
+---
+ gcc/config/vax/vax.md                   |   4 +-
+ gcc/testsuite/g++.dg/torture/pr112400.C | 114 ++++++++++++++++++++++++
+ 2 files changed, 116 insertions(+), 2 deletions(-)
+ create mode 100644 gcc/testsuite/g++.dg/torture/pr112400.C
+
+diff --git a/gcc/config/vax/vax.md b/gcc/config/vax/vax.md
+index bb26d276db03..ae5d56ae33ce 100644
+--- a/gcc/config/vax/vax.md
++++ b/gcc/config/vax/vax.md
+@@ -2909,7 +2909,7 @@
+   "#"
+   "reload_completed"
+   [(parallel
+-     [(match_dup 1)
++     [(use (match_dup 1))
+       (set (pc)
+ 	   (plus:SI (sign_extend:SI
+ 		      (mem:HI (plus:SI
+@@ -2922,7 +2922,7 @@
+   "")
+ 
+ (define_insn "*casesi1"
+-  [(match_operand:SI 1 "const_int_operand" "n")
++  [(use (match_operand:SI 1 "const_int_operand" "n"))
+    (set (pc)
+ 	(plus:SI (sign_extend:SI
+ 		   (mem:HI (plus:SI
+diff --git a/gcc/testsuite/g++.dg/torture/pr112400.C b/gcc/testsuite/g++.dg/torture/pr112400.C
+new file mode 100644
+index 000000000000..b703c80ce73d
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/torture/pr112400.C
+@@ -0,0 +1,114 @@
++/* { dg-do compile } */
++/* { dg-options "-Wno-return-type" } */
++
++typedef struct a *b;
++template <typename c, typename d> c e(d);
++enum f { g, h, i };
++enum j { k, l, m, aa };
++struct a {
++  f ab;
++};
++struct af {
++} n;
++struct ah;
++class al;
++b q;
++void r(a *);
++struct o : af {};
++struct p : o {};
++struct ag : p {};
++j s(af *);
++b t();
++f fn4();
++unsigned fn5(ag *);
++b u(ag *, unsigned);
++af *v(b(b), b);
++static bool w(al *, af *, b(b), b aw, b *ax, j) {
++  r(ax[2]);
++  if (aw)
++    return false;
++}
++ag *ay;
++void x(al *at, b as(b), b bb, b bc) {
++  switch (bb->ab)
++  case i:
++    if (af *bd = v(as, bb))
++      if (e<ah *>(bd))
++	switch (fn4())
++	case h: {
++	  b be;
++	  switch (be->ab)
++	  case i:
++	    if (af *bf = v(as, be))
++	      if (e<ah *>(bf))
++		if (ag *bg = e<ag *>(bf))
++		  switch (s(bg)) {
++		  case k:
++		    if (fn5(bg) == 1) {
++		      b bh = u(bg, 0);
++		      bh = t();
++		      switch (bc->ab)
++		      case g: {
++			b ax[]{be, bh, bc};
++			w(at, &n, as, q, ax, k);
++		      }
++		    }
++		    break;
++		  case l:
++		    if (fn5(bg) == 1) {
++		      b bh = u(bg, 0);
++		      bh = t();
++		      switch (bc->ab)
++		      case g: {
++			b ax[]{be, bh, bc};
++			w(at, &n, as, q, ax, l);
++		      }
++		    }
++		  }
++	}
++	  else switch (s(ay)) {
++	  case k:
++	    if (fn5(ay) == 1) {
++	      b be = u(ay, 0);
++	      be = t();
++	      switch (bc->ab)
++	      case g: {
++		b ax[]{bb, be, bc};
++		w(at, &n, as, q, ax, k);
++	      }
++	    }
++	    break;
++	  case l:
++	    if (fn5(ay) == 1) {
++	      b be = u(ay, 0);
++	      be = t();
++	      switch (bc->ab)
++	      case g: {
++		b ax[]{bb, be, bc};
++		w(at, &n, as, q, ax, l);
++	      }
++	    }
++	    break;
++	  case m:
++	    if (fn5(ay) == 1) {
++	      b be = u(ay, 0);
++	      be = t();
++	      switch (bc->ab)
++	      case g: {
++		b ax[]{bb, be, bc};
++		w(at, &n, as, q, ax, m);
++	      }
++	    }
++	    break;
++	  case aa:
++	    if (fn5(ay) == 1) {
++	      b be = u(ay, 0);
++	      be = t();
++	      switch (bc->ab)
++	      case g: {
++		b ax[]{bb, be, bc};
++		w(at, &n, as, q, ax, aa);
++	      }
++	    }
++	  }
++}
+-- 
+2.43.7
+
+

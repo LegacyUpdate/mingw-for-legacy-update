@@ -1,0 +1,96 @@
+From 628cc8568e7dafaabf2c9e7165124a491377f52a Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Fri, 30 Jan 2026 10:56:10 +0100
+Subject: [PATCH] libcpp: Fix up comment handling in -fdirectives-only
+ preprocessing [PR123273]
+
+Back in 2020 Nathan rewrote the -E -fdirectives-only preprocessing.
+In PR103130 a year and half later I've fixed the handling of comments
+so that /* \*/ is considered as full comment even when * is escaped,
+to match the normal preprocessing.
+The following testcases shows further bugs in the comment handling.
+One is that /* *\/ should not be considered as full comment (i.e.
+when the / after * is escaped).  And another one is that the code
+was treating any number of backslashes as escape, which is wrong,
+only a single backslash is an escape, two backslashes preprocess as
+one backslash, three as one backslash and one escape, etc.
+So, while /* *\
+/ is a full comment, /* *\\
+/ or /* *\\\\\\\\\\\\\
+/ is not.
+
+2026-01-30  Jakub Jelinek  <jakub@redhat.com>
+
+	PR preprocessor/123273
+	* lex.cc (cpp_directive_only_process): Only go to done_comment
+	for '/' if star is true and esc is false.  When seeing '\\' with
+	esc set to true, clear esc as well as star instead of keeping esc
+	set.
+
+	* c-c++-common/cpp/dir-only-10.c: New test.
+	* c-c++-common/cpp/dir-only-11.c: New test.
+
+(cherry picked from commit 1297b7204aca7fbad741ae02086fa5e134083a5f)
+---
+ gcc/testsuite/c-c++-common/cpp/dir-only-10.c |  5 +++++
+ gcc/testsuite/c-c++-common/cpp/dir-only-11.c |  6 ++++++
+ libcpp/lex.cc                                | 10 ++++++++--
+ 3 files changed, 19 insertions(+), 2 deletions(-)
+ create mode 100644 gcc/testsuite/c-c++-common/cpp/dir-only-10.c
+ create mode 100644 gcc/testsuite/c-c++-common/cpp/dir-only-11.c
+
+diff --git a/gcc/testsuite/c-c++-common/cpp/dir-only-10.c b/gcc/testsuite/c-c++-common/cpp/dir-only-10.c
+new file mode 100644
+index 000000000000..902d378fd3a2
+--- /dev/null
++++ b/gcc/testsuite/c-c++-common/cpp/dir-only-10.c
+@@ -0,0 +1,5 @@
++/* PR preprocessor/123273 */
++/* { dg-do preprocess } */
++/* { dg-options -fdirectives-only } */
++
++/* *\/""" */
+diff --git a/gcc/testsuite/c-c++-common/cpp/dir-only-11.c b/gcc/testsuite/c-c++-common/cpp/dir-only-11.c
+new file mode 100644
+index 000000000000..33437bd508cb
+--- /dev/null
++++ b/gcc/testsuite/c-c++-common/cpp/dir-only-11.c
+@@ -0,0 +1,6 @@
++/* PR preprocessor/123273 */
++/* { dg-do preprocess } */
++/* { dg-options -fdirectives-only } */
++
++/* *\\
++/""" */
+diff --git a/libcpp/lex.cc b/libcpp/lex.cc
+index a3ba74de3e30..b6dcd46a3726 100644
+--- a/libcpp/lex.cc
++++ b/libcpp/lex.cc
+@@ -5465,7 +5465,13 @@ cpp_directive_only_process (cpp_reader *pfile,
+ 		    switch (c)
+ 		      {
+ 		      case '\\':
+-			esc = true;
++			if (esc)
++			  {
++			    star = false;
++			    esc = false;
++			  }
++			else
++			  esc = true;
+ 			break;
+ 
+ 		      case '\r':
+@@ -5496,7 +5502,7 @@ cpp_directive_only_process (cpp_reader *pfile,
+ 			break;
+ 
+ 		      case '/':
+-			if (star)
++			if (star && !esc)
+ 			  goto done_comment;
+ 			/* FALLTHROUGH  */
+ 
+-- 
+2.43.7
+
+

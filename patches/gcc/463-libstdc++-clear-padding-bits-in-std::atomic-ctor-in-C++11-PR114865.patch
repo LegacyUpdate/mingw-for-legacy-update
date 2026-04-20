@@ -1,0 +1,183 @@
+From 283f85bc232a173ed9b7a7030e7027afdc85a357 Mon Sep 17 00:00:00 2001
+From: Patrick Palka <ppalka@redhat.com>
+Date: Wed, 11 Feb 2026 21:35:21 -0500
+Subject: [PATCH] libstdc++: Clear padding bits in std::atomic ctor in C++11
+ [PR114865]
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf8
+Content-Transfer-Encoding: 8bit
+
+After the front end change r16-7199 both GCC and Clang allow non-empty
+constexpr constructor bodies in C++11 as an extension, so we can now
+unconditionally enable the __builtin_clear_padding logic in std::atomic's
+constructor.
+
+	PR libstdc++/114865
+
+libstdc++-v3/ChangeLog:
+
+	* include/std/atomic (atomic<_Tp>::atomic(_Tp)) [C++11]:
+	Enable __builtin_clear_padding logic.
+	* testsuite/29_atomics/atomic/compare_exchange_padding.cc: Enable
+	this test in earlier modes, including C++11.
+	* testsuite/29_atomics/atomic/cons/zero_padding.cc [C++11]:
+	Enable tests verifying cleared padding bits for a non-static-init
+	std::atomic object.
+
+Reviewed-by: Tomasz KamiÅski <tkaminsk@redhat.com>
+Reviewed-by: Jonathan Wakely <jwakely@redhat.com>
+(cherry picked from commit 48f2e8aa6ddad72955781728bdf515eb50411d24)
+---
+ libstdc++-v3/include/std/atomic                              | 5 ++++-
+ .../testsuite/29_atomics/atomic/compare_exchange_padding.cc  | 2 +-
+ .../testsuite/29_atomics/atomic/cons/zero_padding.cc         | 4 ----
+ 3 files changed, 5 insertions(+), 6 deletions(-)
+
+diff --git a/libstdc++-v3/include/std/atomic b/libstdc++-v3/include/std/atomic
+index 98576234b6ec..0127d7dbc3d5 100644
+--- a/libstdc++-v3/include/std/atomic
++++ b/libstdc++-v3/include/std/atomic
+@@ -241,14 +241,17 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
+       atomic& operator=(const atomic&) = delete;
+       atomic& operator=(const atomic&) volatile = delete;
+ 
++#pragma GCC diagnostic push
++#pragma GCC diagnostic ignored "-Wc++14-extensions" // constexpr ctor body
+       constexpr atomic(_Tp __i) noexcept : _M_i(__i)
+       {
+-#if __cplusplus >= 201402L && __has_builtin(__builtin_clear_padding)
++#if __has_builtin(__builtin_clear_padding)
+ 	if _GLIBCXX17_CONSTEXPR (__atomic_impl::__maybe_has_padding<_Tp>())
+ 	  if (!std::__is_constant_evaluated())
+ 	    __builtin_clear_padding(std::__addressof(_M_i));
+ #endif
+       }
++#pragma GCC diagnostic pop
+ 
+       operator _Tp() const noexcept
+       { return load(); }
+diff --git a/libstdc++-v3/testsuite/29_atomics/atomic/compare_exchange_padding.cc b/libstdc++-v3/testsuite/29_atomics/atomic/compare_exchange_padding.cc
+index a6081968ca86..d9c7b90c1a5c 100644
+--- a/libstdc++-v3/testsuite/29_atomics/atomic/compare_exchange_padding.cc
++++ b/libstdc++-v3/testsuite/29_atomics/atomic/compare_exchange_padding.cc
+@@ -1,4 +1,4 @@
+-// { dg-do run { target c++20 } }
++// { dg-do run { target c++11 } }
+ // { dg-require-atomic-cmpxchg-word "" }
+ // { dg-add-options libatomic }
+ // { dg-additional-options "-fno-tree-sra" }
+diff --git a/libstdc++-v3/testsuite/29_atomics/atomic/cons/zero_padding.cc b/libstdc++-v3/testsuite/29_atomics/atomic/cons/zero_padding.cc
+index d57846d60205..f85ac4859ec5 100644
+--- a/libstdc++-v3/testsuite/29_atomics/atomic/cons/zero_padding.cc
++++ b/libstdc++-v3/testsuite/29_atomics/atomic/cons/zero_padding.cc
+@@ -56,15 +56,11 @@ void test_struct(std::atomic<T>& g, const T& zp)
+ 
+   std::atomic<T> l(T{1, 2});
+   std::memcpy(&t, &zp, sizeof(T));
+-#if __cplusplus >= 201402L // Remove once PR114865 is fixed
+   VERIFY( l.compare_exchange_strong(t, d) );
+-#endif
+ 
+   std::atomic<T>* h = new std::atomic<T>(T{1, 2});
+   std::memcpy(&t, &zp, sizeof(T));
+-#if __cplusplus >= 201402L // Remove once PR114865 is fixed
+   VERIFY( h->compare_exchange_strong(t, d) );
+-#endif
+   delete h;
+ 
+   constexpr std::atomic<T> cl(T{1, 2});
+-- 
+2.43.7
+
+From 283f85bc232a173ed9b7a7030e7027afdc85a357 Mon Sep 17 00:00:00 2001
+From: Patrick Palka <ppalka@redhat.com>
+Date: Wed, 11 Feb 2026 21:35:21 -0500
+Subject: [PATCH] libstdc++: Clear padding bits in std::atomic ctor in C++11
+ [PR114865]
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf8
+Content-Transfer-Encoding: 8bit
+
+After the front end change r16-7199 both GCC and Clang allow non-empty
+constexpr constructor bodies in C++11 as an extension, so we can now
+unconditionally enable the __builtin_clear_padding logic in std::atomic's
+constructor.
+
+	PR libstdc++/114865
+
+libstdc++-v3/ChangeLog:
+
+	* include/std/atomic (atomic<_Tp>::atomic(_Tp)) [C++11]:
+	Enable __builtin_clear_padding logic.
+	* testsuite/29_atomics/atomic/compare_exchange_padding.cc: Enable
+	this test in earlier modes, including C++11.
+	* testsuite/29_atomics/atomic/cons/zero_padding.cc [C++11]:
+	Enable tests verifying cleared padding bits for a non-static-init
+	std::atomic object.
+
+Reviewed-by: Tomasz KamiÅski <tkaminsk@redhat.com>
+Reviewed-by: Jonathan Wakely <jwakely@redhat.com>
+(cherry picked from commit 48f2e8aa6ddad72955781728bdf515eb50411d24)
+---
+ libstdc++-v3/include/std/atomic                              | 5 ++++-
+ .../testsuite/29_atomics/atomic/compare_exchange_padding.cc  | 2 +-
+ .../testsuite/29_atomics/atomic/cons/zero_padding.cc         | 4 ----
+ 3 files changed, 5 insertions(+), 6 deletions(-)
+
+diff --git a/libstdc++-v3/include/std/atomic b/libstdc++-v3/include/std/atomic
+index 98576234b6ec..0127d7dbc3d5 100644
+--- a/libstdc++-v3/include/std/atomic
++++ b/libstdc++-v3/include/std/atomic
+@@ -241,14 +241,17 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
+       atomic& operator=(const atomic&) = delete;
+       atomic& operator=(const atomic&) volatile = delete;
+ 
++#pragma GCC diagnostic push
++#pragma GCC diagnostic ignored "-Wc++14-extensions" // constexpr ctor body
+       constexpr atomic(_Tp __i) noexcept : _M_i(__i)
+       {
+-#if __cplusplus >= 201402L && __has_builtin(__builtin_clear_padding)
++#if __has_builtin(__builtin_clear_padding)
+ 	if _GLIBCXX17_CONSTEXPR (__atomic_impl::__maybe_has_padding<_Tp>())
+ 	  if (!std::__is_constant_evaluated())
+ 	    __builtin_clear_padding(std::__addressof(_M_i));
+ #endif
+       }
++#pragma GCC diagnostic pop
+ 
+       operator _Tp() const noexcept
+       { return load(); }
+diff --git a/libstdc++-v3/testsuite/29_atomics/atomic/compare_exchange_padding.cc b/libstdc++-v3/testsuite/29_atomics/atomic/compare_exchange_padding.cc
+index a6081968ca86..d9c7b90c1a5c 100644
+--- a/libstdc++-v3/testsuite/29_atomics/atomic/compare_exchange_padding.cc
++++ b/libstdc++-v3/testsuite/29_atomics/atomic/compare_exchange_padding.cc
+@@ -1,4 +1,4 @@
+-// { dg-do run { target c++20 } }
++// { dg-do run { target c++11 } }
+ // { dg-require-atomic-cmpxchg-word "" }
+ // { dg-add-options libatomic }
+ // { dg-additional-options "-fno-tree-sra" }
+diff --git a/libstdc++-v3/testsuite/29_atomics/atomic/cons/zero_padding.cc b/libstdc++-v3/testsuite/29_atomics/atomic/cons/zero_padding.cc
+index d57846d60205..f85ac4859ec5 100644
+--- a/libstdc++-v3/testsuite/29_atomics/atomic/cons/zero_padding.cc
++++ b/libstdc++-v3/testsuite/29_atomics/atomic/cons/zero_padding.cc
+@@ -56,15 +56,11 @@ void test_struct(std::atomic<T>& g, const T& zp)
+ 
+   std::atomic<T> l(T{1, 2});
+   std::memcpy(&t, &zp, sizeof(T));
+-#if __cplusplus >= 201402L // Remove once PR114865 is fixed
+   VERIFY( l.compare_exchange_strong(t, d) );
+-#endif
+ 
+   std::atomic<T>* h = new std::atomic<T>(T{1, 2});
+   std::memcpy(&t, &zp, sizeof(T));
+-#if __cplusplus >= 201402L // Remove once PR114865 is fixed
+   VERIFY( h->compare_exchange_strong(t, d) );
+-#endif
+   delete h;
+ 
+   constexpr std::atomic<T> cl(T{1, 2});
+-- 
+2.43.7
+
+

@@ -1,0 +1,143 @@
+From 88e202e51767c33d13cde495be11cd5092247592 Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Wed, 11 Feb 2026 11:34:09 +0100
+Subject: [PATCH] cfgexpand: Fix up "=@ccz" etc. outputs on asm goto [PR124056]
+
+The following testcase is miscompiled, because after_md_seq which is
+what is emitted for "=@cc?" outputs to initialize a pseudo with
+the result is emitted just once, on the asm goto fallthru edge, before
+after_rtl_seq (on that edge that is the correct ordering), but a copy
+of after_rtl_seq is also emitted on the other edges from asm goto, but
+after_md_seq is not.
+So, the pseudo with the flags checking is initialized only in the
+fallthru case and not when asm goto is left through one of the other
+labels (unless those are degenerate).
+
+The following patch arranges to emit that sequence duplicated on all the
+edges before after_rtl_seq sequence, by modifying after_rtl_seq so that
+it includes after_md_seq followed by the old after_rtl_seq.
+
+2026-02-11  Jakub Jelinek  <jakub@redhat.com>
+
+	PR middle-end/124056
+	* cfgexpand.cc (expand_asm_stmt): If after_md_seq is non-NULL, emit
+	it at the start of after_rtl_seq instead of after fallthru_label.
+
+	* gcc.target/i386/pr124056.c: New test.
+
+(cherry picked from commit 1c68b2b4e244dff5f1087c37a68dd891ffae58b4)
+---
+ gcc/cfgexpand.cc                         | 15 ++++--
+ gcc/testsuite/gcc.target/i386/pr124056.c | 61 ++++++++++++++++++++++++
+ 2 files changed, 72 insertions(+), 4 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.target/i386/pr124056.c
+
+diff --git a/gcc/cfgexpand.cc b/gcc/cfgexpand.cc
+index e2455981b4ed..d31ac13d1708 100644
+--- a/gcc/cfgexpand.cc
++++ b/gcc/cfgexpand.cc
+@@ -3767,13 +3767,22 @@ expand_asm_stmt (gasm *stmt)
+      Case in point is when the i386 backend moved from cc0 to a hard reg --
+      maintaining source-level compatibility means automatically clobbering
+      the flags register.  */
+-  rtx_insn *after_md_seq = NULL;
+   auto_vec<rtx> use_rvec;
+   if (targetm.md_asm_adjust)
+-    after_md_seq
++    {
++      rtx_insn *after_md_seq
+ 	= targetm.md_asm_adjust (output_rvec, input_rvec, input_mode,
+ 				 constraints, use_rvec, clobber_rvec,
+ 				 clobbered_regs, locus);
++      if (after_md_seq)
++	{
++	  push_to_sequence (after_md_seq);
++	  emit_insn (after_rtl_seq);
++	  after_rtl_seq = get_insns ();
++	  after_rtl_end = get_last_insn ();
++	  end_sequence ();
++	}
++    }
+ 
+   /* Do not allow the hook to change the output and input count,
+      lest it mess up the operand numbering.  */
+@@ -3948,8 +3957,6 @@ expand_asm_stmt (gasm *stmt)
+   if (fallthru_label)
+     emit_label (fallthru_label);
+ 
+-  if (after_md_seq)
+-    emit_insn (after_md_seq);
+   if (after_rtl_seq)
+     {
+       if (nlabels == 0)
+diff --git a/gcc/testsuite/gcc.target/i386/pr124056.c b/gcc/testsuite/gcc.target/i386/pr124056.c
+new file mode 100644
+index 000000000000..5f646f7914e5
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/i386/pr124056.c
+@@ -0,0 +1,61 @@
++/* PR middle-end/124056 */
++/* { dg-do run } */
++/* { dg-options "-O2 -masm=att" } */
++
++int v;
++
++[[gnu::noipa]] void
++foo (void)
++{
++  v = 42;
++}
++
++[[gnu::noipa]] void
++bar (void)
++{
++  v = 43;
++}
++
++[[gnu::noipa]] int
++baz (void)
++{
++  bool err;
++  __asm goto ("movl %1, %%ecx\n\t"
++	       "test %%ecx, %%ecx\n\t"
++	       "js 1f\n\t"
++	       "jmp %l[lab]\n\t"
++	    "1: cmpl $-1, %%ecx"
++	       : "=@ccz" (err) : "m" (v) : "ecx" : lab);
++  if (err)
++    {
++      bar ();
++      return -1;
++    }
++  return 0;
++
++ lab:
++  if (err)
++    {
++      foo ();
++      return -2;
++    }
++
++  return 1;
++}
++
++int
++main ()
++{
++  v = 0;
++  if (baz () != -2 || v != 42)
++    __builtin_abort ();
++  v = 1;
++  if (baz () != 1 || v != 1)
++    __builtin_abort ();
++  v = -1;
++  if (baz () != -1 || v != 43)
++    __builtin_abort ();
++  v = -2;
++  if (baz () != 0 || v != -2)
++    __builtin_abort ();
++}
+-- 
+2.43.7
+
+

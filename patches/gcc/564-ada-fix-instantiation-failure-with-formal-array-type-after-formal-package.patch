@@ -1,0 +1,122 @@
+From 5fbbf1b99ca1bb792d667e5a9a3d078cb071fed2 Mon Sep 17 00:00:00 2001
+From: Eric Botcazou <ebotcazou@adacore.com>
+Date: Mon, 23 Mar 2026 21:48:52 +0100
+Subject: [PATCH] Ada: Fix instantiation failure with formal array type after
+ formal package
+
+This comes from a confusion in the mapping maintained between formal and
+actual parameters of the instantiation caused by the equivalent mapping
+maintained for the instantiation of the formal package.  The change just
+removes the offending lines, which do not seem to serve any useful purpose.
+
+gcc/ada/
+	PR ada/124606
+	* sem_ch12.adb (Find_Actual_Type): Rename formal parameter.
+	(Map_Formal_Package_Entities): Do not register base types.
+
+gcc/testsuite/
+	* gnat.dg/generic_inst19.adb: New test.
+---
+ gcc/ada/sem_ch12.adb                     | 16 ++++-----
+ gcc/testsuite/gnat.dg/generic_inst19.adb | 42 ++++++++++++++++++++++++
+ 2 files changed, 48 insertions(+), 10 deletions(-)
+ create mode 100644 gcc/testsuite/gnat.dg/generic_inst19.adb
+
+diff --git a/gcc/ada/sem_ch12.adb b/gcc/ada/sem_ch12.adb
+index bde56723e4e6..b6ddeb84ebe5 100644
+--- a/gcc/ada/sem_ch12.adb
++++ b/gcc/ada/sem_ch12.adb
+@@ -637,13 +637,13 @@ package body Sem_Ch12 is
+    --  of freeze nodes for instance bodies that may depend on other instances.
+ 
+    function Find_Actual_Type
+-     (Typ       : Entity_Id;
+-      Gen_Type  : Entity_Id) return Entity_Id;
++     (Typ     : Entity_Id;
++      Gen_Typ : Entity_Id) return Entity_Id;
+    --  When validating the actual types of a child instance, check whether
+    --  the formal is a formal type of the parent unit, and retrieve the current
+    --  actual for it. Typ is the entity in the analyzed formal type declaration
+    --  (component or index type of an array type, or designated type of an
+-   --  access formal) and Gen_Type is the enclosing analyzed formal array
++   --  access formal) and Gen_Typ is the enclosing analyzed formal array
+    --  or access type. The desired actual may be a formal of a parent, or may
+    --  be declared in a formal package of a parent. In both cases it is a
+    --  generic actual type because it appears within a visible instance.
+@@ -9858,10 +9858,10 @@ package body Sem_Ch12 is
+    ----------------------
+ 
+    function Find_Actual_Type
+-     (Typ      : Entity_Id;
+-      Gen_Type : Entity_Id) return Entity_Id
++     (Typ     : Entity_Id;
++      Gen_Typ : Entity_Id) return Entity_Id
+    is
+-      Gen_Scope : constant Entity_Id := Scope (Gen_Type);
++      Gen_Scope : constant Entity_Id := Scope (Gen_Typ);
+       T         : Entity_Id;
+ 
+    begin
+@@ -15869,10 +15869,6 @@ package body Sem_Ch12 is
+                   Set_Instance_Of (Class_Wide_Type (E1), Class_Wide_Type (E2));
+                end if;
+ 
+-               if Is_Constrained (E1) then
+-                  Set_Instance_Of (Base_Type (E1), Base_Type (E2));
+-               end if;
+-
+                if Ekind (E1) = E_Package and then No (Renamed_Entity (E1)) then
+                   Map_Formal_Package_Entities (E1, E2);
+                end if;
+diff --git a/gcc/testsuite/gnat.dg/generic_inst19.adb b/gcc/testsuite/gnat.dg/generic_inst19.adb
+new file mode 100644
+index 000000000000..7dca9d3a5523
+--- /dev/null
++++ b/gcc/testsuite/gnat.dg/generic_inst19.adb
+@@ -0,0 +1,42 @@
++-- { dg-do compile }
++
++with Ada.Containers.Vectors;
++
++procedure Generic_Inst19 is
++
++   generic
++      type T is private;
++      type Vector_Index is range <>;
++      --  Index and T_Array need to be placed here or T actual unconstrained
++      with package T_Vectors is new Ada.Containers.Vectors (Vector_Index, T);
++      type Index is range <>;
++      type T_Array is array (Index range <>) of T;
++   function To_Array_Generic (Vec : T_Vectors.Vector) return T_Array;
++
++   function To_Array_Generic (Vec : T_Vectors.Vector) return T_Array is
++      Result : T_Array (Index'First .. Index'First + Index (Vec.Length) - 1);
++      I      : Index := Index'First;
++   begin
++      for X of Vec loop
++         Result (I) := X;
++         I := I + 1;
++      end loop;
++      return Result;
++   end To_Array_Generic;
++
++   type Probability is new Float range 0.0 .. 1.0;
++
++   package Probability_Vectors is new Ada.Containers.Vectors
++      (Index_Type => Positive, Element_Type => Probability);
++   type Probability_Array is array (Positive range <>) of Probability;
++
++   function To_Array is new To_Array_Generic (
++      T            => Probability,
++      Vector_Index => Positive,
++      T_Vectors    => Probability_Vectors,
++      Index  => Positive,
++      T_Array      => Probability_Array);
++
++begin
++   null;
++end;
+-- 
+2.43.7
+
+

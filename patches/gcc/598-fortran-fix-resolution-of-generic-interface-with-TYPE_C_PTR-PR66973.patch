@@ -1,0 +1,187 @@
+From 2874711ed9f2db5640e8af7f0c12297ac7c35f88 Mon Sep 17 00:00:00 2001
+From: Harald Anlauf <anlauf@gmx.de>
+Date: Fri, 3 Apr 2026 22:35:48 +0200
+Subject: [PATCH] Fortran: fix resolution of generic interface with TYPE(C_PTR)
+ [PR66973]
+
+When symbols from the intrinsic module ISO_C_BINDING were USEd indirectly,
+the resolution of generic interfaces with procedures having dummies with
+TYPE(C_PTR) or TYPE(C_FUNPTR) could fail when the actual argument was
+C_LOC() or C_FUNLOC().  Amend checking of actual versus formal procedure
+arguments to these cases.
+
+	PR fortran/66973
+
+gcc/fortran/ChangeLog:
+
+	* interface.cc (gfc_compare_actual_formal): Check that C_LOC and
+	C_FUNLOC from ISO_C_BINDING as actual argument are passed to a
+	dummy argument of matching type C_PTR/C_FUNPTR.
+
+gcc/testsuite/ChangeLog:
+
+	* gfortran.dg/generic_36-1.f90: New test.
+	* gfortran.dg/generic_36-2.f90: New test.
+
+(cherry picked from commit 64e03b96dfe593692d43bf5801f9b5103b71d085)
+---
+ gcc/fortran/interface.cc                   | 22 +++++++
+ gcc/testsuite/gfortran.dg/generic_36-1.f90 | 68 ++++++++++++++++++++++
+ gcc/testsuite/gfortran.dg/generic_36-2.f90 | 36 ++++++++++++
+ 3 files changed, 126 insertions(+)
+ create mode 100644 gcc/testsuite/gfortran.dg/generic_36-1.f90
+ create mode 100644 gcc/testsuite/gfortran.dg/generic_36-2.f90
+
+diff --git a/gcc/fortran/interface.cc b/gcc/fortran/interface.cc
+index 3ec34005fb49..38d8cd2b473b 100644
+--- a/gcc/fortran/interface.cc
++++ b/gcc/fortran/interface.cc
+@@ -4024,6 +4024,28 @@ gfc_compare_actual_formal (gfc_actual_arglist **ap, gfc_formal_arglist *formal,
+ 	  goto match;
+ 	}
+ 
++      /* C_LOC/C_FUNLOC from ISO_C_BINDING as actual argument can only be
++	 passed to a dummy argument of matching type C_PTR/C_FUNPTR.  */
++      if (a->expr->expr_type == EXPR_FUNCTION
++	  && a->expr->ts.type == BT_VOID
++	  && a->expr->symtree->n.sym
++	  && a->expr->symtree->n.sym->from_intmod == INTMOD_ISO_C_BINDING
++	  && (f->sym->ts.type != BT_DERIVED
++	      || f->sym->ts.u.derived->from_intmod != INTMOD_ISO_C_BINDING
++	      || !((a->expr->symtree->n.sym->intmod_sym_id == ISOCBINDING_FUNLOC
++		    && f->sym->ts.u.derived->intmod_sym_id == ISOCBINDING_FUNPTR)
++		   || (a->expr->symtree->n.sym->intmod_sym_id == ISOCBINDING_LOC
++		       && f->sym->ts.u.derived->intmod_sym_id == ISOCBINDING_PTR))))
++	{
++	  if (where)
++	    gfc_error ("ISO_C_BINDING function actual argument at %L "
++		       "requires dummy argument %qs to have a matching "
++		       "type from ISO_C_BINDING",
++		       &a->expr->where,f->sym->name);
++	  ok = false;
++	  goto match;
++	}
++
+     match:
+       if (a == actual)
+ 	na = i;
+diff --git a/gcc/testsuite/gfortran.dg/generic_36-1.f90 b/gcc/testsuite/gfortran.dg/generic_36-1.f90
+new file mode 100644
+index 000000000000..d54483f473c0
+--- /dev/null
++++ b/gcc/testsuite/gfortran.dg/generic_36-1.f90
+@@ -0,0 +1,68 @@
++! { dg-do compile }
++!
++! PR fortran/66973 - resolution of generic interface with TYPE(C_PTR)
++
++MODULE H5T
++  USE ISO_C_BINDING, only: C_LOC,    C_PTR,    C_NULL_PTR, &
++                           C_FUNLOC, C_FUNPTR, C_NULL_FUNPTR
++  IMPLICIT NONE
++  public :: pickone, cnt, test1
++  public :: C_LOC, C_PTR, C_NULL_PTR, C_FUNLOC, C_FUNPTR, C_NULL_FUNPTR
++  private
++
++  INTERFACE pickone
++     MODULE PROCEDURE pick_f03    ! order matters for the test!
++     MODULE PROCEDURE pick_funptr
++     MODULE PROCEDURE pick_f90
++  END INTERFACE
++
++  integer :: cnt(3) = 0
++
++CONTAINS
++
++  SUBROUTINE pick_f90(int_value)
++    IMPLICIT NONE
++    INTEGER, INTENT(IN) :: int_value
++    PRINT*,'Inside pick_f90'
++    cnt(1) = cnt(1) + 1
++  END SUBROUTINE pick_f90
++
++  SUBROUTINE pick_f03(value)
++    IMPLICIT NONE
++    TYPE(C_PTR), INTENT(IN) :: value
++    PRINT*,'Inside pick_f03'
++    cnt(2) = cnt(2) + 1
++  END SUBROUTINE pick_f03
++
++  SUBROUTINE pick_funptr(addr)
++    IMPLICIT NONE
++    TYPE(C_FUNPTR), INTENT(IN) :: addr
++    PRINT*,'Inside pick_funptr'
++    cnt(3) = cnt(3) + 1
++  END SUBROUTINE pick_funptr
++
++  subroutine test1 ()
++    integer      :: intval
++    REAL, TARGET :: val
++    type(c_ptr)  :: ptr
++    type(c_funptr) :: funptr
++    procedure(), pointer :: indirect => null()
++    cnt = 0
++    CALL pickone(intval)
++!   print *, cnt
++    if (any (cnt /= [1,0,0])) stop 1
++    cnt = 0
++    CALL pickone(ptr)
++    CALL pickone(c_null_ptr)
++    CALL pickone(C_LOC(val))
++!   print *, cnt
++    if (any (cnt /= [0,3,0])) stop 2
++    cnt = 0
++    CALL pickone(funptr)
++    CALL pickone(c_null_funptr)
++    CALL pickone(C_FUNLOC(indirect))
++!   print *, cnt
++    if (any (cnt /= [0,0,3])) stop 3
++  end subroutine test1
++
++END MODULE H5T
+diff --git a/gcc/testsuite/gfortran.dg/generic_36-2.f90 b/gcc/testsuite/gfortran.dg/generic_36-2.f90
+new file mode 100644
+index 000000000000..1467ae6edf2a
+--- /dev/null
++++ b/gcc/testsuite/gfortran.dg/generic_36-2.f90
+@@ -0,0 +1,36 @@
++! { dg-do run }
++! { dg-compile-aux-modules "generic_36-1.f90" }
++! { dg-additional-sources generic_36-1.f90 }
++! { dg-additional-options "-O2" }
++!
++! PR fortran/66973 - resolution of generic interface with TYPE(C_PTR)
++
++PROGRAM main
++  USE H5T, only: pickone, cnt, test1,            &
++                 c_loc, c_ptr, c_null_ptr,       &
++                 c_funloc, c_funptr, c_null_funptr
++  IMPLICIT NONE
++  integer      :: intval
++  REAL, TARGET :: val
++  type(c_ptr)  :: ptr
++  type(c_funptr) :: funptr
++  procedure(), pointer :: indirect => null()
++  cnt = 0
++  call test1
++  cnt = 0
++  CALL pickone(intval)
++! print *, cnt
++  if (any (cnt /= [1,0,0])) stop 11
++  cnt = 0
++  CALL pickone(ptr)
++  CALL pickone(c_null_ptr)
++  CALL pickone(C_LOC(val))
++! print *, cnt
++  if (any (cnt /= [0,3,0])) stop 12
++  cnt = 0
++  CALL pickone(funptr)
++  CALL pickone(c_null_funptr)
++  CALL pickone(C_FUNLOC(indirect))
++! print *, cnt
++  if (any (cnt /= [0,0,3])) stop 13
++END PROGRAM main
+-- 
+2.43.7
+
+

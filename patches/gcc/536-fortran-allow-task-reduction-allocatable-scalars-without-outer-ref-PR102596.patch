@@ -1,0 +1,155 @@
+From 1f4e191b8255c5f75e826fbdac69e8d08ac4a704 Mon Sep 17 00:00:00 2001
+From: Christopher Albert <albert@tugraz.at>
+Date: Tue, 10 Mar 2026 19:16:24 +0100
+Subject: [PATCH] Fortran: Allow task-reduction allocatable scalars without
+ outer ref [PR102596]
+
+OpenMP task reduction lowering can call gfc_omp_clause_default_ctor for
+an allocatable scalar with outer == NULL_TREE.  That is valid for scalar
+allocatables that only need fresh storage allocation and do not need a
+copied descriptor or allocatable-component walk.
+
+The Fortran hook asserted unconditionally on outer != NULL_TREE, so
+reduction(task, +:r) with an allocatable scalar ICEd during omplower.
+
+Fix this by requiring outer only for the cases that actually use it:
+descriptor-based allocatables and types with allocatable components.
+Keep the assertion for those cases and allow NULL outer for plain scalar
+allocatables.  Add a regression test for the allocatable task-reduction
+case.
+
+gcc/fortran/ChangeLog:
+
+	PR fortran/102596
+	* trans-openmp.cc (gfc_omp_clause_default_ctor): Only require an
+	outer reference when the constructor path actually uses it.
+
+gcc/testsuite/ChangeLog:
+
+	PR fortran/102596
+	* gfortran.dg/pr102596.f90: New test.
+
+Signed-off-by: Christopher Albert <albert@tugraz.at>
+(cherry picked from commit e53a7510be51139ff4297e65e69895a6243caa9d)
+---
+ gcc/fortran/trans-openmp.cc            |  5 ++++-
+ gcc/testsuite/gfortran.dg/pr102596.f90 | 13 +++++++++++++
+ 2 files changed, 17 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/gfortran.dg/pr102596.f90
+
+diff --git a/gcc/fortran/trans-openmp.cc b/gcc/fortran/trans-openmp.cc
+index 0dfb3379892b..1dd015f0d9ff 100644
+--- a/gcc/fortran/trans-openmp.cc
++++ b/gcc/fortran/trans-openmp.cc
+@@ -815,7 +815,10 @@ gfc_omp_clause_default_ctor (tree clause, tree decl, tree outer)
+       return NULL_TREE;
+     }
+ 
+-  gcc_assert (outer != NULL_TREE);
++  gcc_assert (outer != NULL_TREE
++	      || (!GFC_DESCRIPTOR_TYPE_P (type)
++		  && !gfc_has_alloc_comps (type, OMP_CLAUSE_DECL (clause),
++					   false)));
+ 
+   /* Allocatable arrays and scalars in PRIVATE clauses need to be set to
+      "not currently allocated" allocation status if outer
+diff --git a/gcc/testsuite/gfortran.dg/pr102596.f90 b/gcc/testsuite/gfortran.dg/pr102596.f90
+new file mode 100644
+index 000000000000..b8c3b2f72d7f
+--- /dev/null
++++ b/gcc/testsuite/gfortran.dg/pr102596.f90
+@@ -0,0 +1,13 @@
++! { dg-do compile }
++! { dg-additional-options "-fopenmp" }
++
++program p
++  integer, allocatable :: r
++
++  allocate (r)
++  r = 0
++
++  !$omp target parallel reduction(task, +:r)
++  r = r + 1
++  !$omp end target parallel
++end
+-- 
+2.43.7
+
+From 1f4e191b8255c5f75e826fbdac69e8d08ac4a704 Mon Sep 17 00:00:00 2001
+From: Christopher Albert <albert@tugraz.at>
+Date: Tue, 10 Mar 2026 19:16:24 +0100
+Subject: [PATCH] Fortran: Allow task-reduction allocatable scalars without
+ outer ref [PR102596]
+
+OpenMP task reduction lowering can call gfc_omp_clause_default_ctor for
+an allocatable scalar with outer == NULL_TREE.  That is valid for scalar
+allocatables that only need fresh storage allocation and do not need a
+copied descriptor or allocatable-component walk.
+
+The Fortran hook asserted unconditionally on outer != NULL_TREE, so
+reduction(task, +:r) with an allocatable scalar ICEd during omplower.
+
+Fix this by requiring outer only for the cases that actually use it:
+descriptor-based allocatables and types with allocatable components.
+Keep the assertion for those cases and allow NULL outer for plain scalar
+allocatables.  Add a regression test for the allocatable task-reduction
+case.
+
+gcc/fortran/ChangeLog:
+
+	PR fortran/102596
+	* trans-openmp.cc (gfc_omp_clause_default_ctor): Only require an
+	outer reference when the constructor path actually uses it.
+
+gcc/testsuite/ChangeLog:
+
+	PR fortran/102596
+	* gfortran.dg/pr102596.f90: New test.
+
+Signed-off-by: Christopher Albert <albert@tugraz.at>
+(cherry picked from commit e53a7510be51139ff4297e65e69895a6243caa9d)
+---
+ gcc/fortran/trans-openmp.cc            |  5 ++++-
+ gcc/testsuite/gfortran.dg/pr102596.f90 | 13 +++++++++++++
+ 2 files changed, 17 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/gfortran.dg/pr102596.f90
+
+diff --git a/gcc/fortran/trans-openmp.cc b/gcc/fortran/trans-openmp.cc
+index 0dfb3379892b..1dd015f0d9ff 100644
+--- a/gcc/fortran/trans-openmp.cc
++++ b/gcc/fortran/trans-openmp.cc
+@@ -815,7 +815,10 @@ gfc_omp_clause_default_ctor (tree clause, tree decl, tree outer)
+       return NULL_TREE;
+     }
+ 
+-  gcc_assert (outer != NULL_TREE);
++  gcc_assert (outer != NULL_TREE
++	      || (!GFC_DESCRIPTOR_TYPE_P (type)
++		  && !gfc_has_alloc_comps (type, OMP_CLAUSE_DECL (clause),
++					   false)));
+ 
+   /* Allocatable arrays and scalars in PRIVATE clauses need to be set to
+      "not currently allocated" allocation status if outer
+diff --git a/gcc/testsuite/gfortran.dg/pr102596.f90 b/gcc/testsuite/gfortran.dg/pr102596.f90
+new file mode 100644
+index 000000000000..b8c3b2f72d7f
+--- /dev/null
++++ b/gcc/testsuite/gfortran.dg/pr102596.f90
+@@ -0,0 +1,13 @@
++! { dg-do compile }
++! { dg-additional-options "-fopenmp" }
++
++program p
++  integer, allocatable :: r
++
++  allocate (r)
++  r = 0
++
++  !$omp target parallel reduction(task, +:r)
++  r = r + 1
++  !$omp end target parallel
++end
+-- 
+2.43.7
+
+

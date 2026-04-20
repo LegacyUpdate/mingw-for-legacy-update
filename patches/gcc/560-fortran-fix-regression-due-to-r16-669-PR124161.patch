@@ -1,0 +1,109 @@
+From be9710b7e1448770fb2a6488333ad547ec918f79 Mon Sep 17 00:00:00 2001
+From: Paul Thomas <pault@gcc.gnu.org>
+Date: Thu, 19 Mar 2026 11:37:40 +0000
+Subject: [PATCH] Fortran: Fix regression due to r16-669 [PR124161]
+
+2026-03-19  Paul Thomas  <pault@gcc.gnu.org>
+
+gcc/fortran
+	PR fortran/124161
+	* resolve.cc (resolve_symbol): Do not apply the default
+	initializer if the symbol is used in a submodule.
+
+gcc/testsuite/
+	PR fortran/124161
+	* gfortran.dg/pr124161.f90: New test.
+
+(cherry picked from commit 240886adb8ac1a381a9dfd67f94755357c42c790)
+---
+ gcc/fortran/resolve.cc                 |  4 +-
+ gcc/testsuite/gfortran.dg/pr124161.f90 | 61 ++++++++++++++++++++++++++
+ 2 files changed, 63 insertions(+), 2 deletions(-)
+ create mode 100644 gcc/testsuite/gfortran.dg/pr124161.f90
+
+diff --git a/gcc/fortran/resolve.cc b/gcc/fortran/resolve.cc
+index 5c072499aa80..914c0e7e5f1e 100644
+--- a/gcc/fortran/resolve.cc
++++ b/gcc/fortran/resolve.cc
+@@ -17964,8 +17964,8 @@ skip_interfaces:
+ 	  || (a->dummy && !a->pointer && a->intent == INTENT_OUT
+ 	      && sym->ns->proc_name->attr.if_source != IFSRC_IFBODY))
+ 	apply_default_init (sym);
+-      else if (a->function && !a->pointer && !a->allocatable && !a->use_assoc
+-	       && sym->result)
++      else if (a->function && !a->pointer && !a->allocatable
++	       && !a->use_assoc && !a->used_in_submodule && sym->result)
+ 	/* Default initialization for function results.  */
+ 	apply_default_init (sym->result);
+       else if (a->function && sym->result && a->access != ACCESS_PRIVATE
+diff --git a/gcc/testsuite/gfortran.dg/pr124161.f90 b/gcc/testsuite/gfortran.dg/pr124161.f90
+new file mode 100644
+index 000000000000..83a9545f92aa
+--- /dev/null
++++ b/gcc/testsuite/gfortran.dg/pr124161.f90
+@@ -0,0 +1,61 @@
++! { dg-do compile }
++!
++! Test the fix for the regression caused by r16-669-gd31ab498b12ebb - See line 59.
++!
++! Contributed by Zaak Beekman  <zbeekman@gmail.com>
++!
++module inner_m
++    implicit none
++    type :: dt_t
++        integer, allocatable :: val
++    end type
++    type, abstract :: inner_t
++    contains
++        procedure(summary_i), deferred :: summary
++    end type
++    abstract interface
++        function summary_i(self)
++            import :: inner_t, dt_t
++            class(inner_t), intent(in) :: self
++            type(dt_t) :: summary_i
++        end function
++    end interface
++end module inner_m
++
++module concrete_m
++    use inner_m, only: inner_t, dt_t
++    implicit none
++    type, extends(inner_t) :: concrete_t
++    contains
++        procedure :: summary
++    end type
++contains
++    function summary(self)
++        class(concrete_t), intent(in) :: self
++        type(dt_t) :: summary
++    end function
++end module concrete_m
++
++module outer_m
++    use inner_m, only: inner_t, dt_t
++    use concrete_m, only: concrete_t
++    implicit none
++    type :: outer_t
++        class(inner_t), allocatable :: component
++    contains
++        procedure :: summary
++    end type
++    interface
++        module function summary(self) result(res)
++            class(outer_t), intent(in) :: self
++            type(dt_t) :: res
++        end function
++    end interface
++end module outer_m
++
++submodule(outer_m) outer_impl
++contains
++    module procedure summary
++        res = self%component%summary()  ! ICE in trans_scalar_assign here
++    end procedure
++end submodule outer_impl
+-- 
+2.43.7
+
+

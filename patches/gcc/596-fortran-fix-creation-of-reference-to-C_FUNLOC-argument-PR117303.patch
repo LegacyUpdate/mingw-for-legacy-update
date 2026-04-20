@@ -1,0 +1,109 @@
+From ff40dfb9543c859e39a957d8599630999bc7aca0 Mon Sep 17 00:00:00 2001
+From: Kirill Chilikin <chilikin.k@gmail.com>
+Date: Sun, 25 Jan 2026 14:43:08 +0700
+Subject: [PATCH] fortran: Fix creation of reference to C_FUNLOC argument
+ [PR117303]
+
+The reference returned by C_FUNLOC is assigned to a variable. Without that,
+no reference from the calling subprogram to the argument of C_FUNLOC
+was created in the call graph, resulting in an undefined-reference error
+with link-time optimization. Please see PR 117303 for more details.
+
+	PR fortran/117303
+
+gcc/fortran/ChangeLog:
+
+	* trans-intrinsic.cc (conv_isocbinding_function):
+	Assign the reference returned by C_FUNLOC to a variable.
+
+gcc/testsuite/ChangeLog:
+
+	* gfortran.dg/c_funloc_tests_7.f90:
+	Updated test due to changed code generation.
+	* gfortran.dg/c_funloc_tests_9.f90: New test.
+
+Signed-off-by: Kirill Chilikin <chilikin.k@gmail.com>
+(cherry picked from commit 3c3c7f6519f54d26afdb9bd810cc7bc11b395a53)
+---
+ gcc/fortran/trans-intrinsic.cc                |  9 ++++-
+ .../gfortran.dg/c_funloc_tests_7.f90          |  2 +-
+ .../gfortran.dg/c_funloc_tests_9.f90          | 34 +++++++++++++++++++
+ 3 files changed, 43 insertions(+), 2 deletions(-)
+ create mode 100644 gcc/testsuite/gfortran.dg/c_funloc_tests_9.f90
+
+diff --git a/gcc/fortran/trans-intrinsic.cc b/gcc/fortran/trans-intrinsic.cc
+index 4b68f5759488..22115ef791c2 100644
+--- a/gcc/fortran/trans-intrinsic.cc
++++ b/gcc/fortran/trans-intrinsic.cc
+@@ -9677,7 +9677,14 @@ conv_isocbinding_function (gfc_se *se, gfc_expr *expr)
+       se->expr = gfc_evaluate_now (se->expr, &se->pre);
+     }
+   else if (expr->value.function.isym->id == GFC_ISYM_C_FUNLOC)
+-    gfc_conv_expr_reference (se, arg->expr);
++    {
++      gfc_conv_expr_reference (se, arg->expr);
++      /* The code below is necessary to create a reference from the calling
++	 subprogram to the argument of C_FUNLOC() in the call graph.
++	 Please see PR 117303 for more details. */
++      se->expr = convert (pvoid_type_node, se->expr);
++      se->expr = gfc_evaluate_now (se->expr, &se->pre);
++    }
+   else if (expr->value.function.isym->id == GFC_ISYM_C_ASSOCIATED)
+     {
+       gfc_se arg1se;
+diff --git a/gcc/testsuite/gfortran.dg/c_funloc_tests_7.f90 b/gcc/testsuite/gfortran.dg/c_funloc_tests_7.f90
+index 7a4464ab5528..1e199b4503be 100644
+--- a/gcc/testsuite/gfortran.dg/c_funloc_tests_7.f90
++++ b/gcc/testsuite/gfortran.dg/c_funloc_tests_7.f90
+@@ -16,6 +16,6 @@ cfp = c_funloc (noCsub)
+ call c_f_procpointer (cfp, fint)
+ end
+ 
+-! { dg-final { scan-tree-dump-times "cfp =\[^;\]+ nocsub;" 1 "original" } }
++! { dg-final { scan-tree-dump-times "D.\[0-9\]* =\[^;\]+ nocsub;" 1 "original" } }
+ ! { dg-final { scan-tree-dump-times "fint =\[^;\]+ cfp;" 1 "original" } }
+ 
+diff --git a/gcc/testsuite/gfortran.dg/c_funloc_tests_9.f90 b/gcc/testsuite/gfortran.dg/c_funloc_tests_9.f90
+new file mode 100644
+index 000000000000..2ebb951a6fc0
+--- /dev/null
++++ b/gcc/testsuite/gfortran.dg/c_funloc_tests_9.f90
+@@ -0,0 +1,34 @@
++! { dg-do link }
++! { dg-options "-O1 -flto" }
++! PR 117303
++
++MODULE M1
++  USE, INTRINSIC :: ISO_C_BINDING
++
++  TYPE T
++    TYPE(C_FUNPTR) FUNPTR
++  END TYPE
++
++  TYPE(T), POINTER :: T_POINTER
++
++CONTAINS
++
++  SUBROUTINE SET_FUNPTR(F)
++    TYPE(C_FUNPTR), INTENT(IN) :: F
++    T_POINTER%FUNPTR = F
++  END SUBROUTINE
++
++  SUBROUTINE S1() BIND(C)
++  END SUBROUTINE
++
++END MODULE
++
++PROGRAM TEST
++  USE M1
++  INTEGER(C_INTPTR_T) I
++  ALLOCATE(T_POINTER)
++  ! There was no reference from TEST to S1 in the call graph,
++  ! resulting in undefined-reference error with link-time optimization.
++  CALL SET_FUNPTR(C_FUNLOC(S1))
++  PRINT *, TRANSFER(T_POINTER%FUNPTR, I)
++END PROGRAM
+-- 
+2.43.7
+
+

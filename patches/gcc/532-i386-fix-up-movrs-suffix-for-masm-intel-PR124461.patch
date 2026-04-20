@@ -1,0 +1,70 @@
+From d6766412142ca1334210e948881185c787ee86bc Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Fri, 13 Mar 2026 09:16:26 +0100
+Subject: [PATCH] i386: Fix up movrs<mode> suffix for -masm=intel [PR124461]
+
+For movrs<mode> the insn was using insn suffix unconditionally, so
+movrsl or movrsq even for -masm=intel, when gas expects movrs and derives
+what size of insn it is from the operands.
+
+There is no movrs effective target, so I've just used dg-do compile with
+scan-assembler to test it instead of dg-do assemble.
+
+2026-03-13  Jakub Jelinek  <jakub@redhat.com>
+
+	PR target/124461
+	* config/i386/i386.md (movrs<mode>): Use <imodesuffix> only for
+	-masm=att, not for -masm=intel.
+
+	* gcc.target/i386/movrs-pr124461.c: New test.
+
+Reviewed-by: Uros Bizjak <ubizjak@gmail.com>
+(cherry picked from commit 418e161083a162721488468f3a50f739becb1700)
+---
+ gcc/config/i386/i386.md                       |  2 +-
+ .../gcc.target/i386/movrs-pr124461.c          | 19 +++++++++++++++++++
+ 2 files changed, 20 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/gcc.target/i386/movrs-pr124461.c
+
+diff --git a/gcc/config/i386/i386.md b/gcc/config/i386/i386.md
+index cb1d4cc98143..f80cd5af6949 100644
+--- a/gcc/config/i386/i386.md
++++ b/gcc/config/i386/i386.md
+@@ -30119,7 +30119,7 @@
+       [(match_operand:SWI1248x 1 "memory_operand" "m")]
+       UNSPECV_MOVRS))]
+   "TARGET_MOVRS && TARGET_64BIT"
+-  "movrs<imodesuffix>\t{%1, %0|%0, %1}"
++  "movrs{<imodesuffix>}\t{%1, %0|%0, %1}"
+   [(set_attr "prefix" "orig")
+    (set_attr "type" "other")
+    (set_attr "mode" "<MODE>")])
+diff --git a/gcc/testsuite/gcc.target/i386/movrs-pr124461.c b/gcc/testsuite/gcc.target/i386/movrs-pr124461.c
+new file mode 100644
+index 000000000000..df06eed609a8
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/i386/movrs-pr124461.c
+@@ -0,0 +1,19 @@
++/* PR target/124461 */
++/* { dg-do compile { target { masm_intel && { ! ia32 } } } } */
++/* { dg-options "-O2 -mmovrs -masm=intel" } */
++/* { dg-final { scan-assembler "\tmovrs\teax, DWORD PTR \\\[\[er]di\\\]" } } */
++/* { dg-final { scan-assembler "\tmovrs\trax, QWORD PTR \\\[\[er]di\\\]" } } */
++
++#include <x86intrin.h>
++
++int
++foo (const void *p)
++{
++  return _movrs_i32 (p);
++}
++
++long long
++bar (const void *p)
++{
++  return _movrs_i64 (p);
++}
+-- 
+2.43.7
+
+

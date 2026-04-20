@@ -1,0 +1,124 @@
+From aed9f193aae331f2d473f714665ab0fc4bfe8a35 Mon Sep 17 00:00:00 2001
+From: Nathaniel Shead <nathanieloshead@gmail.com>
+Date: Mon, 6 Apr 2026 00:34:33 +1000
+Subject: [PATCH] c++/modules: Fix propagating noexcept for templates
+ [PR124785]
+
+We triggered a checking assertion because when propagating deduced
+noexcept, we were updating the type of the existing TEMPLATE_DECL but
+not the type of its DECL_TEMPLATE_RESULT, violating assumptions made
+later on during modules streaming.
+
+But actually there was nothing to propagate here anyway, these
+declarations are identical, so this patch also fixes the condition for
+checking whether we need to propagate anything.  And so now I don't
+think there is ever a case we should have a noexcept-spec to propagate
+for a TEMPLATE_DECL, so add an assertion to validate this.
+
+	PR c++/124785
+
+gcc/cp/ChangeLog:
+
+	* module.cc (trees_in::is_matching_decl): Narrow condition for
+	when noexcept propagation occurs; assert that we don't propagate
+	noexcept-specs for TEMPLATE_DECLs.
+
+gcc/testsuite/ChangeLog:
+
+	* g++.dg/modules/noexcept-5.h: New test.
+	* g++.dg/modules/noexcept-5_a.C: New test.
+	* g++.dg/modules/noexcept-5_b.C: New test.
+	* g++.dg/modules/noexcept-5_c.C: New test.
+
+Signed-off-by: Nathaniel Shead <nathanieloshead@gmail.com>
+Reviewed-by: Jason Merrill <jason@redhat.com>
+(cherry picked from commit ca20148d0b784ce52f83a33fc3abb2693a0d6a41)
+---
+ gcc/cp/module.cc                            |  4 +++-
+ gcc/testsuite/g++.dg/modules/noexcept-5.h   |  4 ++++
+ gcc/testsuite/g++.dg/modules/noexcept-5_a.C |  7 +++++++
+ gcc/testsuite/g++.dg/modules/noexcept-5_b.C |  7 +++++++
+ gcc/testsuite/g++.dg/modules/noexcept-5_c.C | 11 +++++++++++
+ 5 files changed, 32 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/g++.dg/modules/noexcept-5.h
+ create mode 100644 gcc/testsuite/g++.dg/modules/noexcept-5_a.C
+ create mode 100644 gcc/testsuite/g++.dg/modules/noexcept-5_b.C
+ create mode 100644 gcc/testsuite/g++.dg/modules/noexcept-5_c.C
+
+diff --git a/gcc/cp/module.cc b/gcc/cp/module.cc
+index 6162871ed061..fb405281d6e8 100644
+--- a/gcc/cp/module.cc
++++ b/gcc/cp/module.cc
+@@ -12246,12 +12246,14 @@ trees_in::is_matching_decl (tree existing, tree decl, bool is_typedef)
+       tree d_spec = TYPE_RAISES_EXCEPTIONS (d_type);
+       if (DECL_MAYBE_DELETED (e_inner) || DEFERRED_NOEXCEPT_SPEC_P (e_spec))
+ 	{
+-	  if (!DEFERRED_NOEXCEPT_SPEC_P (d_spec)
++	  if (!(DECL_MAYBE_DELETED (d_inner)
++		|| DEFERRED_NOEXCEPT_SPEC_P (d_spec))
+ 	      || (UNEVALUATED_NOEXCEPT_SPEC_P (e_spec)
+ 		  && !UNEVALUATED_NOEXCEPT_SPEC_P (d_spec)))
+ 	    {
+ 	      dump (dumper::MERGE)
+ 		&& dump ("Propagating instantiated noexcept to %N", existing);
++	      gcc_checking_assert (existing == e_inner);
+ 	      TREE_TYPE (existing) = d_type;
+ 
+ 	      /* Propagate to existing clones.  */
+diff --git a/gcc/testsuite/g++.dg/modules/noexcept-5.h b/gcc/testsuite/g++.dg/modules/noexcept-5.h
+new file mode 100644
+index 000000000000..78d91322a1ab
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/modules/noexcept-5.h
+@@ -0,0 +1,4 @@
++// PR c++/124785
++template <typename T> struct Iterator {
++  constexpr friend auto operator<=>(const Iterator&, const Iterator&) = default;
++};
+diff --git a/gcc/testsuite/g++.dg/modules/noexcept-5_a.C b/gcc/testsuite/g++.dg/modules/noexcept-5_a.C
+new file mode 100644
+index 000000000000..72085717e604
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/modules/noexcept-5_a.C
+@@ -0,0 +1,7 @@
++// PR c++/124785
++// { dg-do compile { target c++20 } }
++// { dg-additional-options "-fmodules" }
++// { dg-module-cmi M:A }
++
++export module M:A;
++#include "noexcept-5.h"
+diff --git a/gcc/testsuite/g++.dg/modules/noexcept-5_b.C b/gcc/testsuite/g++.dg/modules/noexcept-5_b.C
+new file mode 100644
+index 000000000000..928980b6c1df
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/modules/noexcept-5_b.C
+@@ -0,0 +1,7 @@
++// PR c++/124785
++// { dg-do compile { target c++20 } }
++// { dg-additional-options "-fmodules" }
++// { dg-module-cmi M:B }
++
++export module M:B;
++#include "noexcept-5.h"
+diff --git a/gcc/testsuite/g++.dg/modules/noexcept-5_c.C b/gcc/testsuite/g++.dg/modules/noexcept-5_c.C
+new file mode 100644
+index 000000000000..d9349147766c
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/modules/noexcept-5_c.C
+@@ -0,0 +1,11 @@
++// PR c++/124785
++// { dg-do compile { target c++20 } }
++// { dg-additional-options "-fmodules -fdump-lang-module-alias" }
++// { dg-module-cmi M }
++
++export module M;
++export import :A;
++export import :B;
++
++// The noexcept-specifiers are equivalent, no need to merge.
++// { dg-final { scan-lang-dump-not {Propagating instantiated noexcept} module } }
+-- 
+2.43.7
+
+

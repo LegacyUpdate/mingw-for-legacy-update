@@ -1,0 +1,114 @@
+From 2bf2526ddf1653a4451bb4c23c78477d9b3e1364 Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Fri, 30 Jan 2026 11:42:41 +0100
+Subject: [PATCH] match.pd: Fix up __imag__ .MUL_OVERFLOW simplification
+ [PR123864]
+
+The integer_minus_onep case is really meant for multiplication by
+-1, not by (unsigned char)0xff or (unsigned short)0xffff or 0xffffffffU etc.
+We've already tested that the first operand is signed (otherwise the
+earlier case is used) and also that int_fits_type_p (@1, TREE_TYPE (@0)),
+but if @0 is signed and @1 is unsigned all ones with smaller precision
+than that, it fits into @0's type, integer_minus_onep will be true
+and it still should be handled through the ranges, not as @0 == min.
+
+2026-01-30  Jakub Jelinek  <jakub@redhat.com>
+
+	PR tree-optimization/123864
+	* match.pd (__builtin_mul_overflow_p (x, cst, (stype) 0) ->
+	x > stype_max / cst || x < stype_min / cst): Only check
+	integer_minus_onep for signed types.
+
+	* gcc.c-torture/execute/pr123864.c: New test.
+	* gcc.dg/torture/pr123864.c: New test.
+
+(cherry picked from commit 238d2fc116cdef31c3d643e71ade0875b5cba110)
+---
+ gcc/match.pd                                  |  2 +-
+ .../gcc.c-torture/execute/pr123864.c          | 24 ++++++++++++++++
+ gcc/testsuite/gcc.dg/torture/pr123864.c       | 28 +++++++++++++++++++
+ 3 files changed, 53 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/gcc.c-torture/execute/pr123864.c
+ create mode 100644 gcc/testsuite/gcc.dg/torture/pr123864.c
+
+diff --git a/gcc/match.pd b/gcc/match.pd
+index 21739e62c411..164d5da22165 100644
+--- a/gcc/match.pd
++++ b/gcc/match.pd
+@@ -8269,7 +8269,7 @@ DEFINE_INT_AND_FLOAT_ROUND_FN (RINT)
+    (if (TYPE_UNSIGNED (TREE_TYPE (@0)))
+     (convert (gt @0 (trunc_div! { TYPE_MAX_VALUE (TREE_TYPE (@0)); } @1)))
+     (if (TYPE_MIN_VALUE (TREE_TYPE (@0)))
+-     (if (integer_minus_onep (@1))
++     (if (!TYPE_UNSIGNED (TREE_TYPE (@1)) && integer_minus_onep (@1))
+       (convert (eq @0 { TYPE_MIN_VALUE (TREE_TYPE (@0)); }))
+       (with
+        {
+diff --git a/gcc/testsuite/gcc.c-torture/execute/pr123864.c b/gcc/testsuite/gcc.c-torture/execute/pr123864.c
+new file mode 100644
+index 000000000000..c70d1ca823f3
+--- /dev/null
++++ b/gcc/testsuite/gcc.c-torture/execute/pr123864.c
+@@ -0,0 +1,24 @@
++/* PR tree-optimization/123864 */
++
++[[gnu::noipa]] static int
++foo (long long x)
++{
++  return __builtin_mul_overflow_p (x, ~0U, x);
++}
++
++int
++main ()
++{
++  if (foo (0))
++    __builtin_abort ();
++#if __SIZEOF_INT__ == 4 && __SIZEOF_LONG_LONG__ == 8 && __CHAR_BIT__ == 8
++  if (foo (__INT_MAX__ + 1LL))
++    __builtin_abort ();
++  if (!foo (__INT_MAX__ + 2LL))
++    __builtin_abort ();
++  if (foo (-__INT_MAX__ - 1LL))
++    __builtin_abort ();
++  if (!foo (-__INT_MAX__ - 2LL))
++    __builtin_abort ();
++#endif
++}
+diff --git a/gcc/testsuite/gcc.dg/torture/pr123864.c b/gcc/testsuite/gcc.dg/torture/pr123864.c
+new file mode 100644
+index 000000000000..8f2e375db926
+--- /dev/null
++++ b/gcc/testsuite/gcc.dg/torture/pr123864.c
+@@ -0,0 +1,28 @@
++/* PR tree-optimization/123864 */
++/* { dg-do run { target int128 } } */
++
++int u, v, x;
++
++[[gnu::noipa]] static void
++foo ()
++{
++  __int128 c = (__int128) 0xa5ee4bc88ULL << 64;
++  long long b = 0x207b8a7f7LL;
++  int a = 4;
++  long long y;
++  __builtin_add_overflow (a, v, &y);
++  c *= y;
++  
++  unsigned z;
++  if (__builtin_add_overflow (b, u, &z))
++    z = 0xffffffffU;
++  x = __builtin_mul_overflow_p (z, c, c);
++}
++
++int
++main ()
++{
++  foo ();
++  if (!x)
++    __builtin_abort ();
++}
+-- 
+2.43.7
+
+

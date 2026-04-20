@@ -1,0 +1,71 @@
+From 035b0a0bb9cb0decb083f9e39fc2aab67b80b107 Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Thu, 12 Mar 2026 12:39:43 +0100
+Subject: [PATCH] fortran: Fix UB in transfer_expr [PR124450]
+
+trans-io.cc (transfer_array_component) calls transfer_expr with
+NULL code:
+  transfer_expr (&se, &cm->ts, tmp, NULL, NULL_TREE);
+I'm surprised it doesn't ICE in other spots that dereference
+code->whatever but each one is guarded with some condition
+that perhaps don't trigger in that case for some reason.
+Anyway, the &code->loc case does trigger, it doesn't ICE, but
+it is undefined behavior in the compiler when code is NULL,
+and we'd crash if the where argument of 3*sizeof(void*) is
+dereferenced.  Code I've checked can handle NULL where though.
+
+2026-03-12  Jakub Jelinek  <jakub@redhat.com>
+
+	PR fortran/124450
+	* trans-io.cc (transfer_expr): If code is NULL, call
+	transfer_array_component with NULL where argument rather than
+	&code->loc.
+
+	* gfortran.dg/pr124450.f90: New test.
+
+(cherry picked from commit adefcfed81e19aa250f34914182a7c5580dc6e2a)
+---
+ gcc/fortran/trans-io.cc                |  4 +++-
+ gcc/testsuite/gfortran.dg/pr124450.f90 | 14 ++++++++++++++
+ 2 files changed, 17 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/gfortran.dg/pr124450.f90
+
+diff --git a/gcc/fortran/trans-io.cc b/gcc/fortran/trans-io.cc
+index f7686543cadd..ccbc47147538 100644
+--- a/gcc/fortran/trans-io.cc
++++ b/gcc/fortran/trans-io.cc
+@@ -2511,7 +2511,9 @@ transfer_expr (gfc_se * se, gfc_typespec * ts, tree addr_expr,
+ 
+ 		  if (c->attr.dimension)
+ 		    {
+-		      tmp = transfer_array_component (tmp, c, & code->loc);
++		      tmp = transfer_array_component (tmp, c,
++						      code ? &code->loc
++						      : NULL);
+ 		      gfc_add_expr_to_block (&se->pre, tmp);
+ 		    }
+ 		  else
+diff --git a/gcc/testsuite/gfortran.dg/pr124450.f90 b/gcc/testsuite/gfortran.dg/pr124450.f90
+new file mode 100644
+index 000000000000..b6d9abc1c85f
+--- /dev/null
++++ b/gcc/testsuite/gfortran.dg/pr124450.f90
+@@ -0,0 +1,14 @@
++! PR fortran/124450
++! { dg-do compile }
++
++  type ta
++    integer(kind=4) :: a(1)
++    integer(kind=4) :: b(1)
++  end type ta
++  type tb
++    type(ta) :: c(1) = ta(1, 2)
++  end type tb
++  type(tb) :: e = tb(ta(3, 4))
++
++  print *, e
++end
+-- 
+2.43.7
+
+

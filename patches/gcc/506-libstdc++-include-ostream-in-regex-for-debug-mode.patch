@@ -1,0 +1,44 @@
+From 0598ae347ace561fe05c9570c0053269f0fc3201 Mon Sep 17 00:00:00 2001
+From: Jonathan Wakely <jwakely@redhat.com>
+Date: Fri, 21 Nov 2025 12:02:54 +0000
+Subject: [PATCH] libstdc++: Include <ostream> in <regex> for debug mode
+
+I don't know what changed, but I'm seeing some new failures:
+
+FAIL: 23_containers/vector/capacity/114945.cc  -std=gnu++11 (test for excess errors)
+FAIL: 23_containers/vector/capacity/114945.cc  -std=gnu++14 (test for excess errors)
+FAIL: 23_containers/vector/capacity/114945.cc  -std=gnu++17 (test for excess errors)
+FAIL: 28_regex/basic_regex/85098.cc  -std=gnu++11 (test for excess errors)
+FAIL: 28_regex/basic_regex/85098.cc  -std=gnu++14 (test for excess errors)
+FAIL: 28_regex/basic_regex/85098.cc  -std=gnu++17 (test for excess errors)
+FAIL: 28_regex/simple_c++11.cc   (test for excess errors)
+
+libstdc++-v3/ChangeLog:
+
+	* include/bits/regex_automaton.tcc [_GLIBCXX_DEBUG]: Include
+	<ostream> so that _State_base::_M_print etc. can use it.
+
+(cherry picked from commit e8cf136b1a281db54edf5f824e8b08e5b757269f)
+---
+ libstdc++-v3/include/bits/regex_automaton.tcc | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/libstdc++-v3/include/bits/regex_automaton.tcc b/libstdc++-v3/include/bits/regex_automaton.tcc
+index 8a826469db10..4d566c62ecdd 100644
+--- a/libstdc++-v3/include/bits/regex_automaton.tcc
++++ b/libstdc++-v3/include/bits/regex_automaton.tcc
+@@ -28,6 +28,10 @@
+  *  Do not attempt to use it directly. @headername{regex}
+  */
+ 
++#ifdef _GLIBCXX_DEBUG
++# include <ostream>
++#endif
++
+ namespace std _GLIBCXX_VISIBILITY(default)
+ {
+ _GLIBCXX_BEGIN_NAMESPACE_VERSION
+-- 
+2.43.7
+
+

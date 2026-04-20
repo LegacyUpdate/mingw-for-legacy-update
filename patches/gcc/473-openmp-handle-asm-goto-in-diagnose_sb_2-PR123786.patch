@@ -1,0 +1,128 @@
+From 93e69dfdafd0ef6659cb6d26ea611402c5871549 Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Fri, 30 Jan 2026 11:00:41 +0100
+Subject: [PATCH] openmp: Handle asm goto in diagnose_sb_2 [PR123876]
+
+We weren't handling asm goto in diagnose_sb_2, so could ICE
+on invalid code instead of diagnosing it as invalid.
+
+Note, for C++ the FE already diagnoses that instead of deferring
+it will omp-low.cc.
+
+2026-01-30  Jakub Jelinek  <jakub@redhat.com>
+
+	PR middle-end/123876
+	* omp-low.cc (diagnose_sb_2): Handle GIMPLE_ASM.
+
+	* gcc.dg/gomp/pr123876.c: New test.
+
+(cherry picked from commit de23c4ad41319525077da03ecbabf41efbf9a3b3)
+---
+ gcc/omp-low.cc                       | 13 ++++++
+ gcc/testsuite/gcc.dg/gomp/pr123876.c | 69 ++++++++++++++++++++++++++++
+ 2 files changed, 82 insertions(+)
+ create mode 100644 gcc/testsuite/gcc.dg/gomp/pr123876.c
+
+diff --git a/gcc/omp-low.cc b/gcc/omp-low.cc
+index 7462f414bcd2..e57c05abe114 100644
+--- a/gcc/omp-low.cc
++++ b/gcc/omp-low.cc
+@@ -15384,6 +15384,19 @@ diagnose_sb_2 (gimple_stmt_iterator *gsi_p, bool *handled_ops_p,
+       }
+       break;
+ 
++    case GIMPLE_ASM:
++      {
++	gasm *asm_stmt = as_a <gasm *> (stmt);
++	for (unsigned i = 0; i < gimple_asm_nlabels (asm_stmt); ++i)
++	  {
++	    tree lab = TREE_VALUE (gimple_asm_label_op (asm_stmt, i));
++	    n = splay_tree_lookup (all_labels, (splay_tree_key) lab);
++	    if (n && diagnose_sb_0 (gsi_p, context, (gimple *) n->value))
++	      break;
++	  }
++      }
++      break;
++
+     case GIMPLE_RETURN:
+       diagnose_sb_0 (gsi_p, context, NULL);
+       break;
+diff --git a/gcc/testsuite/gcc.dg/gomp/pr123876.c b/gcc/testsuite/gcc.dg/gomp/pr123876.c
+new file mode 100644
+index 000000000000..984c2dcdb6a3
+--- /dev/null
++++ b/gcc/testsuite/gcc.dg/gomp/pr123876.c
+@@ -0,0 +1,69 @@
++/* PR middle-end/123876 */
++
++void
++foo ()
++{
++lab:
++#pragma omp simd
++  for (int i = 0; i < 4; i++)
++    asm goto ("" : : : : lab);			/* { dg-error "invalid branch to/from OpenMP structured block" } */
++#pragma omp for
++  for (int i = 0; i < 4; i++)
++   asm goto ("" : : : : lab);			/* { dg-error "invalid branch to/from OpenMP structured block" } */
++#pragma omp parallel
++  asm goto ("" : : : : lab);			/* { dg-error "invalid branch to/from OpenMP structured block" } */
++}
++
++void
++bar ()
++{
++lab3:
++#pragma omp simd
++  for (int i = 0; i < 4; i++)
++    {
++    lab1:
++    lab2:
++      asm goto ("" : : : : lab1, lab2, lab3);	/* { dg-error "invalid branch to/from OpenMP structured block" } */
++    }
++#pragma omp for
++  for (int i = 0; i < 4; i++)
++    {
++    lab4:
++    lab5:
++      asm goto ("" : : : : lab4, lab5, lab3);	/* { dg-error "invalid branch to/from OpenMP structured block" } */
++    }
++#pragma omp parallel
++  {
++  lab6:
++  lab7:
++    asm goto ("" : : : : lab6, lab7, lab3);	/* { dg-error "invalid branch to/from OpenMP structured block" } */
++  }
++}
++
++void
++baz ()
++{
++#pragma omp simd
++  for (int i = 0; i < 4; i++)
++    {
++    lab1:
++    lab2:
++      asm goto ("" : : : : lab1, lab2, lab3);
++    lab3:;
++    }
++#pragma omp for
++  for (int i = 0; i < 4; i++)
++    {
++    lab4:
++    lab5:
++      asm goto ("" : : : : lab4, lab5, lab6);
++    lab6:;
++    }
++#pragma omp parallel
++  {
++  lab7:
++  lab8:
++    asm goto ("" : : : : lab7, lab8, lab9);
++  lab9:;
++  }
++}
+-- 
+2.43.7
+
+

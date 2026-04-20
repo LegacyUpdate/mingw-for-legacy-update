@@ -1,0 +1,107 @@
+From 504ed6eb3e62a20e6fab6281731b9bcd6ba4c090 Mon Sep 17 00:00:00 2001
+From: Nathaniel Shead <nathanieloshead@gmail.com>
+Date: Tue, 3 Mar 2026 01:24:06 +1100
+Subject: [PATCH] c++/modules: Merge synthesized definitions of defaulted
+ members [PR124311]
+
+When a TU synthesizes a definition of a defaulted member function we
+mark the TU that did this as the originating module, and so export it
+from there.  If this TU is imported into a module that already has a
+declaration of this entity the declarations should be merged.
+
+This patch fixes an issue where this merging was not occurring for
+explicitly defaulted member functions, by checking DECL_DEFAULTED_FN
+instead of just DECL_ARTIFICIAL.
+
+	PR c++/124311
+
+gcc/cp/ChangeLog:
+
+	* module.cc (trees_in::key_mergeable): Check DECL_DEFAULTED_FN
+	instead of DECL_ARTIFICIAL.
+
+gcc/testsuite/ChangeLog:
+
+	* g++.dg/modules/imp-member-5_a.C: New test.
+	* g++.dg/modules/imp-member-5_b.C: New test.
+	* g++.dg/modules/imp-member-5_c.C: New test.
+
+Signed-off-by: Nathaniel Shead <nathanieloshead@gmail.com>
+Reviewed-by: Jason Merrill <jason@redhat.com>
+(cherry picked from commit 2d1bf27b49d5d6cbe38a2a2cd8291ed8f98e1a31)
+---
+ gcc/cp/module.cc                              | 11 ++++++-----
+ gcc/testsuite/g++.dg/modules/imp-member-5_a.C |  9 +++++++++
+ gcc/testsuite/g++.dg/modules/imp-member-5_b.C |  8 ++++++++
+ gcc/testsuite/g++.dg/modules/imp-member-5_c.C |  5 +++++
+ 4 files changed, 28 insertions(+), 5 deletions(-)
+ create mode 100644 gcc/testsuite/g++.dg/modules/imp-member-5_a.C
+ create mode 100644 gcc/testsuite/g++.dg/modules/imp-member-5_b.C
+ create mode 100644 gcc/testsuite/g++.dg/modules/imp-member-5_c.C
+
+diff --git a/gcc/cp/module.cc b/gcc/cp/module.cc
+index d0a481849ff1..7d5465e3e595 100644
+--- a/gcc/cp/module.cc
++++ b/gcc/cp/module.cc
+@@ -11974,11 +11974,12 @@ trees_in::key_mergeable (int tag, merge_kind mk, tree decl, tree inner,
+ 	    gcc_checking_assert (!is_imported_temploid_friend);
+ 	    int use_tmpl = 0;
+ 	    if (is_attached && !(state->is_module () || state->is_partition ())
+-		/* Implicit member functions can come from
+-		   anywhere.  */
+-		&& !(DECL_ARTIFICIAL (decl)
+-		     && TREE_CODE (decl) == FUNCTION_DECL
+-		     && !DECL_THUNK_P (decl))
++		/* Implicit or in-class defaulted member functions
++		   can come from anywhere.  */
++		&& !(TREE_CODE (decl) == FUNCTION_DECL
++		     && !DECL_THUNK_P (decl)
++		     && DECL_DEFAULTED_FN (decl)
++		     && !DECL_DEFAULTED_OUTSIDE_CLASS_P (decl))
+ 		/* As can members of template specialisations.  */
+ 		&& !(node_template_info (container, use_tmpl)
+ 		     && use_tmpl != 0))
+diff --git a/gcc/testsuite/g++.dg/modules/imp-member-5_a.C b/gcc/testsuite/g++.dg/modules/imp-member-5_a.C
+new file mode 100644
+index 000000000000..6f9482cb6791
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/modules/imp-member-5_a.C
+@@ -0,0 +1,9 @@
++// PR c++/124311
++// { dg-additional-options "-fmodules" }
++// { dg-module-cmi A }
++
++export module A;
++export struct S {
++  int x = 0;
++  S() = default;
++};
+diff --git a/gcc/testsuite/g++.dg/modules/imp-member-5_b.C b/gcc/testsuite/g++.dg/modules/imp-member-5_b.C
+new file mode 100644
+index 000000000000..d55219a8eba6
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/modules/imp-member-5_b.C
+@@ -0,0 +1,8 @@
++// PR c++/124311
++// { dg-additional-options "-fmodules" }
++// { dg-module-cmi B }
++
++export module B;
++export import A;
++export struct M { S h; };
++M m;
+diff --git a/gcc/testsuite/g++.dg/modules/imp-member-5_c.C b/gcc/testsuite/g++.dg/modules/imp-member-5_c.C
+new file mode 100644
+index 000000000000..39770acd3622
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/modules/imp-member-5_c.C
+@@ -0,0 +1,5 @@
++// PR c++/124311
++// { dg-additional-options "-fmodules" }
++
++import B;
++M m2;
+-- 
+2.43.7
+
+

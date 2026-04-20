@@ -1,0 +1,158 @@
+From c982903092f55dfb6d5e75b4961db6573388dc0b Mon Sep 17 00:00:00 2001
+From: Nathaniel Shead <nathanieloshead@gmail.com>
+Date: Wed, 11 Mar 2026 23:21:02 +1100
+Subject: [PATCH] c++/modules: Allow merging members of instantiations attached
+ to named modules [PR124431]
+
+The crash in the linked PR occurs because we treat all entities attached
+to a (different) named module as being unmergeable, and so end up with
+two different FIELD_DECLs for the member of a type.
+
+But templates can be instantiated or specialised in any module, not just
+the module they originated from, but are still considered attached to
+that named module.  It seems that we already handle class-scope
+VAR_DECL, FUNCTION_DECL, TYPE_DECL, and TEMPLATE_DECL correctly by using
+a MK_decl_spec or MK_type_spec merge kind, but FIELD_DECLs and
+CONST_DECLs are not depended upon separately and so never get
+MK_template_mask specs.
+
+For these cases I think we can always rely on the container being
+accurate and having its fields already setup, so this patch fixes the
+issue by allowing non-unique merge kind for decls with a template
+specialisation container of code TYPE_DECL.
+
+	PR c++/124431
+
+gcc/cp/ChangeLog:
+
+	* module.cc (trees_in::key_mergeable): Allow merging members of
+	template specialisations.
+
+gcc/testsuite/ChangeLog:
+
+	* g++.dg/modules/merge-21_a.C: New test.
+	* g++.dg/modules/merge-21_b.C: New test.
+	* g++.dg/modules/merge-21_c.C: New test.
+	* g++.dg/modules/merge-21_d.C: New test.
+
+Signed-off-by: Nathaniel Shead <nathanieloshead@gmail.com>
+Reviewed-by: Jason Merrill <jason@redhat.com>
+(cherry picked from commit 7b1a7720ef8a5f59e10c0f90211c75af91e42b90)
+---
+ gcc/cp/module.cc                          |  6 +++++-
+ gcc/testsuite/g++.dg/modules/merge-21_a.C | 16 ++++++++++++++++
+ gcc/testsuite/g++.dg/modules/merge-21_b.C | 11 +++++++++++
+ gcc/testsuite/g++.dg/modules/merge-21_c.C |  9 +++++++++
+ gcc/testsuite/g++.dg/modules/merge-21_d.C | 20 ++++++++++++++++++++
+ 5 files changed, 61 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/g++.dg/modules/merge-21_a.C
+ create mode 100644 gcc/testsuite/g++.dg/modules/merge-21_b.C
+ create mode 100644 gcc/testsuite/g++.dg/modules/merge-21_c.C
+ create mode 100644 gcc/testsuite/g++.dg/modules/merge-21_d.C
+
+diff --git a/gcc/cp/module.cc b/gcc/cp/module.cc
+index 2b275260d1ed..d0a481849ff1 100644
+--- a/gcc/cp/module.cc
++++ b/gcc/cp/module.cc
+@@ -11972,12 +11972,16 @@ trees_in::key_mergeable (int tag, merge_kind mk, tree decl, tree inner,
+ 
+ 	  case TYPE_DECL:
+ 	    gcc_checking_assert (!is_imported_temploid_friend);
++	    int use_tmpl = 0;
+ 	    if (is_attached && !(state->is_module () || state->is_partition ())
+ 		/* Implicit member functions can come from
+ 		   anywhere.  */
+ 		&& !(DECL_ARTIFICIAL (decl)
+ 		     && TREE_CODE (decl) == FUNCTION_DECL
+-		     && !DECL_THUNK_P (decl)))
++		     && !DECL_THUNK_P (decl))
++		/* As can members of template specialisations.  */
++		&& !(node_template_info (container, use_tmpl)
++		     && use_tmpl != 0))
+ 	      kind = "unique";
+ 	    else
+ 	      {
+diff --git a/gcc/testsuite/g++.dg/modules/merge-21_a.C b/gcc/testsuite/g++.dg/modules/merge-21_a.C
+new file mode 100644
+index 000000000000..77f47f544a2f
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/modules/merge-21_a.C
+@@ -0,0 +1,16 @@
++// PR c++/124431
++// { dg-additional-options "-fmodules" }
++// { dg-module-cmi A }
++
++export module A;
++
++export template <int N> struct mat {
++  int data[1] = { 123 };
++  constexpr const int& operator[](int x) const { return data[x]; };
++};
++
++export template <int N> struct S {
++  int field;
++  enum e { a };
++  enum class ce { ca };
++};
+diff --git a/gcc/testsuite/g++.dg/modules/merge-21_b.C b/gcc/testsuite/g++.dg/modules/merge-21_b.C
+new file mode 100644
+index 000000000000..5947f0bf6a3f
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/modules/merge-21_b.C
+@@ -0,0 +1,11 @@
++// PR c++/124431
++// { dg-additional-options "-fmodules" }
++// { dg-module-cmi B }
++
++export module B;
++export import A;
++struct X {
++  mat<4> viewmatrix;
++};
++
++template struct S<0>;
+diff --git a/gcc/testsuite/g++.dg/modules/merge-21_c.C b/gcc/testsuite/g++.dg/modules/merge-21_c.C
+new file mode 100644
+index 000000000000..ebd39fb96718
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/modules/merge-21_c.C
+@@ -0,0 +1,9 @@
++// PR c++/124431
++// { dg-additional-options "-fmodules" }
++// { dg-module-cmi C }
++
++export module C;
++export import A;
++mat<4> from_triangle_frame;
++
++template struct S<0>;
+diff --git a/gcc/testsuite/g++.dg/modules/merge-21_d.C b/gcc/testsuite/g++.dg/modules/merge-21_d.C
+new file mode 100644
+index 000000000000..f34af1852786
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/modules/merge-21_d.C
+@@ -0,0 +1,20 @@
++// PR c++/124431
++// { dg-additional-options "-fmodules -fdump-lang-module-alias" }
++
++import C;
++import B;
++
++void test() {
++  constexpr auto r = mat<4>()[0];
++  // { dg-final { scan-lang-dump {Read:-[0-9]*'s named merge key \(matched\) field_decl:'::mat@.:.<0x4>::data'} module } }
++
++  S<0> s;
++  s.field;
++  // { dg-final { scan-lang-dump {Read:-[0-9]*'s named merge key \(matched\) field_decl:'::S@.:.<0x0>::field'} module } }
++
++  S<0>::e se = S<0>::a;
++  // { dg-final { scan-lang-dump {Read:-[0-9]*'s named merge key \(matched\) const_decl:'::S@.:.<0x0>::e@.:.<0x0>::a'} module } }
++
++  S<0>::ce sce = S<0>::ce::ca;
++  // { dg-final { scan-lang-dump {Read:-[0-9]*'s named merge key \(matched\) const_decl:'::S@.:.<0x0>::ce@.:.<0x0>::ca'} module } }
++}
+-- 
+2.43.7
+
+

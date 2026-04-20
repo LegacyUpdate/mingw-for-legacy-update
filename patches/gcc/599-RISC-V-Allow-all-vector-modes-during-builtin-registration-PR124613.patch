@@ -1,0 +1,109 @@
+From c57334876504a1b98dd2b3ef5b45e4619a64daa4 Mon Sep 17 00:00:00 2001
+From: Robin Dapp <rdapp@oss.qualcomm.com>
+Date: Tue, 24 Mar 2026 10:58:14 +0100
+Subject: [PATCH] RISC-V: Allow all vector modes during builtin registration.
+ [PR124613]
+
+In r16-7312-gecc37444062b40 we allowed all vector modes for the
+any_target hook.  Since then we would ICE in gcc.target/riscv/pr122051.c
+as emit_move_multi_word would choose a fractional vector mode.
+
+This patch disallows fractional vector modes for xtheadvector in
+riscv_vector_mode_supported_p but makes an exception for builtin
+registration (through a global variable).  During registration we
+need to have all modes available in order to maintain the registration
+order for LTO streaming.
+
+	PR target/124613
+
+gcc/ChangeLog:
+
+	* config/riscv/riscv-vector-builtins.cc (rvv_switcher::rvv_switcher):
+	Add riscv_registering_builtins.
+	(rvv_switcher::~rvv_switcher): Set riscv_registering_builtins to
+	false.
+	* config/riscv/riscv.cc (riscv_vector_mode_supported_p): Use
+	riscv_registering_builtins.
+	* config/riscv/riscv.h: Declare.
+
+(cherry picked from commit a4f2cc9fb772b31869b6227ff566882764fe8af6)
+---
+ gcc/config/riscv/riscv-vector-builtins.cc |  7 +++++++
+ gcc/config/riscv/riscv.cc                 | 15 ++++++++++++++-
+ gcc/config/riscv/riscv.h                  |  1 +
+ 3 files changed, 22 insertions(+), 1 deletion(-)
+
+diff --git a/gcc/config/riscv/riscv-vector-builtins.cc b/gcc/config/riscv/riscv-vector-builtins.cc
+index a1159f3451de..ad5d3510de68 100644
+--- a/gcc/config/riscv/riscv-vector-builtins.cc
++++ b/gcc/config/riscv/riscv-vector-builtins.cc
+@@ -3221,6 +3221,11 @@ rvv_switcher::rvv_switcher (bool pollute_flags)
+       riscv_option_override ();
+     }
+ 
++  /* Allow all vector modes during builtin registration so that
++     vector_mode_supported_p does not reject fractional LMUL modes
++     for xtheadvector.  */
++  riscv_registering_builtins = true;
++
+   /* Set have_regs_of_mode before targetm.init_builtins ().  */
+   memcpy (m_old_have_regs_of_mode, have_regs_of_mode,
+ 	  sizeof (have_regs_of_mode));
+@@ -3240,6 +3245,8 @@ rvv_switcher::rvv_switcher (bool pollute_flags)
+ 
+ rvv_switcher::~rvv_switcher ()
+ {
++  riscv_registering_builtins = false;
++
+   /* Recover back have_regs_of_mode.  */
+   memcpy (have_regs_of_mode, m_old_have_regs_of_mode,
+ 	  sizeof (have_regs_of_mode));
+diff --git a/gcc/config/riscv/riscv.cc b/gcc/config/riscv/riscv.cc
+index 4007e0db3211..3c316b90549b 100644
+--- a/gcc/config/riscv/riscv.cc
++++ b/gcc/config/riscv/riscv.cc
+@@ -340,6 +340,9 @@ poly_uint16 riscv_vector_chunks;
+ /* The number of bytes in a vector chunk.  */
+ unsigned riscv_bytes_per_vector_chunk;
+ 
++/* Whether we are currently registering builtins.  */
++bool riscv_registering_builtins;
++
+ /* Index R is the smallest register class that contains register R.  */
+ const enum reg_class riscv_regno_to_class[FIRST_PSEUDO_REGISTER] = {
+   GR_REGS,	GR_REGS,	GR_REGS,	GR_REGS,
+@@ -11728,7 +11731,17 @@ static bool
+ riscv_vector_mode_supported_p (machine_mode mode)
+ {
+   if (TARGET_VECTOR)
+-    return riscv_v_ext_mode_p (mode);
++    {
++      /* Avoid fractional LMUL modes for xtheadvector with the exception
++	 of builtin registration time.  During registration, all modes
++	 must be available so the order and numbering is consistent,
++	 see PR123279.  */
++      if (TARGET_XTHEADVECTOR && !riscv_registering_builtins
++	  && maybe_lt (GET_MODE_SIZE (mode), BYTES_PER_RISCV_VECTOR))
++	return false;
++
++      return riscv_v_ext_mode_p (mode);
++    }
+ 
+   return false;
+ }
+diff --git a/gcc/config/riscv/riscv.h b/gcc/config/riscv/riscv.h
+index 2759a4cb1c9f..ab0e821f3509 100644
+--- a/gcc/config/riscv/riscv.h
++++ b/gcc/config/riscv/riscv.h
+@@ -1192,6 +1192,7 @@ extern bool riscv_user_wants_strict_align;
+ extern unsigned riscv_stack_boundary;
+ extern unsigned riscv_bytes_per_vector_chunk;
+ extern poly_uint16 riscv_vector_chunks;
++extern bool riscv_registering_builtins;
+ extern poly_int64 riscv_v_adjust_nunits (enum machine_mode, int);
+ extern poly_int64 riscv_v_adjust_nunits (machine_mode, bool, int, int);
+ extern poly_int64 riscv_v_adjust_precision (enum machine_mode, int);
+-- 
+2.43.7
+
+

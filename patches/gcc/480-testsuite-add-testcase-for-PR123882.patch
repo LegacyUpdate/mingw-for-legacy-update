@@ -1,0 +1,36 @@
+From acc29d633b9da17627b96856e022944b24a7c279 Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Thu, 5 Feb 2026 15:17:56 +0100
+Subject: [PATCH] testsuite: Add testcase for PR [PR123882]
+
+I've reverted the PR101312 changes in order to fix this PR.
+Here I'm just adding new testcase.
+
+2026-02-05  Jakub Jelinek  <jakub@redhat.com>
+
+	PR c/123882
+	* gcc.dg/pr123882.c: New test.
+
+(cherry picked from commit ce8a84ba6719a71365b611a94cc2454dd157f3b2)
+---
+ gcc/testsuite/gcc.dg/pr123882.c | 7 +++++++
+ 1 file changed, 7 insertions(+)
+ create mode 100644 gcc/testsuite/gcc.dg/pr123882.c
+
+diff --git a/gcc/testsuite/gcc.dg/pr123882.c b/gcc/testsuite/gcc.dg/pr123882.c
+new file mode 100644
+index 000000000000..4b87552c9990
+--- /dev/null
++++ b/gcc/testsuite/gcc.dg/pr123882.c
+@@ -0,0 +1,7 @@
++/* PR c/123882 */
++/* { dg-do compile } */
++/* { dg-options "-std=c23" } */
++
++typedef int T;
++void foo (unsigned long, T[]);
++void foo (unsigned long x, T[restrict x]);
+-- 
+2.43.7
+
+

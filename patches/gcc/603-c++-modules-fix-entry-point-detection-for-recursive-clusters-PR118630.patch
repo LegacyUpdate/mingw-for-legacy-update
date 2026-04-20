@@ -1,0 +1,126 @@
+From e3593aea97a561d083f927fa0ee9b9085aaf4626 Mon Sep 17 00:00:00 2001
+From: Nathaniel Shead <nathanieloshead@gmail.com>
+Date: Mon, 6 Apr 2026 01:56:28 +1000
+Subject: [PATCH] c++/modules: Fix entry-point detection for recursive clusters
+ [PR118630]
+
+In r15-4861-g4a99443c5dd9a235022652ba0fb143c6370ea99d we added support
+to handle recursive dependency clusters, where we need to find the
+"entry" dependency that all other entities will hook off to ensure that
+we stream merge keys in the correct order on read-in.
+
+The logic I'd used to track the entry bit was not completely correct
+however, leading to assertion failures in 'sort_cluster' where we found
+that entities were not marked maybe_recursive when they should have
+been, or multiple entities were marked as the entry point.
+
+Consider a cycle of three entities in a cluster, 'A', 'B', and 'C',
+where 'A' is the entry point.  By definition we walk into 'A' first, and
+find one of the other entities, 'B'.  The old logic marked 'A' as the
+entry and 'B' as maybe-recursive; so far this is correct.
+
+But then if we walk into 'B' and find 'C' is maybe-recursive, the old
+logic would mark 'B' as the entry point (again!).  And likewise when we
+walk into 'C' and find 'A'.  So we would end up with three entry points.
+Similar issues could happen with other arrangements of dependencies.
+
+Instead, by aggressively marking everything we see as maybe-recursive,
+and only marking an entry point if nothing we see is maybe-recursive, we
+avoid this issue.  We should only be able to discover these other
+entities through the entry point (A) and so this 'flood fill' behaviour
+should ensure that all entities are correctly marked maybe-recursive,
+and only A is marked as an entry-point.
+
+	PR c++/118630
+
+gcc/cp/ChangeLog:
+
+	* module.cc (depset::hash::add_dependency): Correct entry point
+	corection for recursive clusters.
+
+gcc/testsuite/ChangeLog:
+
+	* g++.dg/modules/late-ret-5.h: New test.
+	* g++.dg/modules/late-ret-5_a.H: New test.
+	* g++.dg/modules/late-ret-5_b.C: New test.
+
+Signed-off-by: Nathaniel Shead <nathanieloshead@gmail.com>
+Reviewed-by: Jason Merrill <jason@redhat.com>
+(cherry picked from commit 5265be568e5f106c8c538a3d82ea8def3dc5bcad)
+---
+ gcc/cp/module.cc                            |  5 +++--
+ gcc/testsuite/g++.dg/modules/late-ret-5.h   | 16 ++++++++++++++++
+ gcc/testsuite/g++.dg/modules/late-ret-5_a.H |  6 ++++++
+ gcc/testsuite/g++.dg/modules/late-ret-5_b.C |  6 ++++++
+ 4 files changed, 31 insertions(+), 2 deletions(-)
+ create mode 100644 gcc/testsuite/g++.dg/modules/late-ret-5.h
+ create mode 100644 gcc/testsuite/g++.dg/modules/late-ret-5_a.H
+ create mode 100644 gcc/testsuite/g++.dg/modules/late-ret-5_b.C
+
+diff --git a/gcc/cp/module.cc b/gcc/cp/module.cc
+index 24f7c41139ec..7f2922261f73 100644
+--- a/gcc/cp/module.cc
++++ b/gcc/cp/module.cc
+@@ -14286,9 +14286,10 @@ depset::hash::add_dependency (depset *dep)
+      details.  */
+   if (writing_merge_key)
+     {
+-      dep->set_flag_bit<DB_MAYBE_RECURSIVE_BIT> ();
+-      if (!current->is_maybe_recursive ())
++      if (!dep->is_maybe_recursive () && !current->is_maybe_recursive ())
+ 	current->set_flag_bit<DB_ENTRY_BIT> ();
++      dep->set_flag_bit<DB_MAYBE_RECURSIVE_BIT> ();
++      current->set_flag_bit<DB_MAYBE_RECURSIVE_BIT> ();
+     }
+ 
+   if (dep->is_unreached ())
+diff --git a/gcc/testsuite/g++.dg/modules/late-ret-5.h b/gcc/testsuite/g++.dg/modules/late-ret-5.h
+new file mode 100644
+index 000000000000..6f14d18e757e
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/modules/late-ret-5.h
+@@ -0,0 +1,16 @@
++// PR c++/118630
++
++namespace test1 {
++  template <typename> decltype([]{}) a();
++}
++
++namespace test2 {
++  template <typename T> struct invoke_result {};
++  template <typename T> struct foo {};
++
++  template <typename T>
++  auto b(T&& arg) -> foo<invoke_result<decltype(arg)>> {
++    invoke_result<decltype(arg)> a;
++    return {};
++  }
++}
+diff --git a/gcc/testsuite/g++.dg/modules/late-ret-5_a.H b/gcc/testsuite/g++.dg/modules/late-ret-5_a.H
+new file mode 100644
+index 000000000000..b39b1d4529f9
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/modules/late-ret-5_a.H
+@@ -0,0 +1,6 @@
++// PR c++/118630
++// { dg-do compile { target c++20 } }
++// { dg-additional-options "-fmodule-header" }
++// { dg-module-cmi {} }
++
++#include "late-ret-5.h"
+diff --git a/gcc/testsuite/g++.dg/modules/late-ret-5_b.C b/gcc/testsuite/g++.dg/modules/late-ret-5_b.C
+new file mode 100644
+index 000000000000..d22d76381274
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/modules/late-ret-5_b.C
+@@ -0,0 +1,6 @@
++// PR c++/118630
++// { dg-do compile { target c++20 } }
++// { dg-additional-options "-fmodules -fno-module-lazy" }
++
++#include "late-ret-5.h"
++import "late-ret-5_a.H";
+-- 
+2.43.7
+
+

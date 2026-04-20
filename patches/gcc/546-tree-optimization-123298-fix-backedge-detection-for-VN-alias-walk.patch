@@ -1,0 +1,355 @@
+From d389c687fb0aba9f6d3933c004035d589aba1415 Mon Sep 17 00:00:00 2001
+From: Richard Biener <rguenther@suse.de>
+Date: Thu, 8 Jan 2026 10:10:25 +0100
+Subject: [PATCH] tree-optimization/123298 - fix backedge detection for VN
+ alias walk
+
+When trying to skip a virtual PHI during an alias walk we have to
+direct a possible VN translation hook to not use valueization when
+walking a backedge.  But this backedge detection was overly
+optimistic, not honoring irreducible regions.  The following hookizes
+the backedge detection so VN can properly flag edges that are back
+with respect to its particular CFG traversal.
+
+	PR tree-optimization/123298
+	* tree-ssa-alias.h (get_continuation_for_phi): Take a gphi *,
+	add is_backedge hook argument.
+	(walk_non_aliased_vuses): Add is_backedge hook argument.
+	* tree-ssa-alias.cc (maybe_skip_until): Adjust.
+	(get_continuation_for_phi): Use new hook to classify an
+	edge into the PHI as backedge.
+	(walk_non_aliased_vuses): Adjust.
+	* gimple-lower-bitint.cc (bitint_dom_walker::before_dom_children):
+	Likewise.
+	* ipa-prop.cc (determine_known_aggregate_parts): Likewise.
+	* tree-ssa-scopedtables.cc (avail_exprs_stack::lookup_avail_expr):
+	Likewise.
+	* tree-ssa-pre.cc (translate_vuse_through_block): Likewise.
+	* tree-ssa-sccvn.cc (vn_bb_to_rpo): Make BB to RPO order
+	mapping accessible from new hook.
+	(do_rpo_vn_1): Likewise.
+	(vn_is_backedge): New hook to classify edge.
+	(vn_reference_lookup_pieces): Adjust.
+	(vn_reference_lookup): Likewise.
+
+	* gcc.dg/torture/pr123298.c: New testcase.
+
+(cherry picked from commit 7a8c00dea5ec301d9e5af5fee5ff1fa469ccb1a1)
+---
+ gcc/gimple-lower-bitint.cc              |  2 +-
+ gcc/ipa-prop.cc                         |  4 +--
+ gcc/testsuite/gcc.dg/torture/pr123298.c | 35 +++++++++++++++++++++++++
+ gcc/tree-ssa-alias.cc                   | 34 +++++++++++++-----------
+ gcc/tree-ssa-alias.h                    |  7 +++--
+ gcc/tree-ssa-pre.cc                     | 10 +++----
+ gcc/tree-ssa-sccvn.cc                   | 21 ++++++++++++---
+ gcc/tree-ssa-scopedtables.cc            |  2 +-
+ 8 files changed, 85 insertions(+), 30 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.dg/torture/pr123298.c
+
+diff --git a/gcc/gimple-lower-bitint.cc b/gcc/gimple-lower-bitint.cc
+index 90ac7f9392b3..a1e10cdeddcc 100644
+--- a/gcc/gimple-lower-bitint.cc
++++ b/gcc/gimple-lower-bitint.cc
+@@ -5899,7 +5899,7 @@ bitint_dom_walker::before_dom_children (basic_block bb)
+ 	    vuse = vop;
+ 	  if (vuse != lvop
+ 	      && walk_non_aliased_vuses (&ref, vuse, false, vuse_eq,
+-					 NULL, NULL, limit, lvop) == NULL)
++					 NULL, NULL, NULL, limit, lvop) == NULL)
+ 	    bitmap_clear_bit (m_loads, SSA_NAME_VERSION (s));
+ 	}
+     }
+diff --git a/gcc/ipa-prop.cc b/gcc/ipa-prop.cc
+index 5f6f93c0a813..44663659bd9a 100644
+--- a/gcc/ipa-prop.cc
++++ b/gcc/ipa-prop.cc
+@@ -2208,9 +2208,9 @@ determine_known_aggregate_parts (struct ipa_func_body_info *fbi,
+     {
+       gimple *stmt = SSA_NAME_DEF_STMT (dom_vuse);
+ 
+-      if (gimple_code (stmt) == GIMPLE_PHI)
++      if (gphi *phi = dyn_cast <gphi *> (stmt))
+ 	{
+-	  dom_vuse = get_continuation_for_phi (stmt, &r, true,
++	  dom_vuse = get_continuation_for_phi (phi, &r, true,
+ 					       fbi->aa_walk_budget,
+ 					       &visited, false, NULL, NULL);
+ 	  continue;
+diff --git a/gcc/testsuite/gcc.dg/torture/pr123298.c b/gcc/testsuite/gcc.dg/torture/pr123298.c
+new file mode 100644
+index 000000000000..ceaa00b1fef6
+--- /dev/null
++++ b/gcc/testsuite/gcc.dg/torture/pr123298.c
+@@ -0,0 +1,35 @@
++/* { dg-do run } */
++
++__attribute__((noipa))
++int
++func_1 (int g_258, int func_1_BS_COND_11, int g_64)
++{
++  int BS_VAR_1 = 10;
++  unsigned char BS_VAR_5[2] = { 19, 28 };
++  int LOCAL_CHECKSUM = 0;
++  if (func_1_BS_COND_11)
++    goto BS_LABEL_0;
++  BS_VAR_1 = 0;
++  while (g_64 <= 5)
++    {
++BS_LABEL_0:
++      for (;;)
++	{
++	  LOCAL_CHECKSUM = BS_VAR_5[1];
++	  if (g_258 != 0) break;
++	  goto out;
++	}
++      BS_VAR_5[BS_VAR_1 < 5] = 0;
++      g_258 = 0;
++    }
++out:
++  return LOCAL_CHECKSUM;
++}
++
++int
++main ()
++{
++  if (func_1 (50, 0, 0) != 0)
++    __builtin_abort ();
++  return 0;
++}
+diff --git a/gcc/tree-ssa-alias.cc b/gcc/tree-ssa-alias.cc
+index f60ed09514e9..8ce0f96603dc 100644
+--- a/gcc/tree-ssa-alias.cc
++++ b/gcc/tree-ssa-alias.cc
+@@ -3736,6 +3736,7 @@ maybe_skip_until (gimple *phi, tree &target, basic_block target_bb,
+ 		  ao_ref *ref, tree vuse, bool tbaa_p, unsigned int &limit,
+ 		  bitmap *visited, bool abort_on_visited,
+ 		  void *(*translate)(ao_ref *, tree, void *, translate_flags *),
++		  bool (*is_backedge)(edge, void *),
+ 		  translate_flags disambiguate_only,
+ 		  void *data)
+ {
+@@ -3767,14 +3768,15 @@ maybe_skip_until (gimple *phi, tree &target, basic_block target_bb,
+ 	}
+ 
+       /* Recurse for PHI nodes.  */
+-      if (gimple_code (def_stmt) == GIMPLE_PHI)
++      if (gphi *phi = dyn_cast <gphi *> (def_stmt))
+ 	{
+ 	  /* An already visited PHI node ends the walk successfully.  */
+-	  if (bitmap_bit_p (*visited, SSA_NAME_VERSION (PHI_RESULT (def_stmt))))
++	  if (bitmap_bit_p (*visited, SSA_NAME_VERSION (PHI_RESULT (phi))))
+ 	    return !abort_on_visited;
+-	  vuse = get_continuation_for_phi (def_stmt, ref, tbaa_p, limit,
++	  vuse = get_continuation_for_phi (phi, ref, tbaa_p, limit,
+ 					   visited, abort_on_visited,
+-					   translate, data, disambiguate_only);
++					   translate, data, is_backedge,
++					   disambiguate_only);
+ 	  if (!vuse)
+ 	    return false;
+ 	  continue;
+@@ -3819,12 +3821,13 @@ maybe_skip_until (gimple *phi, tree &target, basic_block target_bb,
+    Returns NULL_TREE if no suitable virtual operand can be found.  */
+ 
+ tree
+-get_continuation_for_phi (gimple *phi, ao_ref *ref, bool tbaa_p,
++get_continuation_for_phi (gphi *phi, ao_ref *ref, bool tbaa_p,
+ 			  unsigned int &limit, bitmap *visited,
+ 			  bool abort_on_visited,
+ 			  void *(*translate)(ao_ref *, tree, void *,
+ 					     translate_flags *),
+ 			  void *data,
++			  bool (*is_backedge)(edge, void *),
+ 			  translate_flags disambiguate_only)
+ {
+   unsigned nargs = gimple_phi_num_args (phi);
+@@ -3867,15 +3870,14 @@ get_continuation_for_phi (gimple *phi, ao_ref *ref, bool tbaa_p,
+       else if (! maybe_skip_until (phi, arg0, dom, ref, arg1, tbaa_p,
+ 				   limit, visited,
+ 				   abort_on_visited,
+-				   translate,
++				   translate, is_backedge,
+ 				   /* Do not valueize when walking over
+ 				      backedges.  */
+-				   dominated_by_p
+-				     (CDI_DOMINATORS,
+-				      gimple_bb (SSA_NAME_DEF_STMT (arg1)),
+-				      phi_bb)
+-				   ? TR_DISAMBIGUATE
+-				   : disambiguate_only, data))
++				   (is_backedge
++				    && !is_backedge
++					  (gimple_phi_arg_edge (phi, i), data))
++				   ? disambiguate_only : TR_DISAMBIGUATE,
++				   data))
+ 	return NULL_TREE;
+     }
+ 
+@@ -3915,6 +3917,7 @@ walk_non_aliased_vuses (ao_ref *ref, tree vuse, bool tbaa_p,
+ 			void *(*walker)(ao_ref *, tree, void *),
+ 			void *(*translate)(ao_ref *, tree, void *,
+ 					   translate_flags *),
++			bool (*is_backedge)(edge, void *),
+ 			tree (*valueize)(tree),
+ 			unsigned &limit, void *data)
+ {
+@@ -3952,9 +3955,10 @@ walk_non_aliased_vuses (ao_ref *ref, tree vuse, bool tbaa_p,
+       def_stmt = SSA_NAME_DEF_STMT (vuse);
+       if (gimple_nop_p (def_stmt))
+ 	break;
+-      else if (gimple_code (def_stmt) == GIMPLE_PHI)
+-	vuse = get_continuation_for_phi (def_stmt, ref, tbaa_p, limit,
+-					 &visited, translated, translate, data);
++      else if (gphi *phi = dyn_cast <gphi *> (def_stmt))
++	vuse = get_continuation_for_phi (phi, ref, tbaa_p, limit,
++					 &visited, translated, translate, data,
++					 is_backedge);
+       else
+ 	{
+ 	  if ((int)limit <= 0)
+diff --git a/gcc/tree-ssa-alias.h b/gcc/tree-ssa-alias.h
+index 6537608df7db..1deeb07bfa1b 100644
+--- a/gcc/tree-ssa-alias.h
++++ b/gcc/tree-ssa-alias.h
+@@ -148,16 +148,19 @@ extern bool ref_can_have_store_data_races (tree);
+ 
+ enum translate_flags
+   { TR_TRANSLATE, TR_VALUEIZE_AND_DISAMBIGUATE, TR_DISAMBIGUATE };
+-extern tree get_continuation_for_phi (gimple *, ao_ref *, bool,
++extern tree get_continuation_for_phi (gphi *, ao_ref *, bool,
+ 				      unsigned int &, bitmap *, bool,
+ 				      void *(*)(ao_ref *, tree, void *,
+ 						translate_flags *),
+-				      void *, translate_flags
++				      void *,
++				      bool (*)(edge, void *) = nullptr,
++				      translate_flags
+ 				        = TR_VALUEIZE_AND_DISAMBIGUATE);
+ extern void *walk_non_aliased_vuses (ao_ref *, tree, bool,
+ 				     void *(*)(ao_ref *, tree, void *),
+ 				     void *(*)(ao_ref *, tree, void *,
+ 					       translate_flags *),
++				     bool (*)(edge, void *),
+ 				     tree (*)(tree), unsigned &, void *);
+ extern int walk_aliased_vdefs (ao_ref *, tree,
+ 			       bool (*)(ao_ref *, tree, void *),
+diff --git a/gcc/tree-ssa-pre.cc b/gcc/tree-ssa-pre.cc
+index 83492b9ebf39..56041690d4ed 100644
+--- a/gcc/tree-ssa-pre.cc
++++ b/gcc/tree-ssa-pre.cc
+@@ -1195,7 +1195,7 @@ translate_vuse_through_block (vec<vn_reference_op_s> operands,
+ 			      tree type, tree vuse, edge e, bool *same_valid)
+ {
+   basic_block phiblock = e->dest;
+-  gimple *phi = SSA_NAME_DEF_STMT (vuse);
++  gimple *def = SSA_NAME_DEF_STMT (vuse);
+   ao_ref ref;
+ 
+   if (same_valid)
+@@ -1203,9 +1203,9 @@ translate_vuse_through_block (vec<vn_reference_op_s> operands,
+ 
+   /* If value-numbering provided a memory state for this
+      that dominates PHIBLOCK we can just use that.  */
+-  if (gimple_nop_p (phi)
+-      || (gimple_bb (phi) != phiblock
+-	  && dominated_by_p (CDI_DOMINATORS, phiblock, gimple_bb (phi))))
++  if (gimple_nop_p (def)
++      || (gimple_bb (def) != phiblock
++	  && dominated_by_p (CDI_DOMINATORS, phiblock, gimple_bb (def))))
+     return vuse;
+ 
+   /* We have pruned expressions that are killed in PHIBLOCK via
+@@ -1213,7 +1213,7 @@ translate_vuse_through_block (vec<vn_reference_op_s> operands,
+      live at the start of the block.  If there is no virtual PHI to translate
+      through return the VUSE live at entry.  Otherwise the VUSE to translate
+      is the def of the virtual PHI node.  */
+-  phi = get_virtual_phi (phiblock);
++  gphi *phi = get_virtual_phi (phiblock);
+   if (!phi)
+     return BB_LIVE_VOP_ON_EXIT
+ 	     (get_immediate_dominator (CDI_DOMINATORS, phiblock));
+diff --git a/gcc/tree-ssa-sccvn.cc b/gcc/tree-ssa-sccvn.cc
+index 9d679824eaf5..daab042e25f5 100644
+--- a/gcc/tree-ssa-sccvn.cc
++++ b/gcc/tree-ssa-sccvn.cc
+@@ -369,6 +369,7 @@ static vn_tables_t valid_info;
+ /* Global RPO state for access from hooks.  */
+ static class eliminate_dom_walker *rpo_avail;
+ basic_block vn_context_bb;
++int *vn_bb_to_rpo;
+ 
+ 
+ /* Valueization hook for simplify_replace_tree.  Valueize NAME if it is
+@@ -3912,6 +3913,16 @@ vn_reference_lookup_3 (ao_ref *ref, tree vuse, void *data_,
+   return (void *)-1;
+ }
+ 
++/* Return true if E is a backedge with respect to our CFG walk order.  */
++
++static bool
++vn_is_backedge (edge e, void *)
++{
++  /* During PRE elimination we no longer have access to this info.  */
++  return (!vn_bb_to_rpo
++	  || vn_bb_to_rpo[e->dest->index] <= vn_bb_to_rpo[e->src->index]);
++}
++
+ /* Return a reference op vector from OP that can be used for
+    vn_reference_lookup_pieces.  The caller is responsible for releasing
+    the vector.  */
+@@ -3993,8 +4004,8 @@ vn_reference_lookup_pieces (tree vuse, alias_set_type set,
+ 	*vnresult
+ 	  = ((vn_reference_t)
+ 	     walk_non_aliased_vuses (&r, vr1.vuse, true, vn_reference_lookup_2,
+-				     vn_reference_lookup_3, vuse_valueize,
+-				     limit, &data));
++				     vn_reference_lookup_3, vn_is_backedge,
++				     vuse_valueize, limit, &data));
+       if (ops_for_ref != shared_lookup_references)
+ 	ops_for_ref.release ();
+       gcc_checking_assert (vr1.operands == shared_lookup_references);
+@@ -4123,8 +4134,8 @@ vn_reference_lookup (tree op, tree vuse, vn_lookup_kind kind,
+       wvnresult
+ 	= ((vn_reference_t)
+ 	   walk_non_aliased_vuses (&r, vr1.vuse, tbaa_p, vn_reference_lookup_2,
+-				   vn_reference_lookup_3, vuse_valueize, limit,
+-				   &data));
++				   vn_reference_lookup_3, vn_is_backedge,
++				   vuse_valueize, limit, &data));
+       gcc_checking_assert (vr1.operands == shared_lookup_references);
+       if (wvnresult)
+ 	{
+@@ -8561,6 +8572,7 @@ do_rpo_vn_1 (function *fn, edge entry, bitmap exit_bbs,
+   int *bb_to_rpo = XNEWVEC (int, last_basic_block_for_fn (fn));
+   for (int i = 0; i < n; ++i)
+     bb_to_rpo[rpo[i]] = i;
++  vn_bb_to_rpo = bb_to_rpo;
+ 
+   unwind_state *rpo_state = XNEWVEC (unwind_state, n);
+ 
+@@ -8918,6 +8930,7 @@ do_rpo_vn_1 (function *fn, edge entry, bitmap exit_bbs,
+ 
+   vn_valueize = NULL;
+   rpo_avail = NULL;
++  vn_bb_to_rpo = NULL;
+ 
+   XDELETEVEC (bb_to_rpo);
+   XDELETEVEC (rpo);
+diff --git a/gcc/tree-ssa-scopedtables.cc b/gcc/tree-ssa-scopedtables.cc
+index b860711eb90e..517cf39d31ae 100644
+--- a/gcc/tree-ssa-scopedtables.cc
++++ b/gcc/tree-ssa-scopedtables.cc
+@@ -340,7 +340,7 @@ avail_exprs_stack::lookup_avail_expr (gimple *stmt, bool insert, bool tbaa_p,
+ 	    && (ao_ref_init (&ref, gimple_assign_rhs1 (stmt)),
+ 		ref.base_alias_set = ref.ref_alias_set = tbaa_p ? -1 : 0, true)
+ 	    && walk_non_aliased_vuses (&ref, vuse2, true, vuse_eq, NULL, NULL,
+-				       limit, vuse1) != NULL))
++				       NULL, limit, vuse1) != NULL))
+ 	{
+ 	  if (insert)
+ 	    {
+-- 
+2.43.7
+
+

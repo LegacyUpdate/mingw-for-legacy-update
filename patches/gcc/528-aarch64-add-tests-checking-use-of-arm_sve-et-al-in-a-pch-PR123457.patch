@@ -1,0 +1,411 @@
+From fe58796bd3cfbfc3d42e8a94207a957411db478b Mon Sep 17 00:00:00 2001
+From: Claudio Bantaloukas <claudio.bantaloukas@arm.com>
+Date: Thu, 8 Jan 2026 13:40:07 +0000
+Subject: [PATCH] aarch64: Add tests checking use of arm_sve.h et al in a pch
+ [PR123457]
+
+These tests check that including files using aarch64 specific pragmas in
+headers that become precompiled headers works.
+
+Built and tested for aarch64-linux-gnu on top of Andrew's patch.
+
+gcc/testsuite/Changelog:
+	PR target/123457
+	* gcc.target/aarch64/pch/aarch64-pch.exp: Add new testsuite.
+	* gcc.target/aarch64/pch/pch_arm_acle.c: Add new test file.
+	* gcc.target/aarch64/pch/pch_arm_acle.hs: Likewise.
+	* gcc.target/aarch64/pch/pch_arm_acle_include_post.c: Likewise.
+	* gcc.target/aarch64/pch/pch_arm_acle_include_post.hs: Likewise.
+	* gcc.target/aarch64/pch/pch_arm_multiple.c: Likewise.
+	* gcc.target/aarch64/pch/pch_arm_multiple.hs: Likewise.
+	* gcc.target/aarch64/pch/pch_arm_multiple_include_post.c: Likewise.
+	* gcc.target/aarch64/pch/pch_arm_multiple_include_post.hs: Likewise.
+	* gcc.target/aarch64/pch/pch_arm_neon.c: Likewise.
+	* gcc.target/aarch64/pch/pch_arm_neon.hs: Likewise.
+	* gcc.target/aarch64/pch/pch_arm_neon_include_post.c: Likewise.
+	* gcc.target/aarch64/pch/pch_arm_neon_include_post.hs: Likewise.
+	* gcc.target/aarch64/pch/pch_arm_neon_sve_bridge.c: Likewise.
+	* gcc.target/aarch64/pch/pch_arm_neon_sve_bridge.hs: Likewise.
+	* gcc.target/aarch64/pch/pch_arm_neon_sve_bridge_include_post.c: Likewise.
+	* gcc.target/aarch64/pch/pch_arm_neon_sve_bridge_include_post.hs: Likewise.
+	* gcc.target/aarch64/pch/pch_arm_sme.c: Likewise.
+	* gcc.target/aarch64/pch/pch_arm_sme.hs: Likewise.
+	* gcc.target/aarch64/pch/pch_arm_sme_include_post.c: Likewise.
+	* gcc.target/aarch64/pch/pch_arm_sme_include_post.hs: Likewise.
+	* gcc.target/aarch64/pch/pch_arm_sve.c: Likewise.
+	* gcc.target/aarch64/pch/pch_arm_sve.hs: Likewise.
+	* gcc.target/aarch64/pch/pch_arm_sve_include_post.c: Likewise.
+	* gcc.target/aarch64/pch/pch_arm_sve_include_post.hs: Likewise.
+---
+ .../gcc.target/aarch64/pch/aarch64-pch.exp    | 52 +++++++++++++++++++
+ .../gcc.target/aarch64/pch/pch_arm_acle.c     |  6 +++
+ .../gcc.target/aarch64/pch/pch_arm_acle.hs    |  2 +
+ .../aarch64/pch/pch_arm_acle_include_post.c   |  7 +++
+ .../aarch64/pch/pch_arm_acle_include_post.hs  |  2 +
+ .../gcc.target/aarch64/pch/pch_arm_multiple.c |  6 +++
+ .../aarch64/pch/pch_arm_multiple.hs           |  6 +++
+ .../pch/pch_arm_multiple_include_post.c       | 11 ++++
+ .../pch/pch_arm_multiple_include_post.hs      |  6 +++
+ .../gcc.target/aarch64/pch/pch_arm_neon.c     |  6 +++
+ .../gcc.target/aarch64/pch/pch_arm_neon.hs    |  2 +
+ .../aarch64/pch/pch_arm_neon_include_post.c   |  7 +++
+ .../aarch64/pch/pch_arm_neon_include_post.hs  |  2 +
+ .../aarch64/pch/pch_arm_neon_sve_bridge.c     |  6 +++
+ .../aarch64/pch/pch_arm_neon_sve_bridge.hs    |  2 +
+ .../pch_arm_neon_sve_bridge_include_post.c    |  7 +++
+ .../pch_arm_neon_sve_bridge_include_post.hs   |  2 +
+ .../gcc.target/aarch64/pch/pch_arm_sme.c      |  6 +++
+ .../gcc.target/aarch64/pch/pch_arm_sme.hs     |  2 +
+ .../aarch64/pch/pch_arm_sme_include_post.c    |  7 +++
+ .../aarch64/pch/pch_arm_sme_include_post.hs   |  2 +
+ .../gcc.target/aarch64/pch/pch_arm_sve.c      |  6 +++
+ .../gcc.target/aarch64/pch/pch_arm_sve.hs     |  2 +
+ .../aarch64/pch/pch_arm_sve_include_post.c    |  7 +++
+ .../aarch64/pch/pch_arm_sve_include_post.hs   |  2 +
+ 25 files changed, 166 insertions(+)
+ create mode 100644 gcc/testsuite/gcc.target/aarch64/pch/aarch64-pch.exp
+ create mode 100644 gcc/testsuite/gcc.target/aarch64/pch/pch_arm_acle.c
+ create mode 100644 gcc/testsuite/gcc.target/aarch64/pch/pch_arm_acle.hs
+ create mode 100644 gcc/testsuite/gcc.target/aarch64/pch/pch_arm_acle_include_post.c
+ create mode 100644 gcc/testsuite/gcc.target/aarch64/pch/pch_arm_acle_include_post.hs
+ create mode 100644 gcc/testsuite/gcc.target/aarch64/pch/pch_arm_multiple.c
+ create mode 100644 gcc/testsuite/gcc.target/aarch64/pch/pch_arm_multiple.hs
+ create mode 100644 gcc/testsuite/gcc.target/aarch64/pch/pch_arm_multiple_include_post.c
+ create mode 100644 gcc/testsuite/gcc.target/aarch64/pch/pch_arm_multiple_include_post.hs
+ create mode 100644 gcc/testsuite/gcc.target/aarch64/pch/pch_arm_neon.c
+ create mode 100644 gcc/testsuite/gcc.target/aarch64/pch/pch_arm_neon.hs
+ create mode 100644 gcc/testsuite/gcc.target/aarch64/pch/pch_arm_neon_include_post.c
+ create mode 100644 gcc/testsuite/gcc.target/aarch64/pch/pch_arm_neon_include_post.hs
+ create mode 100644 gcc/testsuite/gcc.target/aarch64/pch/pch_arm_neon_sve_bridge.c
+ create mode 100644 gcc/testsuite/gcc.target/aarch64/pch/pch_arm_neon_sve_bridge.hs
+ create mode 100644 gcc/testsuite/gcc.target/aarch64/pch/pch_arm_neon_sve_bridge_include_post.c
+ create mode 100644 gcc/testsuite/gcc.target/aarch64/pch/pch_arm_neon_sve_bridge_include_post.hs
+ create mode 100644 gcc/testsuite/gcc.target/aarch64/pch/pch_arm_sme.c
+ create mode 100644 gcc/testsuite/gcc.target/aarch64/pch/pch_arm_sme.hs
+ create mode 100644 gcc/testsuite/gcc.target/aarch64/pch/pch_arm_sme_include_post.c
+ create mode 100644 gcc/testsuite/gcc.target/aarch64/pch/pch_arm_sme_include_post.hs
+ create mode 100644 gcc/testsuite/gcc.target/aarch64/pch/pch_arm_sve.c
+ create mode 100644 gcc/testsuite/gcc.target/aarch64/pch/pch_arm_sve.hs
+ create mode 100644 gcc/testsuite/gcc.target/aarch64/pch/pch_arm_sve_include_post.c
+ create mode 100644 gcc/testsuite/gcc.target/aarch64/pch/pch_arm_sve_include_post.hs
+
+diff --git a/gcc/testsuite/gcc.target/aarch64/pch/aarch64-pch.exp b/gcc/testsuite/gcc.target/aarch64/pch/aarch64-pch.exp
+new file mode 100644
+index 000000000000..ee0c1f25f3ca
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/aarch64/pch/aarch64-pch.exp
+@@ -0,0 +1,52 @@
++#  Regression driver checking precompiled header compatibility of acle headers.
++#  Copyright (C) 2025 Free Software Foundation, Inc.
++#  Contributed by ARM Ltd.
++#
++#  This file is part of GCC.
++#
++#  GCC is free software; you can redistribute it and/or modify it
++#  under the terms of the GNU General Public License as published by
++#  the Free Software Foundation; either version 3, or (at your option)
++#  any later version.
++#
++#  GCC is distributed in the hope that it will be useful, but
++#  WITHOUT ANY WARRANTY; without even the implied warranty of
++#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++#  General Public License for more details.
++#
++#  You should have received a copy of the GNU General Public License
++#  along with GCC; see the file COPYING3.  If not see
++#  <http://www.gnu.org/licenses/>.  */
++
++# GCC testsuite checking acle headers can be included in precompiled headers
++# that uses the `dg.exp' driver.
++
++# Exit immediately if this isn't an AArch64 target.
++if {![istarget aarch64*-*-*] } then {
++  return
++}
++
++# Load support procs.
++load_lib gcc-dg.exp
++load_lib dg-pch.exp
++load_lib torture-options.exp
++
++# Initialize `dg'.
++dg-init
++torture-init
++set-torture-options $DG_TORTURE_OPTIONS
++pch-init
++
++set arch_flags "-march=armv8.5-a+sve2+sme"
++set old_dg_do_what_default "${dg-do-what-default}"
++# Main loop.
++foreach test [lsort [glob -nocomplain $srcdir/$subdir/*.c]] {
++  global torture_without_loops
++  dg-flags-pch $subdir $test $arch_flags \
++  	[concat [list {-O0 -g}] $torture_without_loops] ".h"
++}
++
++# All done.
++pch-finish
++torture-finish
++dg-finish
+diff --git a/gcc/testsuite/gcc.target/aarch64/pch/pch_arm_acle.c b/gcc/testsuite/gcc.target/aarch64/pch/pch_arm_acle.c
+new file mode 100644
+index 000000000000..51fc22629e6d
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/aarch64/pch/pch_arm_acle.c
+@@ -0,0 +1,6 @@
++#include "pch_arm_acle.h"
++
++uint32_t ror(uint32_t a, uint32_t b)
++{
++  return __ror(a, b);
++}
+diff --git a/gcc/testsuite/gcc.target/aarch64/pch/pch_arm_acle.hs b/gcc/testsuite/gcc.target/aarch64/pch/pch_arm_acle.hs
+new file mode 100644
+index 000000000000..4ac5eec8a8ed
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/aarch64/pch/pch_arm_acle.hs
+@@ -0,0 +1,2 @@
++#pragma once
++#include <arm_acle.h>
+diff --git a/gcc/testsuite/gcc.target/aarch64/pch/pch_arm_acle_include_post.c b/gcc/testsuite/gcc.target/aarch64/pch/pch_arm_acle_include_post.c
+new file mode 100644
+index 000000000000..59ee34a63082
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/aarch64/pch/pch_arm_acle_include_post.c
+@@ -0,0 +1,7 @@
++#include "pch_arm_acle_include_post.h"
++#include <arm_acle.h>
++
++uint32_t ror(uint32_t a, uint32_t b)
++{
++  return __ror(a, b);
++}
+diff --git a/gcc/testsuite/gcc.target/aarch64/pch/pch_arm_acle_include_post.hs b/gcc/testsuite/gcc.target/aarch64/pch/pch_arm_acle_include_post.hs
+new file mode 100644
+index 000000000000..4ac5eec8a8ed
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/aarch64/pch/pch_arm_acle_include_post.hs
+@@ -0,0 +1,2 @@
++#pragma once
++#include <arm_acle.h>
+diff --git a/gcc/testsuite/gcc.target/aarch64/pch/pch_arm_multiple.c b/gcc/testsuite/gcc.target/aarch64/pch/pch_arm_multiple.c
+new file mode 100644
+index 000000000000..aab025750f44
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/aarch64/pch/pch_arm_multiple.c
+@@ -0,0 +1,6 @@
++#include "pch_arm_multiple.h"
++
++svint32_t add_vectors(svint32_t a, svint32_t b)
++{
++  return svadd_s32_z(svptrue_b32(), a, b);
++}
+diff --git a/gcc/testsuite/gcc.target/aarch64/pch/pch_arm_multiple.hs b/gcc/testsuite/gcc.target/aarch64/pch/pch_arm_multiple.hs
+new file mode 100644
+index 000000000000..fe5fd6094e9d
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/aarch64/pch/pch_arm_multiple.hs
+@@ -0,0 +1,6 @@
++#pragma once
++#include <arm_sme.h>
++#include <arm_sve.h>
++#include <arm_neon_sve_bridge.h>
++#include <arm_neon.h>
++#include <arm_acle.h>
+diff --git a/gcc/testsuite/gcc.target/aarch64/pch/pch_arm_multiple_include_post.c b/gcc/testsuite/gcc.target/aarch64/pch/pch_arm_multiple_include_post.c
+new file mode 100644
+index 000000000000..a811fd1f0a58
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/aarch64/pch/pch_arm_multiple_include_post.c
+@@ -0,0 +1,11 @@
++#include "pch_arm_multiple_include_post.h"
++#include <arm_sme.h>
++#include <arm_sve.h>
++#include <arm_neon_sve_bridge.h>
++#include <arm_neon.h>
++#include <arm_acle.h>
++
++svint32_t add_vectors(svint32_t a, svint32_t b)
++{
++  return svadd_s32_z(svptrue_b32(), a, b);
++}
+diff --git a/gcc/testsuite/gcc.target/aarch64/pch/pch_arm_multiple_include_post.hs b/gcc/testsuite/gcc.target/aarch64/pch/pch_arm_multiple_include_post.hs
+new file mode 100644
+index 000000000000..fe5fd6094e9d
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/aarch64/pch/pch_arm_multiple_include_post.hs
+@@ -0,0 +1,6 @@
++#pragma once
++#include <arm_sme.h>
++#include <arm_sve.h>
++#include <arm_neon_sve_bridge.h>
++#include <arm_neon.h>
++#include <arm_acle.h>
+diff --git a/gcc/testsuite/gcc.target/aarch64/pch/pch_arm_neon.c b/gcc/testsuite/gcc.target/aarch64/pch/pch_arm_neon.c
+new file mode 100644
+index 000000000000..c0abcc18b9b8
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/aarch64/pch/pch_arm_neon.c
+@@ -0,0 +1,6 @@
++#include "pch_arm_neon.h"
++
++uint32x4_t add_vectors(uint32x4_t a, uint32x4_t b)
++{
++  return vaddq_u32(a, b);
++}
+diff --git a/gcc/testsuite/gcc.target/aarch64/pch/pch_arm_neon.hs b/gcc/testsuite/gcc.target/aarch64/pch/pch_arm_neon.hs
+new file mode 100644
+index 000000000000..0bf04944c128
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/aarch64/pch/pch_arm_neon.hs
+@@ -0,0 +1,2 @@
++#pragma once
++#include <arm_neon.h>
+diff --git a/gcc/testsuite/gcc.target/aarch64/pch/pch_arm_neon_include_post.c b/gcc/testsuite/gcc.target/aarch64/pch/pch_arm_neon_include_post.c
+new file mode 100644
+index 000000000000..6589ffdc83f2
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/aarch64/pch/pch_arm_neon_include_post.c
+@@ -0,0 +1,7 @@
++#include "pch_arm_neon_include_post.h"
++#include "arm_neon.h"
++
++uint32x4_t add_vectors(uint32x4_t a, uint32x4_t b)
++{
++  return vaddq_u32(a, b);
++}
+diff --git a/gcc/testsuite/gcc.target/aarch64/pch/pch_arm_neon_include_post.hs b/gcc/testsuite/gcc.target/aarch64/pch/pch_arm_neon_include_post.hs
+new file mode 100644
+index 000000000000..0bf04944c128
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/aarch64/pch/pch_arm_neon_include_post.hs
+@@ -0,0 +1,2 @@
++#pragma once
++#include <arm_neon.h>
+diff --git a/gcc/testsuite/gcc.target/aarch64/pch/pch_arm_neon_sve_bridge.c b/gcc/testsuite/gcc.target/aarch64/pch/pch_arm_neon_sve_bridge.c
+new file mode 100644
+index 000000000000..001cbce8400b
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/aarch64/pch/pch_arm_neon_sve_bridge.c
+@@ -0,0 +1,6 @@
++#include "pch_arm_neon_sve_bridge.h"
++
++svint8_t set(svint8_t a, int8x16_t b)
++{
++  return svset_neonq(a, b);
++}
+diff --git a/gcc/testsuite/gcc.target/aarch64/pch/pch_arm_neon_sve_bridge.hs b/gcc/testsuite/gcc.target/aarch64/pch/pch_arm_neon_sve_bridge.hs
+new file mode 100644
+index 000000000000..08ae5bd6831b
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/aarch64/pch/pch_arm_neon_sve_bridge.hs
+@@ -0,0 +1,2 @@
++#pragma once
++#include <arm_neon_sve_bridge.h>
+diff --git a/gcc/testsuite/gcc.target/aarch64/pch/pch_arm_neon_sve_bridge_include_post.c b/gcc/testsuite/gcc.target/aarch64/pch/pch_arm_neon_sve_bridge_include_post.c
+new file mode 100644
+index 000000000000..aad4bf1b6e79
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/aarch64/pch/pch_arm_neon_sve_bridge_include_post.c
+@@ -0,0 +1,7 @@
++#include "pch_arm_neon_sve_bridge_include_post.h"
++#include <arm_neon_sve_bridge.h>
++
++svint8_t set(svint8_t a, int8x16_t b)
++{
++  return svset_neonq(a, b);
++}
+diff --git a/gcc/testsuite/gcc.target/aarch64/pch/pch_arm_neon_sve_bridge_include_post.hs b/gcc/testsuite/gcc.target/aarch64/pch/pch_arm_neon_sve_bridge_include_post.hs
+new file mode 100644
+index 000000000000..08ae5bd6831b
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/aarch64/pch/pch_arm_neon_sve_bridge_include_post.hs
+@@ -0,0 +1,2 @@
++#pragma once
++#include <arm_neon_sve_bridge.h>
+diff --git a/gcc/testsuite/gcc.target/aarch64/pch/pch_arm_sme.c b/gcc/testsuite/gcc.target/aarch64/pch/pch_arm_sme.c
+new file mode 100644
+index 000000000000..a30233c806e2
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/aarch64/pch/pch_arm_sme.c
+@@ -0,0 +1,6 @@
++#include "pch_arm_sme.h"
++
++void st(svbool_t pg, void *ptr, uint32_t slice_base) 
++  __arm_streaming __arm_inout("za"){
++  svst1_hor_za8(0, slice_base, pg, ptr);
++}
+diff --git a/gcc/testsuite/gcc.target/aarch64/pch/pch_arm_sme.hs b/gcc/testsuite/gcc.target/aarch64/pch/pch_arm_sme.hs
+new file mode 100644
+index 000000000000..0263e377bb14
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/aarch64/pch/pch_arm_sme.hs
+@@ -0,0 +1,2 @@
++#pragma once
++#include <arm_sme.h>
+diff --git a/gcc/testsuite/gcc.target/aarch64/pch/pch_arm_sme_include_post.c b/gcc/testsuite/gcc.target/aarch64/pch/pch_arm_sme_include_post.c
+new file mode 100644
+index 000000000000..c301803e88dc
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/aarch64/pch/pch_arm_sme_include_post.c
+@@ -0,0 +1,7 @@
++#include "pch_arm_sme_include_post.h"
++#include <arm_sme.h>
++
++void st(svbool_t pg, void *ptr, uint32_t slice_base) 
++  __arm_streaming __arm_inout("za"){
++  svst1_hor_za8(0, slice_base, pg, ptr);
++}
+diff --git a/gcc/testsuite/gcc.target/aarch64/pch/pch_arm_sme_include_post.hs b/gcc/testsuite/gcc.target/aarch64/pch/pch_arm_sme_include_post.hs
+new file mode 100644
+index 000000000000..0263e377bb14
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/aarch64/pch/pch_arm_sme_include_post.hs
+@@ -0,0 +1,2 @@
++#pragma once
++#include <arm_sme.h>
+diff --git a/gcc/testsuite/gcc.target/aarch64/pch/pch_arm_sve.c b/gcc/testsuite/gcc.target/aarch64/pch/pch_arm_sve.c
+new file mode 100644
+index 000000000000..70b0147ec7e1
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/aarch64/pch/pch_arm_sve.c
+@@ -0,0 +1,6 @@
++#include "pch_arm_sve.h"
++
++svint32_t add_vectors(svint32_t a, svint32_t b)
++{
++  return svadd_s32_z(svptrue_b32(), a, b);
++}
+diff --git a/gcc/testsuite/gcc.target/aarch64/pch/pch_arm_sve.hs b/gcc/testsuite/gcc.target/aarch64/pch/pch_arm_sve.hs
+new file mode 100644
+index 000000000000..4e98c76b72c8
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/aarch64/pch/pch_arm_sve.hs
+@@ -0,0 +1,2 @@
++#pragma once
++#include <arm_sve.h>
+diff --git a/gcc/testsuite/gcc.target/aarch64/pch/pch_arm_sve_include_post.c b/gcc/testsuite/gcc.target/aarch64/pch/pch_arm_sve_include_post.c
+new file mode 100644
+index 000000000000..476b338d284b
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/aarch64/pch/pch_arm_sve_include_post.c
+@@ -0,0 +1,7 @@
++#include "pch_arm_sve_include_post.h"
++#include "arm_sve.h"
++
++svint32_t add_vectors(svint32_t a, svint32_t b)
++{
++  return svadd_s32_z(svptrue_b32(), a, b);
++}
+diff --git a/gcc/testsuite/gcc.target/aarch64/pch/pch_arm_sve_include_post.hs b/gcc/testsuite/gcc.target/aarch64/pch/pch_arm_sve_include_post.hs
+new file mode 100644
+index 000000000000..4e98c76b72c8
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/aarch64/pch/pch_arm_sve_include_post.hs
+@@ -0,0 +1,2 @@
++#pragma once
++#include <arm_sve.h>
+-- 
+2.43.7
+
+

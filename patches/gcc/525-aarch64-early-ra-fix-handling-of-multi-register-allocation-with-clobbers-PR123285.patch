@@ -1,0 +1,156 @@
+From f6a0cdd7815de805ef6e23d991e10eebd15b9391 Mon Sep 17 00:00:00 2001
+From: Andrew Pinski <andrew.pinski@oss.qualcomm.com>
+Date: Tue, 27 Jan 2026 12:19:13 -0800
+Subject: [PATCH] aarch64: early-ra: Fix handling of multi-register allocation
+ with clobbers [PR123285]
+
+So the problem here is while forming chains, we don't process hard register
+conflicts (and ABI based ones) for allocnos which are already part of a chain.
+This means sometimes we allocate a register to a color which might be clobbered
+over is live range.
+Processing clobbers for all allocnos don't work while forming a chain does
+not work as the chain's front allocnos' candidates does not get updated.
+So we need to the processing of clobbers (and ABI clobbers) before starting
+to form the chains.
+
+Changes since v1:
+ * v2: remove accidental hack which was there just for testing.
+ * v3: Move the copying of the shared part to new earlier loop too.
+       Fix small white space issue.
+
+Bootstrappd and tested on aarch64-linux-gnu.
+
+	PR target/123285
+
+gcc/ChangeLog:
+
+	* config/aarch64/aarch64-early-ra.cc (early_ra::form_chains): Process clobbers
+	and ABI clobbers before starting to form the chain.
+
+gcc/testsuite/ChangeLog:
+
+	* gcc.target/aarch64/pr123285-1.c: New test.
+
+Signed-off-by: Andrew Pinski <andrew.pinski@oss.qualcomm.com>
+---
+ gcc/config/aarch64/aarch64-early-ra.cc        | 44 +++++++++++--------
+ gcc/testsuite/gcc.target/aarch64/pr123285-1.c | 36 +++++++++++++++
+ 2 files changed, 62 insertions(+), 18 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.target/aarch64/pr123285-1.c
+
+diff --git a/gcc/config/aarch64/aarch64-early-ra.cc b/gcc/config/aarch64/aarch64-early-ra.cc
+index 479fe56b4d87..65294b71eb74 100644
+--- a/gcc/config/aarch64/aarch64-early-ra.cc
++++ b/gcc/config/aarch64/aarch64-early-ra.cc
+@@ -2733,23 +2733,10 @@ early_ra::form_chains ()
+   if (dump_file && (dump_flags & TDF_DETAILS))
+     fprintf (dump_file, "\nChaining allocnos:\n");
+ 
+-  // Perform (modified) interval graph coloring.  First sort by
+-  // increasing start point.
+-  m_sorted_allocnos.reserve (m_allocnos.length ());
+-  m_sorted_allocnos.splice (m_allocnos);
+-  m_sorted_allocnos.qsort (cmp_increasing<&allocno_info::start_point>);
+-
+-  // During this phase, color representatives are only correct for
+-  // unprocessed allocno groups (where the color representative is
+-  // the group itself) and for groups that contain a current chain head.
+-  unsigned int ti = 0;
+-  auto_vec<chain_candidate_info> candidates;
+-  for (unsigned int hi = 0; hi < m_sorted_allocnos.length (); ++hi)
++  // Record conflicts of hard register and ABI conflicts before the
++  // forming of chains so chains have the updated candidates
++  for (auto *allocno1 : m_allocnos)
+     {
+-      auto *allocno1 = m_sorted_allocnos[hi];
+-      if (allocno1->chain_next != INVALID_ALLOCNO)
+-	continue;
+-
+       // Record conflicts with direct uses for FPR hard registers.
+       auto *group1 = allocno1->group ();
+       for (unsigned int fpr = allocno1->offset; fpr < 32; ++fpr)
+@@ -2765,6 +2752,29 @@ early_ra::form_chains ()
+ 	    auto fprs = partial_fpr_clobbers (abi_id, group1->fpr_size);
+ 	    group1->fpr_candidates &= ~fprs >> allocno1->offset;
+ 	  }
++      if (allocno1->is_shared ())
++	{
++	  auto *allocno2 = m_allocnos[allocno1->related_allocno];
++	  merge_fpr_info (allocno2->group (), group1, allocno2->offset);
++	}
++    }
++
++  // Perform (modified) interval graph coloring.  First sort by
++  // increasing start point.
++  m_sorted_allocnos.reserve (m_allocnos.length ());
++  m_sorted_allocnos.splice (m_allocnos);
++  m_sorted_allocnos.qsort (cmp_increasing<&allocno_info::start_point>);
++
++  // During this phase, color representatives are only correct for
++  // unprocessed allocno groups (where the color representative is
++  // the group itself) and for groups that contain a current chain head.
++  unsigned int ti = 0;
++  auto_vec<chain_candidate_info> candidates;
++  for (unsigned int hi = 0; hi < m_sorted_allocnos.length (); ++hi)
++    {
++      auto *allocno1 = m_sorted_allocnos[hi];
++      if (allocno1->chain_next != INVALID_ALLOCNO)
++	continue;
+ 
+       if (allocno1->is_shared ())
+ 	{
+@@ -2772,8 +2782,6 @@ early_ra::form_chains ()
+ 	    fprintf (dump_file, "  Allocno %d shares the same hard register"
+ 		     " as allocno %d\n", allocno1->id,
+ 		     allocno1->related_allocno);
+-	  auto *allocno2 = m_allocnos[allocno1->related_allocno];
+-	  merge_fpr_info (allocno2->group (), group1, allocno2->offset);
+ 	  m_shared_allocnos.safe_push (allocno1);
+ 	  continue;
+ 	}
+diff --git a/gcc/testsuite/gcc.target/aarch64/pr123285-1.c b/gcc/testsuite/gcc.target/aarch64/pr123285-1.c
+new file mode 100644
+index 000000000000..9ef5a28c9afd
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/aarch64/pr123285-1.c
+@@ -0,0 +1,36 @@
++/* { dg-do run } */
++/* { dg-options "-O3" } */
++/* PR target/123285 */
++
++#define BS_VEC(type, num) type __attribute__((vector_size(num * sizeof(type))))
++
++/* f used to allocate v30 to either a or b and the inline-asm
++   would clobber the v30. */
++[[gnu::noipa]]
++BS_VEC(int, 8) f(BS_VEC(int, 8) a, BS_VEC(int, 8) b)
++{
++  a+=b;
++  asm("movi v30.16b, 0":::"v30");
++  a+=b;
++  return a;
++}
++[[gnu::noipa]]
++BS_VEC(int, 8) f1(BS_VEC(int, 8) a, BS_VEC(int, 8) b)
++{
++  a+=b;
++  a+=b;
++  return a;
++}
++
++int main()
++{
++  BS_VEC(int, 8) a = {0,1,2,3,4,5,6,7};
++  BS_VEC(int, 8) b = {8,9,10,11,12,13,14};
++  BS_VEC(int, 8) c0 = f(a,b);
++  BS_VEC(int, 8) c1 = f1(a,b);
++  for(int i=0;i<8;i++)
++  if ( c0[i] != c1[i] )
++    __builtin_abort ();
++}
++
++
+-- 
+2.43.7
+
+

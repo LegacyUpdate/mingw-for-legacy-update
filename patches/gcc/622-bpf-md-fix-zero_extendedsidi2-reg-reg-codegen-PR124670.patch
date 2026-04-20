@@ -1,0 +1,86 @@
+From b2b3342f36cbe7502a5db099f28140d5a79814ff Mon Sep 17 00:00:00 2001
+From: Vineet Gupta <vineet.gupta@linux.dev>
+Date: Thu, 26 Mar 2026 11:01:24 -0700
+Subject: [PATCH] bpf: md: fix zero_extendsidi2 reg->reg codegen [PR124670]
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf8
+Content-Transfer-Encoding: 8bit
+
+Currently the following RTL for zero extension
+
+| (insn 8 7 9 (set (reg:DI 0 %r0 [25])
+|        (zero_extend:DI (reg:SI 0 %r0 [24])))  {zero_extendsidi2}
+|     (nil))
+
+generates
+
+|   r0 = r0
+
+which is just a 64-bit copy and doesn't clear the upper 32-bits as
+semantically required by the pattern.
+
+The issue is pattern's asm template missing âwâ/'W' causing bpf_print_register ()
+to only emit 'r' regs. Using âWâ in template generates correct code.
+
+|   w0 = w0
+
+Note that 'W specifier ignores the RTL mode and unconditionally emits
+the 'w' reg which might feel like creating a potential future bug.
+However for this insn, it is correct/completely safe as follows:
+ - 'W1' for src operand: src operand has a SI mode in pattern.
+ - 'W0' for dst: Technically dst is DI, but the upper 32-bits of output
+   have to be 0 due to zero-extension, thus a 'w' reg is OK.
+
+For selftests this is a wash, except for some spurious changes.
+
+	PR target/124670
+
+gcc/ChangeLog:
+
+	* config/bpf/bpf.md (zero_extendsidi2): Use 'W' in asm template.
+
+gcc/testsuite/ChangeLog:
+
+	* gcc.target/bpf/zero-ext.c: New test.
+
+Signed-off-by: Vineet Gupta <vineet.gupta@linux.dev>
+---
+ gcc/config/bpf/bpf.md                   |  2 +-
+ gcc/testsuite/gcc.target/bpf/zero-ext.c | 11 +++++++++++
+ 2 files changed, 12 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/gcc.target/bpf/zero-ext.c
+
+diff --git a/gcc/config/bpf/bpf.md b/gcc/config/bpf/bpf.md
+index 91d94838e395..fa19d10e9f77 100644
+--- a/gcc/config/bpf/bpf.md
++++ b/gcc/config/bpf/bpf.md
+@@ -300,7 +300,7 @@
+ 	  (match_operand:SI 1 "nonimmediate_operand" "r,q")))]
+   ""
+   "@
+-   *return bpf_output_move (operands, bpf_has_alu32 ? \"{mov32\t%0,%1|%0 = %1}\" : \"{mov\t%0,%1\;and\t%0,0xffffffff|%0 = %1;%0 &= 0xffffffff}\");
++   *return bpf_output_move (operands, bpf_has_alu32 ? \"{mov32\t%0,%1|%W0 = %W1}\" : \"{mov\t%0,%1\;and\t%0,0xffffffff|%0 = %1;%0 &= 0xffffffff}\");
+    *return bpf_output_move (operands, \"{ldxw\t%0,%1|%0 = *(u32 *) %1}\");"
+   [(set_attr "type" "alu,ldx")])
+ 
+diff --git a/gcc/testsuite/gcc.target/bpf/zero-ext.c b/gcc/testsuite/gcc.target/bpf/zero-ext.c
+new file mode 100644
+index 000000000000..a57c7dc521f0
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/bpf/zero-ext.c
+@@ -0,0 +1,11 @@
++/* { dg-do compile } */
++/* { dg-options "-O2 -mcpu=v4" } */
++
++int bar_int(void);
++
++int foo_int(void) {
++      if (bar_int() != 1) return 0; else return 1;
++}
++
++/* { dg-final { scan-assembler-not {r0 = r0} } } */
++/* { dg-final { scan-assembler-times {w0 = w0} 1 } } */
+-- 
+2.43.7
+
+

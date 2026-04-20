@@ -1,0 +1,89 @@
+From bf06ae0fe3309e0835cbb5b21f91d7cb56126b70 Mon Sep 17 00:00:00 2001
+From: =?utf8?q?Tomasz=20Kami=C5=84ski?= <tkaminsk@redhat.com>
+Date: Fri, 27 Feb 2026 19:55:19 +0100
+Subject: [PATCH] libstdc++: Add #pragma to slience null-dereference warning in
+ istreambuf_iterator::operator++ [PR105580]
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf8
+Content-Transfer-Encoding: 8bit
+
+The warning was produced by following sequence, given an istream_iterator<char>
+it, such that *it will result in hitting EoF in it->_M_get(), and thus clearing
+_M_sbuf, the subsequent call to ++it, will result in _M_sbuf->sbumpc() call on
+null pointer. This is however an false-positive, as in such situation
+it == istream_iteator() returns true, and the iterator should not be
+incremented in first place.
+
+This patch sliences the issue, by disabling the "-Wnull-dereference" using
+GCC diagnostic pragmas. To work correctly the pragmas needs to be placed around
+streambuf functions on which the issue originating from istreambuf_iterator are
+reported.
+
+	PR libstdc++/105580
+
+libstdc++-v3/ChangeLog:
+
+	* include/std/streambuf (streambuf::gptr, streambuf::egptr)
+	(streambuf::gbump): Surround with pragma disabling -Wnull-dereference.
+	* testsuite/24_iterators/istreambuf_iterator/105580.cc: New test.
+
+Reviewed-by: Jonathan Wakely <jwakely@redhat.com>
+Signed-off-by: Tomasz KamiÅski <tkaminsk@redhat.com>
+	(cherry picked from commits
+	8758503918a91dacff4dbc7126eced21787fbfc9
+	bfc2b87f8244a13ab00e8e3fe2af1d6d18fcaa36
+	a523d1ecc89dcb7ea205e3de22d00443d4a0d91d)
+---
+ libstdc++-v3/include/std/streambuf                |  5 +++++
+ .../24_iterators/istreambuf_iterator/105580.cc    | 15 +++++++++++++++
+ 2 files changed, 20 insertions(+)
+ create mode 100644 libstdc++-v3/testsuite/24_iterators/istreambuf_iterator/105580.cc
+
+diff --git a/libstdc++-v3/include/std/streambuf b/libstdc++-v3/include/std/streambuf
+index 0d0f7a826282..3b70af1ed063 100644
+--- a/libstdc++-v3/include/std/streambuf
++++ b/libstdc++-v3/include/std/streambuf
+@@ -490,6 +490,10 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
+       char_type*
+       eback() const { return _M_in_beg; }
+ 
++// Required to silence false-positive warnings originating from istream_iterator::operator++,
++// see PR105580.
++#pragma GCC diagnostic push
++#pragma GCC diagnostic ignored "-Wnull-dereference"
+       char_type*
+       gptr()  const { return _M_in_cur;  }
+ 
+@@ -505,6 +509,7 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
+       */
+       void
+       gbump(int __n) { _M_in_cur += __n; }
++#pragma GCC diagnostic pop
+ 
+       /**
+        *  @brief  Setting the three read area pointers.
+diff --git a/libstdc++-v3/testsuite/24_iterators/istreambuf_iterator/105580.cc b/libstdc++-v3/testsuite/24_iterators/istreambuf_iterator/105580.cc
+new file mode 100644
+index 000000000000..e1ef4b107396
+--- /dev/null
++++ b/libstdc++-v3/testsuite/24_iterators/istreambuf_iterator/105580.cc
+@@ -0,0 +1,15 @@
++// { dg-compile }
++// { dg-additional-options "-Wnull-dereference" }
++
++#include <string>
++#include <sstream>
++
++int main()
++{
++  std::istringstream in("Hello, world");
++  std::istreambuf_iterator<char> it(in), end;
++  std::string ss(it, end);
++  return 0;
++}
++
++// { dg-bogus "null pointer dereference" "" { target *-*-* } 0 }
+-- 
+2.43.7
+
+

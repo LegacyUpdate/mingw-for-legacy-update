@@ -1,0 +1,68 @@
+From fad99a0893616663be529baea17c39748c675aff Mon Sep 17 00:00:00 2001
+From: Richard Biener <rguenther@suse.de>
+Date: Tue, 13 Jan 2026 12:59:41 +0100
+Subject: [PATCH] middle-end/123573 - fix VEC_PERM folding more
+
+The following fixes the fix from r16-6709-ga4716ece529dfd some
+more by making sure permute to one operand folding faces same
+element number vectors but also insert a VIEW_CONVERT_EXPR for
+the case one is VLA and one is VLS (when the VLA case is actually
+constant, like with -msve-vector-bits=128).  It also makes the
+assert that output and input element numbers match done in
+fold_vec_perm which this pattern eventually dispatches to into
+a check (as the comment already indicates).
+
+Testcases are in the target specific aarch64 testsuite already.
+
+	PR middle-end/123573
+	* fold-const.cc (fold_vec_perm): Actually check, not assert,
+	that input and output vector element numbers agree.
+	* match.pd (vec_perm @0 @1 @2): Make sure element numbers
+	are the same when folding to an input vector and wrap that
+	inside a VIEW_CONVERT_EXPR.
+
+(cherry picked from commit e787d5ace5cc315892868f3e5e2a2a16fd31bcc8)
+---
+ gcc/fold-const.cc | 5 ++---
+ gcc/match.pd      | 6 +++---
+ 2 files changed, 5 insertions(+), 6 deletions(-)
+
+diff --git a/gcc/fold-const.cc b/gcc/fold-const.cc
+index aef76d2457ba..407381b15913 100644
+--- a/gcc/fold-const.cc
++++ b/gcc/fold-const.cc
+@@ -10685,11 +10685,10 @@ fold_vec_perm (tree type, tree arg0, tree arg1, const vec_perm_indices &sel)
+ 
+   /* For fall back case, we want to ensure we have VLS vectors
+      with equal length.  */
+-  if (!sel.length ().is_constant (&nelts))
++  if (!sel.length ().is_constant (&nelts)
++      || !known_eq (sel.length (), TYPE_VECTOR_SUBPARTS (TREE_TYPE (arg0))))
+     return NULL_TREE;
+ 
+-  gcc_assert (known_eq (sel.length (),
+-			TYPE_VECTOR_SUBPARTS (TREE_TYPE (arg0))));
+   tree *in_elts = XALLOCAVEC (tree, nelts * 2);
+   if (!vec_cst_ctor_to_array (arg0, nelts, in_elts)
+       || !vec_cst_ctor_to_array (arg1, nelts, in_elts + nelts))
+diff --git a/gcc/match.pd b/gcc/match.pd
+index 67c9e5abb6a0..05325e1da1e7 100644
+--- a/gcc/match.pd
++++ b/gcc/match.pd
+@@ -10958,9 +10958,9 @@ and,
+       vec_perm_indices sel (builder, single_arg ? 1 : 2, nelts_in);
+     }
+     (if (known_eq (nelts, nelts_in) && sel.series_p (0, 1, 0, 1))
+-     { op0; }
+-     (if (sel.series_p (0, 1, nelts_in, 1))
+-      { op1; }
++     (view_convert @0)
++     (if (known_eq (nelts, nelts_in) && sel.series_p (0, 1, nelts_in, 1))
++      (view_convert @1)
+       (with
+        {
+          if (!single_arg)
+-- 
+2.43.7
+
+

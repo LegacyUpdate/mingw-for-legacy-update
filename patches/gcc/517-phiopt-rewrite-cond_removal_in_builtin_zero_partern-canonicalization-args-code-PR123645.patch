@@ -1,0 +1,146 @@
+From 4c341e52bfaf6f534e9e3b0ac14ab64d5ddf1deb Mon Sep 17 00:00:00 2001
+From: Andrew Pinski <andrew.pinski@oss.qualcomm.com>
+Date: Sat, 17 Jan 2026 12:55:04 -0800
+Subject: [PATCH] phiopt: Rewrite cond_removal_in_builtin_zero_pattern
+ canonicalization args code [PR123645]
+
+The canonicalization of args code was originally thinking edges e1/e2
+were edges out going from the cond block but they were the edges
+coming into the join block. This rewrites the canonicalization of arg0/1
+args to correct that mistake. And it fixes the wrong code that would
+happen in this case.
+
+	PR tree-optimization/123645
+
+gcc/ChangeLog:
+
+	* tree-ssa-phiopt.cc (cond_removal_in_builtin_zero_pattern): Rewrite
+	the canonicalization of the args code based on e1/e2 being edges into
+	the join block.
+
+gcc/testsuite/ChangeLog:
+
+	* gcc.dg/torture/pr123645-1.c: New test.
+	* gcc.dg/torture/pr123645-2.c: New test.
+
+Signed-off-by: Andrew Pinski <andrew.pinski@oss.qualcomm.com>
+(cherry picked from commit 92044aadb3037c59ea124c0b23f8437c9e48b2fd)
+---
+ gcc/testsuite/gcc.dg/torture/pr123645-1.c | 24 +++++++++++++++++
+ gcc/testsuite/gcc.dg/torture/pr123645-2.c | 24 +++++++++++++++++
+ gcc/tree-ssa-phiopt.cc                    | 32 ++++++++++++++++++-----
+ 3 files changed, 74 insertions(+), 6 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.dg/torture/pr123645-1.c
+ create mode 100644 gcc/testsuite/gcc.dg/torture/pr123645-2.c
+
+diff --git a/gcc/testsuite/gcc.dg/torture/pr123645-1.c b/gcc/testsuite/gcc.dg/torture/pr123645-1.c
+new file mode 100644
+index 000000000000..c183cd31d41e
+--- /dev/null
++++ b/gcc/testsuite/gcc.dg/torture/pr123645-1.c
+@@ -0,0 +1,24 @@
++/* { dg-do run } */
++
++/* PR tree-optimization/123645 */
++/* Phi-opt was transforming f into __builtin_popcount which was incorrect. */
++
++__attribute__((noinline))
++int f(unsigned a)
++{
++  return a < 1 ? __builtin_popcount(a) : 0;
++}
++
++int main()
++{
++  if (f(1) != 0)
++    __builtin_abort();
++  if (f(0) != 0)
++    __builtin_abort();
++  if (f(2) != 0)
++    __builtin_abort();
++  if (f(3) != 0)
++    __builtin_abort();
++  if (f(-1) != 0)
++    __builtin_abort();
++}
+diff --git a/gcc/testsuite/gcc.dg/torture/pr123645-2.c b/gcc/testsuite/gcc.dg/torture/pr123645-2.c
+new file mode 100644
+index 000000000000..8c488acfbeca
+--- /dev/null
++++ b/gcc/testsuite/gcc.dg/torture/pr123645-2.c
+@@ -0,0 +1,24 @@
++/* { dg-do run } */
++
++/* PR tree-optimization/123645 */
++/* Phi-opt was transforming f into __builtin_bswap which was incorrect. */
++
++__attribute__((noinline))
++int f(unsigned a)
++{
++  return a < 1 ? __builtin_bswap32(a) : 0;
++}
++
++int main()
++{
++  if (f(1) != 0)
++    __builtin_abort();
++  if (f(0) != 0)
++    __builtin_abort();
++  if (f(2) != 0)
++    __builtin_abort();
++  if (f(3) != 0)
++    __builtin_abort();
++  if (f(-1) != 0)
++    __builtin_abort();
++}
+diff --git a/gcc/tree-ssa-phiopt.cc b/gcc/tree-ssa-phiopt.cc
+index 3e0ad9d3bb09..29c072362602 100644
+--- a/gcc/tree-ssa-phiopt.cc
++++ b/gcc/tree-ssa-phiopt.cc
+@@ -3222,16 +3222,36 @@ cond_removal_in_builtin_zero_pattern (basic_block cond_bb,
+       || arg != gimple_cond_lhs (cond))
+     return false;
+ 
+-  /* Canonicalize.  */
+-  if ((e2->flags & EDGE_TRUE_VALUE
+-       && gimple_cond_code (cond) == NE_EXPR)
+-      || (e1->flags & EDGE_TRUE_VALUE
+-	  && gimple_cond_code (cond) == EQ_EXPR))
++  edge true_edge, false_edge;
++  /* We need to know which is the true edge and which is the false
++     edge so that we know when to invert the condition below.  */
++  extract_true_false_edges_from_block (cond_bb, &true_edge, &false_edge);
++
++  /* Forward the edges over the middle basic block.  */
++  if (true_edge->dest == middle_bb)
++    true_edge = EDGE_SUCC (true_edge->dest, 0);
++  if (false_edge->dest == middle_bb)
++    false_edge = EDGE_SUCC (false_edge->dest, 0);
++
++  /* Canonicalize the args with respect to the edges,
++     arg0 is from the true edge and arg1 is from the
++     false edge.
++     That is `cond ? arg0 : arg1`.*/
++  if (true_edge == e1)
++    gcc_assert (false_edge == e2);
++  else
+     {
++      gcc_assert (false_edge == e1);
++      gcc_assert (true_edge == e2);
+       std::swap (arg0, arg1);
+-      std::swap (e1, e2);
+     }
+ 
++  /* Canonicalize the args such that we get:
++     `arg != 0 ? arg0 : arg1`. So swap arg0/arg1
++     around if cond was an equals.  */
++  if (gimple_cond_code (cond) == EQ_EXPR)
++    std::swap (arg0, arg1);
++
+   /* Check PHI arguments.  */
+   if (lhs != arg0
+       || TREE_CODE (arg1) != INTEGER_CST)
+-- 
+2.43.7
+
+

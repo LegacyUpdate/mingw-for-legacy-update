@@ -1,0 +1,62 @@
+From e8edba9551d2996ec0b85cee9a1c468df6a74eaf Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Tue, 3 Mar 2026 09:50:44 +0100
+Subject: [PATCH] i386: Fix up *avx512f_load<mode>_mask for -masm=intel
+ [PR124335]
+
+The Intel syntax part is missing % before 3, so it always prints {3}
+rather than {k1} or similar.
+
+Fixed thusly.
+
+2026-03-03  Jakub Jelinek  <jakub@redhat.com>
+
+	PR target/124335
+	* config/i386/sse.md (*avx512f_load<mode>_mask): Use %{%3%} instead of
+	%{3%} for -masm=intel syntax.
+
+	* gcc.target/i386/avx512fp16-pr124335.c: New test.
+
+(cherry picked from commit b3502a668627caa7f49609a36dbeaf088f17037c)
+---
+ gcc/config/i386/sse.md                              |  2 +-
+ gcc/testsuite/gcc.target/i386/avx512fp16-pr124335.c | 13 +++++++++++++
+ 2 files changed, 14 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/gcc.target/i386/avx512fp16-pr124335.c
+
+diff --git a/gcc/config/i386/sse.md b/gcc/config/i386/sse.md
+index 79d7e82730ec..4f0c8f8091df 100644
+--- a/gcc/config/i386/sse.md
++++ b/gcc/config/i386/sse.md
+@@ -1722,7 +1722,7 @@
+ 	  (match_operand:<ssevecmode> 4 "const0_operand")
+ 	  (const_int 1)))]
+   "TARGET_AVX512F"
+-  "vmov<ssescalarmodesuffix>\t{%1, %0%{%3%}%N2|%0%{3%}%N2, %1}"
++  "vmov<ssescalarmodesuffix>\t{%1, %0%{%3%}%N2|%0%{%3%}%N2, %1}"
+   [(set_attr "type" "ssemov")
+    (set_attr "prefix" "evex")
+    (set_attr "memory" "load")
+diff --git a/gcc/testsuite/gcc.target/i386/avx512fp16-pr124335.c b/gcc/testsuite/gcc.target/i386/avx512fp16-pr124335.c
+new file mode 100644
+index 000000000000..21dc1282b9ad
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/i386/avx512fp16-pr124335.c
+@@ -0,0 +1,13 @@
++/* PR target/124335 */
++/* { dg-do assemble } */
++/* { dg-require-effective-target masm_intel } */
++/* { dg-options "-mavx512fp16 -masm=intel" } */
++/* { dg-require-effective-target avx512bw } */
++
++#include <x86intrin.h>
++
++__m128h
++foo (_Float16 const *x, __mmask8 y)
++{
++  return _mm_maskz_load_sh (y, x);
++}
+-- 
+2.43.7
+
+

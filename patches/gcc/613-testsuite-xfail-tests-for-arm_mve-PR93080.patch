@@ -1,0 +1,52 @@
+From 02bb2ca2f2549d5c90fa7cf9e94e7c8e6bc408d8 Mon Sep 17 00:00:00 2001
+From: =?utf8?q?Torbj=C3=B6rn=20SVENSSON?= <torbjorn.svensson@foss.st.com>
+Date: Tue, 31 Mar 2026 17:36:04 +0200
+Subject: [PATCH] testsuite: xfail tests for arm_mve [PR93080]
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf8
+Content-Transfer-Encoding: 8bit
+
+As per comment 11 in PR93080.
+
+gcc/testsuite/ChangeLog:
+
+	PR testsuite/93080
+	* gcc.dg/tree-ssa/forwprop-40.c: Xfail for arm_mve.
+	* gcc.dg/tree-ssa/forwprop-41.c: Likewise.
+
+Signed-off-by: TorbjÃ¶rn SVENSSON <torbjorn.svensson@foss.st.com>
+(cherry picked from commit c607efe92d114e03ebffd36d6369b0c6c014315a)
+---
+ gcc/testsuite/gcc.dg/tree-ssa/forwprop-40.c | 4 ++--
+ gcc/testsuite/gcc.dg/tree-ssa/forwprop-41.c | 4 ++--
+ 2 files changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/gcc/testsuite/gcc.dg/tree-ssa/forwprop-40.c b/gcc/testsuite/gcc.dg/tree-ssa/forwprop-40.c
+index 0c5233a68f4a..152d06c71079 100644
+--- a/gcc/testsuite/gcc.dg/tree-ssa/forwprop-40.c
++++ b/gcc/testsuite/gcc.dg/tree-ssa/forwprop-40.c
+@@ -10,5 +10,5 @@ vector int g(vector int a)
+   return a;
+ }
+ 
+-/* { dg-final { scan-tree-dump-times "BIT_INSERT_EXPR" 0 "optimized" { xfail s390_mvx } } } Xfail: PR114802 */
+-/* { dg-final { scan-tree-dump-times "BIT_FIELD_REF" 0 "optimized" { xfail s390_mvx } } } Xfail: PR114802 */
++/* { dg-final { scan-tree-dump-times "BIT_INSERT_EXPR" 0 "optimized" { xfail { arm_mve || s390_mvx } } } } Xfail: PR114802 */
++/* { dg-final { scan-tree-dump-times "BIT_FIELD_REF" 0 "optimized" { xfail { arm_mve || s390_mvx } } } } Xfail: PR114802 */
+diff --git a/gcc/testsuite/gcc.dg/tree-ssa/forwprop-41.c b/gcc/testsuite/gcc.dg/tree-ssa/forwprop-41.c
+index a1f08289dd69..1a2d0ef8ec4d 100644
+--- a/gcc/testsuite/gcc.dg/tree-ssa/forwprop-41.c
++++ b/gcc/testsuite/gcc.dg/tree-ssa/forwprop-41.c
+@@ -11,6 +11,6 @@ vector int g(vector int a, int c)
+   return a;
+ }
+ 
+-/* { dg-final { scan-tree-dump-times "BIT_INSERT_EXPR" 1 "optimized" { xfail s390_mvx } } } Xfail PR114802 */
+-/* { dg-final { scan-tree-dump-times "BIT_FIELD_REF" 0 "optimized" { xfail s390_mvx } } } Xfail PR114802 */
++/* { dg-final { scan-tree-dump-times "BIT_INSERT_EXPR" 1 "optimized" { xfail { arm_mve || s390_mvx } } } } Xfail PR114802 */
++/* { dg-final { scan-tree-dump-times "BIT_FIELD_REF" 0 "optimized" { xfail { arm_mve || s390_mvx } } } } Xfail PR114802 */
+ /* { dg-final { scan-tree-dump-times "VEC_PERM_EXPR" 0 "optimized" } } */
+-- 
+2.43.7
+
+

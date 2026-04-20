@@ -1,0 +1,119 @@
+From c958e1e9833ca4e0fca633e6c71f9e4967f7be82 Mon Sep 17 00:00:00 2001
+From: Andrew Pinski <andrew.pinski@oss.qualcomm.com>
+Date: Sun, 1 Feb 2026 21:08:54 -0800
+Subject: [PATCH] fold/dse: Don't simplify/remove noreturn functions [PR121103]
+
+This fixes 2 related bugs. The user marks memmove as noreturn
+so when we simplify the memmove to a memory load/store there
+is no longer a statement that can alter the CFG and things go
+down hill.
+The same is true for removing the call in DSE.
+So the fix is not to simplify/take into account the call from
+gimple-fold and DSE.
+
+changes since v1:
+ * v2: Use gimple_call_ctrl_altering_p instead of flags.
+
+Bootstrapped and tested on x86_64-linux-gnu.
+
+	PR tree-optimization/121103
+
+gcc/ChangeLog:
+
+	* gimple-fold.cc (gimple_fold_call): Don't simplify
+	noreturn functions.
+	* tree-ssa-dse.cc (dse_optimize_stmt): Don't handle
+	calls to noreturn functions.
+
+gcc/testsuite/ChangeLog:
+
+	* gcc.dg/torture/pr121103-1.c: New test.
+
+Signed-off-by: Andrew Pinski <andrew.pinski@oss.qualcomm.com>
+(cherry picked from commit 36a5d12cca2bc3b6d06432f10206188c1799479e)
+---
+ gcc/gimple-fold.cc                        |  4 +++
+ gcc/testsuite/gcc.dg/torture/pr121103-1.c | 40 +++++++++++++++++++++++
+ gcc/tree-ssa-dse.cc                       |  3 +-
+ 3 files changed, 46 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/gcc.dg/torture/pr121103-1.c
+
+diff --git a/gcc/gimple-fold.cc b/gcc/gimple-fold.cc
+index 8e03b66c440a..a446a0f530a6 100644
+--- a/gcc/gimple-fold.cc
++++ b/gcc/gimple-fold.cc
+@@ -5913,6 +5913,10 @@ gimple_fold_call (gimple_stmt_iterator *gsi, bool inplace)
+   if (inplace)
+     return changed;
+ 
++  /* Don't constant fold functions which can change the control. */
++  if (gimple_call_ctrl_altering_p (stmt))
++    return changed;
++
+   /* Check for builtins that CCP can handle using information not
+      available in the generic fold routines.  */
+   if (gimple_call_builtin_p (stmt, BUILT_IN_NORMAL))
+diff --git a/gcc/testsuite/gcc.dg/torture/pr121103-1.c b/gcc/testsuite/gcc.dg/torture/pr121103-1.c
+new file mode 100644
+index 000000000000..22f76c528df7
+--- /dev/null
++++ b/gcc/testsuite/gcc.dg/torture/pr121103-1.c
+@@ -0,0 +1,40 @@
++/* { dg-do compile } */
++/* PR tree-optimization/121103 */
++
++extern void *memmove(void *, const void *, __SIZE_TYPE__) __attribute__((noreturn));
++
++struct A {
++  const char *s;
++  int n;
++};
++
++void f(void *);
++
++struct B {
++  char d[5];
++  int n;
++};
++
++__attribute__((always_inline)) inline void g(struct B *p, struct A a) {
++  int i = a.n;
++  if (i <= 5)
++    p->n = i;
++  else {
++    p->n = -1;
++    f(p);
++  }
++
++  if (p->n >= 0)
++    memmove(p->d, a.s, a.n); /* { dg-bogus "\\\[-Warray-bounds" } */
++}
++
++void h(void) {
++  char c[8] = "";
++
++  struct A a;
++  a.s = c;
++  a.n = 8;
++
++  struct B b;
++  g(&b, a);
++}
+diff --git a/gcc/tree-ssa-dse.cc b/gcc/tree-ssa-dse.cc
+index 215f5c3e2869..19c0977adf1f 100644
+--- a/gcc/tree-ssa-dse.cc
++++ b/gcc/tree-ssa-dse.cc
+@@ -1493,7 +1493,8 @@ dse_optimize_stmt (function *fun, gimple_stmt_iterator *gsi, sbitmap live_bytes)
+ 
+   /* We know we have virtual definitions.  We can handle assignments and
+      some builtin calls.  */
+-  if (gimple_call_builtin_p (stmt, BUILT_IN_NORMAL))
++  if (gimple_call_builtin_p (stmt, BUILT_IN_NORMAL)
++      && !gimple_call_ctrl_altering_p (stmt))
+     {
+       tree fndecl = gimple_call_fndecl (stmt);
+       switch (DECL_FUNCTION_CODE (fndecl))
+-- 
+2.43.7
+
+

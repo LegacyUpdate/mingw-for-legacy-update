@@ -1,0 +1,313 @@
+From 237ca4e9c631877f9ba56112303db4a372b9b6f6 Mon Sep 17 00:00:00 2001
+From: Richard Biener <rguenther@suse.de>
+Date: Tue, 3 Feb 2026 12:18:56 +0100
+Subject: [PATCH] tree-optimization/121726 - TBAA bug with SRA of address-taken
+ decls
+
+The following fixes re-materialization of aggregates before calls
+that take the address of a scalarized decl.  The issue here is that
+we do not know the appropriate effective type to use for the stores.
+So we use ref-all accesses for the re-materialization to properly
+support TBAA info modref might have recorded.  The same holds
+true for the re-load after the call.
+
+	PR tree-optimization/121726
+	* tree-sra.cc (build_ref_for_offset): Add force_ref_all
+	parameter and use ptr_type_node as alias pointer type in
+	that case.
+	(build_ref_for_model): Add force_ref_all parameter and
+	pass it through, forcing build_ref_for_offset.
+	(generate_subtree_copies): Likewise.
+	(sra_modify_call_arg): Force ref-all accesses.
+
+	* gcc.target/i386/pr121726.c: New testcase.
+
+(cherry picked from commit 5c46b4d38a8b10c1fe5c0a27472b4e9c7cce2480)
+---
+ gcc/testsuite/gcc.target/i386/pr121726.c | 117 +++++++++++++++++++++++
+ gcc/tree-sra.cc                          |  43 +++++----
+ 2 files changed, 143 insertions(+), 17 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.target/i386/pr121726.c
+
+diff --git a/gcc/testsuite/gcc.target/i386/pr121726.c b/gcc/testsuite/gcc.target/i386/pr121726.c
+new file mode 100644
+index 000000000000..65b2dfd4f12b
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/i386/pr121726.c
+@@ -0,0 +1,117 @@
++/* { dg-do run { target { lp64 && avx2_runtime } } } */
++/* { dg-options "-O3 -mavx2" } */
++
++#include <stdint.h>
++#include <string.h>
++#include <immintrin.h>
++
++#define SPX_N 16
++
++typedef struct {
++    uint8_t pub_seed[SPX_N];
++} spx_ctx;
++
++typedef float __m256_u __attribute__ ((__vector_size__ (32), __may_alias__, __aligned__ (1)));
++typedef double __m256d_u __attribute__ ((__vector_size__ (32), __may_alias__, __aligned__ (1)));
++typedef long long __m256i_u __attribute__ ((__vector_size__ (32), __may_alias__, __aligned__ (1)));
++
++__attribute__((noinline))
++void Keccak(__m256i *states) { }
++
++__attribute__((noipa))
++void capture(uint8_t *v) { }
++
++static void thashx4(uint64_t *out0,
++             uint64_t *out1,
++             uint64_t *out2,
++             uint64_t *out3,
++             unsigned int inblocks,
++             const uint64_t* pub_seed) {
++    if (inblocks == 1 || inblocks == 2) {
++        __m256i state[25];
++        for (int i = 0; i < 25; i++) {
++            state[i] = _mm256_set1_epi64x(0);
++        }
++        for (int i = 0; i < 2; i++) {
++            state[i] = _mm256_set1_epi64x(pub_seed[i]);
++        }
++
++        /* Domain separator and padding. */
++        for (size_t i = 4 * inblocks + 4; i < 16; i++) {
++            state[i] = _mm256_set1_epi64x(0);
++        }
++
++        Keccak(&state[0]);
++
++        for (int i = 0; i < SPX_N / 8; i++) {
++            out0[i] = _mm256_extract_epi64(state[i], 0);
++            out1[i] = _mm256_extract_epi64(state[i], 1);
++            out2[i] = _mm256_extract_epi64(state[i], 2);
++            out3[i] = _mm256_extract_epi64(state[i], 3);
++        }
++    } else {
++        unsigned char buf0[inblocks * SPX_N];
++        unsigned char buf1[inblocks * SPX_N];
++        unsigned char buf2[inblocks * SPX_N];
++
++        memcpy(buf0, pub_seed, SPX_N);
++        memcpy(buf1, pub_seed, SPX_N);
++        memcpy(buf2, pub_seed, SPX_N);
++
++        capture(buf0);
++        capture(buf1);
++        capture(buf2);
++    }
++}
++
++static
++void wots_gen_leafx4(const spx_ctx *ctx) {
++	uint64_t dest[4];
++
++	thashx4(dest, dest, dest, dest, 1, (const uint64_t *) ctx->pub_seed);
++	thashx4(dest, dest, dest, dest, 3, (const uint64_t *) ctx->pub_seed);
++}
++
++void treehashx4_v2(const spx_ctx *ctx,
++                void (*gen_leafx4)( const spx_ctx *),
++                uint32_t* tree_addrx4
++                ) {
++    for (int i = 0; i < 2; i++) {
++        gen_leafx4( ctx );
++    }
++}
++
++__attribute__((noipa))
++void crypto_sign_signature(uint64_t *sg, uint8_t enable, const uint8_t *sk)
++{
++  spx_ctx ctx;
++
++  memcpy(ctx.pub_seed, sk, SPX_N);
++
++  const uint64_t* ptr = (const uint64_t *)&ctx.pub_seed[0];
++  thashx4(sg, sg, sg, sg, 1, ptr);
++
++  if (!enable)
++    return;
++
++  uint32_t tree_addrx4[32] = { 0 };
++
++  treehashx4_v2(&ctx, wots_gen_leafx4, tree_addrx4);
++}
++
++#define length_secret_key 64
++#define length_signature 64
++
++int main() {
++  uint8_t secret_key[length_secret_key];
++  uint64_t signature[length_signature];
++  memset(secret_key, 0, length_secret_key);
++  memset(signature, 0, length_signature * sizeof(uint64_t));
++
++  crypto_sign_signature(signature, 0, secret_key);
++  
++  for (int i = 0; i < length_signature; ++i)
++    if (signature[i] != 0)
++      __builtin_abort ();
++  return 0;
++}
+diff --git a/gcc/tree-sra.cc b/gcc/tree-sra.cc
+index 89351af368f8..57acf8785a28 100644
+--- a/gcc/tree-sra.cc
++++ b/gcc/tree-sra.cc
+@@ -1880,12 +1880,13 @@ make_fancy_name (tree expr)
+    something for which get_addr_base_and_unit_offset returns NULL, gsi must
+    be non-NULL and is used to insert new statements either before or below
+    the current one as specified by INSERT_AFTER.  This function is not capable
+-   of handling bitfields.  */
++   of handling bitfields.  If FORCE_REF_ALL is true then the memory access
++   will use alias-set zero.  */
+ 
+ tree
+ build_ref_for_offset (location_t loc, tree base, poly_int64 offset,
+ 		      bool reverse, tree exp_type, gimple_stmt_iterator *gsi,
+-		      bool insert_after)
++		      bool insert_after, bool force_ref_all = false)
+ {
+   tree prev_base = base;
+   tree off;
+@@ -1923,19 +1924,22 @@ build_ref_for_offset (location_t loc, tree base, poly_int64 offset,
+       else
+ 	gsi_insert_before (gsi, stmt, GSI_SAME_STMT);
+ 
+-      off = build_int_cst (reference_alias_ptr_type (prev_base), byte_offset);
++      off = build_int_cst (force_ref_all ? ptr_type_node
++			   : reference_alias_ptr_type (prev_base), byte_offset);
+       base = tmp;
+     }
+   else if (TREE_CODE (base) == MEM_REF)
+     {
+-      off = build_int_cst (TREE_TYPE (TREE_OPERAND (base, 1)),
++      off = build_int_cst (force_ref_all ? ptr_type_node
++			   : TREE_TYPE (TREE_OPERAND (base, 1)),
+ 			   base_offset + byte_offset);
+       off = int_const_binop (PLUS_EXPR, TREE_OPERAND (base, 1), off);
+       base = unshare_expr (TREE_OPERAND (base, 0));
+     }
+   else
+     {
+-      off = build_int_cst (reference_alias_ptr_type (prev_base),
++      off = build_int_cst (force_ref_all ? ptr_type_node
++			   : reference_alias_ptr_type (prev_base),
+ 			   base_offset + byte_offset);
+       base = build_fold_addr_expr (unshare_expr (base));
+     }
+@@ -1998,12 +2002,13 @@ build_reconstructed_reference (location_t, tree base, struct access *model)
+    build_ref_for_offset, furthermore, when GSI is NULL, the function expects
+    that it re-builds the entire reference from a DECL to the final access and
+    so will create a MEM_REF when OFFSET does not exactly match offset of
+-   MODEL.  */
++   MODEL.  If FORCE_REF_ALL is true then the memory access will use
++   alias-set zero.  */
+ 
+ static tree
+ build_ref_for_model (location_t loc, tree base, HOST_WIDE_INT offset,
+ 		     struct access *model, gimple_stmt_iterator *gsi,
+-		     bool insert_after)
++		     bool insert_after, bool force_ref_all = false)
+ {
+   gcc_assert (offset >= 0);
+   if (TREE_CODE (model->expr) == COMPONENT_REF
+@@ -2015,7 +2020,7 @@ build_ref_for_model (location_t loc, tree base, HOST_WIDE_INT offset,
+       offset -= int_bit_position (fld);
+       exp_type = TREE_TYPE (TREE_OPERAND (model->expr, 0));
+       t = build_ref_for_offset (loc, base, offset, model->reverse, exp_type,
+-				gsi, insert_after);
++				gsi, insert_after, force_ref_all);
+       /* The flag will be set on the record type.  */
+       REF_REVERSE_STORAGE_ORDER (t) = 0;
+       return fold_build3_loc (loc, COMPONENT_REF, TREE_TYPE (fld), t, fld,
+@@ -2025,6 +2030,7 @@ build_ref_for_model (location_t loc, tree base, HOST_WIDE_INT offset,
+     {
+       tree res;
+       if (model->grp_same_access_path
++	  && !force_ref_all
+ 	  && !TREE_THIS_VOLATILE (base)
+ 	  && (TYPE_ADDR_SPACE (TREE_TYPE (base))
+ 	      == TYPE_ADDR_SPACE (TREE_TYPE (model->expr)))
+@@ -2036,7 +2042,8 @@ build_ref_for_model (location_t loc, tree base, HOST_WIDE_INT offset,
+ 	return res;
+       else
+ 	return build_ref_for_offset (loc, base, offset, model->reverse,
+-				     model->type, gsi, insert_after);
++				     model->type, gsi, insert_after,
++				     force_ref_all);
+     }
+ }
+ 
+@@ -3920,16 +3927,18 @@ analyze_all_variable_accesses (void)
+    replacements in the interval <start_offset, start_offset + chunk_size>,
+    otherwise copy all.  GSI is a statement iterator used to place the new
+    statements.  WRITE should be true when the statements should write from AGG
+-   to the replacement and false if vice versa.  if INSERT_AFTER is true, new
++   to the replacement and false if vice versa.  If INSERT_AFTER is true, new
+    statements will be added after the current statement in GSI, they will be
+-   added before the statement otherwise.  */
++   added before the statement otherwise.  If FORCE_REF_ALL is true then
++   memory accesses will use alias-set zero.  */
+ 
+ static void
+ generate_subtree_copies (struct access *access, tree agg,
+ 			 HOST_WIDE_INT top_offset,
+ 			 HOST_WIDE_INT start_offset, HOST_WIDE_INT chunk_size,
+ 			 gimple_stmt_iterator *gsi, bool write,
+-			 bool insert_after, location_t loc)
++			 bool insert_after, location_t loc,
++			 bool force_ref_all = false)
+ {
+   /* Never write anything into constant pool decls.  See PR70602.  */
+   if (!write && constant_decl_p (agg))
+@@ -3947,7 +3956,7 @@ generate_subtree_copies (struct access *access, tree agg,
+ 	  gassign *stmt;
+ 
+ 	  expr = build_ref_for_model (loc, agg, access->offset - top_offset,
+-				      access, gsi, insert_after);
++				      access, gsi, insert_after, force_ref_all);
+ 
+ 	  if (write)
+ 	    {
+@@ -3997,7 +4006,7 @@ generate_subtree_copies (struct access *access, tree agg,
+       if (access->first_child)
+ 	generate_subtree_copies (access->first_child, agg, top_offset,
+ 				 start_offset, chunk_size, gsi,
+-				 write, insert_after, loc);
++				 write, insert_after, loc, force_ref_all);
+ 
+       access = access->next_sibling;
+     }
+@@ -4299,14 +4308,14 @@ sra_modify_call_arg (tree *expr, gimple_stmt_iterator *call_gsi,
+   gimple *stmt = gsi_stmt (*call_gsi);
+   location_t loc = gimple_location (stmt);
+   generate_subtree_copies (access, base, 0, 0, 0, call_gsi, false, false,
+-			   loc);
++			   loc, true);
+ 
+   if (flags & EAF_NO_DIRECT_CLOBBER)
+     return true;
+ 
+   if (!stmt_ends_bb_p (stmt))
+     generate_subtree_copies (access, base, 0, 0, 0, refresh_gsi, true,
+-			     true, loc);
++			     true, loc, true);
+   else
+     {
+       edge e;
+@@ -4315,7 +4324,7 @@ sra_modify_call_arg (tree *expr, gimple_stmt_iterator *call_gsi,
+ 	{
+ 	  gimple_stmt_iterator alt_gsi = gsi_start_edge (e);
+ 	  generate_subtree_copies (access, base, 0, 0, 0, &alt_gsi, true,
+-				   true, loc);
++				   true, loc, true);
+ 	}
+     }
+   return true;
+-- 
+2.43.7
+
+

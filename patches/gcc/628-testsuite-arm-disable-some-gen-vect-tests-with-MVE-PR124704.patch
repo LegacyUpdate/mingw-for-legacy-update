@@ -1,0 +1,56 @@
+From b2cc82743a6167a1887e312955b541aa26755e23 Mon Sep 17 00:00:00 2001
+From: Christophe Lyon <christophe.lyon@arm.com>
+Date: Thu, 2 Apr 2026 12:33:07 +0000
+Subject: [PATCH] testsuite: arm: disable some gen-vect tests with MVE
+ [PR124704]
+
+Like we already do when Neon enablement does not need a compiler
+option, return 0 when MVE is enabled by default.
+
+For instance when checking for -march=armv8.1-m.main+mve.fp+fp.dp (or
+-mcpu=cortex-m55), this makes the following tests UNSUPPORTED:
+
+gcc.dg/tree-ssa/gen-vect-11.c
+gcc.dg/tree-ssa/gen-vect-11a.c
+gcc.dg/tree-ssa/gen-vect-11b.c
+gcc.dg/tree-ssa/gen-vect-11c.c
+gcc.dg/tree-ssa/gen-vect-2.c
+
+and thus avoids
+FAIL: gcc.dg/tree-ssa/gen-vect-11b.c scan-tree-dump-times vect "vectorized 0 loops" 1
+FAIL: gcc.dg/tree-ssa/gen-vect-11c.c scan-tree-dump-times vect "vectorized 0 loops" 1
+
+This may be overkill Given that all the other tests mentioned above
+PASS, but this is consistent with what we already do for Neon.
+
+gcc/testsuite/ChangeLog:
+
+	PR target/124704
+	* lib/target-supports.exp
+	(check_effective_target_vect_cmdline_neeed): Handle arm_mve
+	similarly to arm_neon.
+
+(cherry picked from commit 32ea730b465307805bde5140b8ffced325beff40)
+---
+ gcc/testsuite/lib/target-supports.exp | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/gcc/testsuite/lib/target-supports.exp b/gcc/testsuite/lib/target-supports.exp
+index b75d41e7e20d..37083bc287fe 100644
+--- a/gcc/testsuite/lib/target-supports.exp
++++ b/gcc/testsuite/lib/target-supports.exp
+@@ -4441,7 +4441,9 @@ proc check_effective_target_vect_cmdline_needed { } {
+ 	     || ([istarget powerpc*-*-*]
+ 		 && [check_effective_target_powerpc_altivec])
+ 	     || ([istarget sparc*-*-*] && [check_effective_target_sparc_vis])
+-	     || ([istarget arm*-*-*] && [check_effective_target_arm_neon])
++	     || ([istarget arm*-*-*] && ([check_effective_target_arm_neon]
++					 || [check_effective_target_arm_mve])
++		 )
+ 	     || [istarget aarch64*-*-*]
+ 	     || [istarget amdgcn*-*-*]
+ 	     || [istarget riscv*-*-*]} {
+-- 
+2.43.7
+
+

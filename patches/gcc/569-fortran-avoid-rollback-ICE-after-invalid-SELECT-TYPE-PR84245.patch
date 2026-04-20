@@ -1,0 +1,64 @@
+From 9cefb203c4010b139a69f1575fcdec14075d2731 Mon Sep 17 00:00:00 2001
+From: Paul Thomas <pault@gcc.gnu.org>
+Date: Sat, 28 Mar 2026 07:23:01 +0000
+Subject: [PATCH] Fortran: Avoid rollback ICE after invalid SELECT TYPE
+ [PR84245]
+
+2026-03-28  Paul Thomas  <pault@gcc.gnu.org>
+
+gcc/fortran
+	PR fortran/84245
+	* match.cc (gfc_match_select_type): Free the temporary namespace
+	only on MATCH_NO. Return immediately on MATCH_ERROR.
+
+gcc/testsuite/ChangeLog:
+
+	* gfortran.dg/pr84245.f90: New test.
+
+(cherry picked from commit 48616938660a9fe64824826ab9172a197631476d)
+---
+ gcc/fortran/match.cc                  | 7 ++++++-
+ gcc/testsuite/gfortran.dg/pr84245.f90 | 7 +++++++
+ 2 files changed, 13 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/gfortran.dg/pr84245.f90
+
+diff --git a/gcc/fortran/match.cc b/gcc/fortran/match.cc
+index 0f6b8e95ad72..4cddcc932d0a 100644
+--- a/gcc/fortran/match.cc
++++ b/gcc/fortran/match.cc
+@@ -7044,12 +7044,17 @@ gfc_match_select_type (void)
+   else
+     {
+       m = gfc_match (" %e ", &expr1);
+-      if (m != MATCH_YES)
++      if (m == MATCH_NO)
+ 	{
+ 	  std::swap (ns, gfc_current_ns);
+ 	  gfc_free_namespace (ns);
+ 	  return m;
+ 	}
++      /* On MATCH_ERROR, the temporary block namespace may already contain
++	 broken state from the failed expression match.  Avoid freeing it
++	 through the normal rollback path.  */
++      else if (m == MATCH_ERROR)
++	return m;
+     }
+ 
+   m = gfc_match (" )%t");
+diff --git a/gcc/testsuite/gfortran.dg/pr84245.f90 b/gcc/testsuite/gfortran.dg/pr84245.f90
+new file mode 100644
+index 000000000000..f43541fd4b24
+--- /dev/null
++++ b/gcc/testsuite/gfortran.dg/pr84245.f90
+@@ -0,0 +1,7 @@
++! { dg-do compile }
++! { dg-options "-w" }
++
++program p
++  select type (x%a) ! { dg-error "Unexpected '%'.*nonderived-type variable 'x'" }
++  end select        ! { dg-error "Expecting END PROGRAM statement" }
++end
+-- 
+2.43.7
+
+

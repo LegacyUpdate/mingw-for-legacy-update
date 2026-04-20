@@ -1,0 +1,139 @@
+From e05d632f202c024cd8d98ad698a9713d49499b06 Mon Sep 17 00:00:00 2001
+From: Paul Thomas <pault@gcc.gnu.org>
+Date: Mon, 16 Mar 2026 07:23:49 +0000
+Subject: [PATCH] Fortran: Fix segfault due to class actual in parentheses
+ [PR105168]
+
+2026-03-16  Paul Thomas  <pault@gcc.gnu.org>
+
+gcc/fortran
+	PR fortran/105168
+	* trans-expr.cc (gfc_conv_class_to_class): If the argument expr
+	is not a class type use the parent tree if that is a class.
+	(gfc_conv_procedure_call): If the argument expression is not a
+	variable, shift the bounds to give unity lbounds.
+	(gfc_trans_arrayfunc_assign): Return NULL_TREE instead of NULL.
+
+gcc/testsuite/
+	PR fortran/105168
+	* gfortran.dg/pr105168.f90: New test.
+
+(cherry picked from commit c523f2a33b92362af74a9ab91e4f9498c5988149)
+---
+ gcc/fortran/trans-expr.cc              | 30 ++++++++++++++------
+ gcc/testsuite/gfortran.dg/pr105168.f90 | 38 ++++++++++++++++++++++++++
+ 2 files changed, 60 insertions(+), 8 deletions(-)
+ create mode 100644 gcc/testsuite/gfortran.dg/pr105168.f90
+
+diff --git a/gcc/fortran/trans-expr.cc b/gcc/fortran/trans-expr.cc
+index 23d40991dd14..00ba563c00bb 100644
+--- a/gcc/fortran/trans-expr.cc
++++ b/gcc/fortran/trans-expr.cc
+@@ -1251,13 +1251,12 @@ gfc_conv_class_to_class (gfc_se *parmse, gfc_expr *e, gfc_typespec class_ts,
+   stmtblock_t block;
+   bool full_array = false;
+ 
+-  /* Class transformational function results are the data field of a class
+-     temporary and so the class expression can be obtained directly.  */
+-  if (e->expr_type == EXPR_FUNCTION
+-      && e->value.function.isym
+-      && e->value.function.isym->transformational
++  /* If this is the data field of a class temporary, the class expression
++     can be obtained and returned directly.  */
++  if (e->expr_type != EXPR_VARIABLE
+       && TREE_CODE (parmse->expr) == COMPONENT_REF
+-      && !GFC_CLASS_TYPE_P (TREE_TYPE (parmse->expr)))
++      && !GFC_CLASS_TYPE_P (TREE_TYPE (parmse->expr))
++      && GFC_CLASS_TYPE_P (TREE_TYPE (TREE_OPERAND (parmse->expr, 0))))
+     {
+       parmse->expr = TREE_OPERAND (parmse->expr, 0);
+       if (!VAR_P (parmse->expr))
+@@ -7605,6 +7604,16 @@ gfc_conv_procedure_call (gfc_se * se, gfc_symbol * sym,
+ 	      gfc_init_block (&class_se.pre);
+ 	      gfc_init_block (&class_se.post);
+ 
++	      if (e->expr_type != EXPR_VARIABLE)
++		{
++		  int n;
++		  /* Set the bounds and offset correctly.  */
++		  for (n = 0; n < e->rank; n++)
++		    gfc_conv_shift_descriptor_lbound (&class_se.pre,
++						      class_se.expr,
++						      n, gfc_index_one_node);
++		}
++
+ 	      /* The conversion does not repackage the reference to a class
+ 	         array - _data descriptor.  */
+ 	      gfc_conv_class_to_class (&class_se, e, fsym->ts, false,
+@@ -11955,8 +11964,13 @@ gfc_trans_arrayfunc_assign (gfc_expr * expr1, gfc_expr * expr2)
+   gfc_symbol *sym = expr1->symtree->n.sym;
+   bool finalizable =  gfc_may_be_finalized (expr1->ts);
+ 
++  /* If the symbol is host associated and has not been referenced in its name
++     space, it might be lacking a backend_decl and vtable.  */
++  if (sym->backend_decl == NULL_TREE)
++    return NULL_TREE;
++
+   if (arrayfunc_assign_needs_temporary (expr1, expr2))
+-    return NULL;
++    return NULL_TREE;
+ 
+   /* The frontend doesn't seem to bother filling in expr->symtree for intrinsic
+      functions.  */
+@@ -11966,7 +11980,7 @@ gfc_trans_arrayfunc_assign (gfc_expr * expr1, gfc_expr * expr2)
+ 	      || (comp && comp->attr.dimension)
+ 	      || (!comp && gfc_return_by_reference (expr2->value.function.esym)
+ 		  && expr2->value.function.esym->result->attr.dimension)))
+-    return NULL;
++    return NULL_TREE;
+ 
+   gfc_init_se (&se, NULL);
+   gfc_start_block (&se.pre);
+diff --git a/gcc/testsuite/gfortran.dg/pr105168.f90 b/gcc/testsuite/gfortran.dg/pr105168.f90
+new file mode 100644
+index 000000000000..03daf2f3e0a8
+--- /dev/null
++++ b/gcc/testsuite/gfortran.dg/pr105168.f90
+@@ -0,0 +1,38 @@
++! { dg-do run }
++! Test fix for PR105168, in which nterface mapping was failing with CLASS 'x'
++! and parentheses around the actual argument.
++!
++! Contributed by Gerhard Steinmetz  <gscfq@t-online.de>
++!
++module m
++   type t
++      integer :: a
++   contains
++      final :: final_t
++   end type
++   integer :: cntr = 0
++contains
++   function f(x, factor) result(z)
++      class(t) :: x(:) ! Worked, with or without parentheses if s/CLASS/TYPE/
++      type(t) :: z(2)
++      integer :: factor
++      z = x            ! Seg fault here
++      z%a = factor * z%a
++   end
++   impure elemental subroutine final_t (arg)
++      type (t), intent(in) :: arg
++      cntr = cntr + 1
++   end subroutine
++end module
++program p
++   use m
++   class(t), allocatable :: y(:), z(:)
++   y = [t(2),t(4)]
++   allocate (t :: z(2))
++   z = f((y), 1)          ! Failed even with parentheses removed
++   if (any(z%a /= [2,4])) stop 1
++   z = f(y, 2)            ! Failed but now OK
++   if (any (z%a /= [4,8])) stop 2
++   deallocate (y, z)
++   if (cntr /= 16) stop 3 ! 6 for each assignment and 4 for deallocation
++end
+-- 
+2.43.7
+
+

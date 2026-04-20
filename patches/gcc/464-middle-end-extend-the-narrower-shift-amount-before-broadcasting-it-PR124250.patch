@@ -1,0 +1,102 @@
+From e0c46cdf3d12dd0d41d14f56dde890181497bed3 Mon Sep 17 00:00:00 2001
+From: Xi Ruoyao <xry111@xry111.site>
+Date: Thu, 26 Feb 2026 11:55:22 +0800
+Subject: [PATCH] middle-end: extend the narrower shift amount before
+ broadcasting it [PR 124250]
+
+The comment above expand_vector_broadcast() states a precondition that
+the mode of op must be the element mode of vmode.  But when
+expand_binop() called expand_vector_broadcast() to broadcast the shift
+amount, it only truncated the shift amount if it's too wide, but no
+action is performed if the shift amount is too narrow.
+
+Note that the assertion in expand_vector_broadcast is deliberately
+skipped in the backport, in order not to wake up latent "harmless" bugs.
+
+	PR middle-end/124250
+	PR target/123807
+
+gcc/
+	* optabs.cc (expand_binop): Extend the shift amount if it's
+	narrower than the element of the shifted vector.
+
+gcc/testsuite/
+
+	* gcc.c-torture/compile/pr124250.c: New test.
+
+(cherry picked from commit 1139fdadc85a0b602a2833e6b7f2cfe2a8a90cdb)
+---
+ gcc/optabs.cc                                 | 32 ++++++++++++-------
+ .../gcc.c-torture/compile/pr124250.c          |  8 +++++
+ 2 files changed, 29 insertions(+), 11 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.c-torture/compile/pr124250.c
+
+diff --git a/gcc/optabs.cc b/gcc/optabs.cc
+index 0a14b1eef8a5..45c692747fd3 100644
+--- a/gcc/optabs.cc
++++ b/gcc/optabs.cc
+@@ -422,9 +422,9 @@ force_expand_binop (machine_mode mode, optab binoptab,
+   return true;
+ }
+ 
+-/* Create a new vector value in VMODE with all elements set to OP.  The
+-   mode of OP must be the element mode of VMODE.  If OP is a constant,
+-   then the return value will be a constant.  */
++/* Create a new vector value in VMODE with all elements set to OP.  If OP
++   is not a constant, the mode of it must be the element mode of VMODE.
++   If OP is a constant, then the return value will be a constant.  */
+ 
+ rtx
+ expand_vector_broadcast (machine_mode vmode, rtx op)
+@@ -1623,15 +1623,25 @@ expand_binop (machine_mode mode, optab binoptab, rtx op0, rtx op1,
+       if (otheroptab
+ 	  && (icode = optab_handler (otheroptab, mode)) != CODE_FOR_nothing)
+ 	{
+-	  /* The scalar may have been extended to be too wide.  Truncate
+-	     it back to the proper size to fit in the broadcast vector.  */
++	  /* The scalar may be wider or narrower than the vector element.
++	     Truncate or extend it to the proper size to fit in the
++	     broadcast vector.  */
+ 	  scalar_mode inner_mode = GET_MODE_INNER (mode);
+-	  if (!CONST_INT_P (op1)
+-	      && (GET_MODE_BITSIZE (as_a <scalar_int_mode> (GET_MODE (op1)))
+-		  > GET_MODE_BITSIZE (inner_mode)))
+-	    op1 = force_reg (inner_mode,
+-			     simplify_gen_unary (TRUNCATE, inner_mode, op1,
+-						 GET_MODE (op1)));
++	  if (!CONST_INT_P (op1))
++	    {
++	      auto mode1 = as_a <scalar_int_mode> (GET_MODE (op1));
++	      int size1 = GET_MODE_BITSIZE (mode1);
++	      int inner_size = GET_MODE_BITSIZE (inner_mode);
++
++	      if (size1 != inner_size)
++		{
++		  auto unary = size1 > inner_size ? TRUNCATE : ZERO_EXTEND;
++		  op1 = force_reg (inner_mode,
++				   simplify_gen_unary (unary, inner_mode,
++						       op1, mode1));
++		}
++	    }
++
+ 	  rtx vop1 = expand_vector_broadcast (mode, op1);
+ 	  if (vop1)
+ 	    {
+diff --git a/gcc/testsuite/gcc.c-torture/compile/pr124250.c b/gcc/testsuite/gcc.c-torture/compile/pr124250.c
+new file mode 100644
+index 000000000000..1435091dc0b8
+--- /dev/null
++++ b/gcc/testsuite/gcc.c-torture/compile/pr124250.c
+@@ -0,0 +1,8 @@
++typedef long long v2i64 __attribute__ ((vector_size (16), aligned (16)));
++v2i64 a, b;
++
++void
++test (int l)
++{
++  a = b >> (-l);
++}
+-- 
+2.43.7
+
+

@@ -1,0 +1,191 @@
+From b01a1d0c86a6222393db45f2406ed0c549e3dcfa Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Fri, 6 Mar 2026 10:32:00 +0100
+Subject: [PATCH] tree-inline: Fix up ICE on !is_gimple_reg is_gimple_reg_type
+ copying [PR124135]
+
+The first testcase below ICEs e.g. with -O2 on s390x-linux, the
+second with -O2 -m32 on x86_64-linux.  We have
+  <bb 2> [local count: 1073741824]:
+  if (x_4(D) != 0)
+    goto <bb 3>; [33.00%]
+  else
+    goto <bb 4>; [67.00%]
+
+  <bb 3> [local count: 354334800]:
+  _7 = qux (42);
+  foo (0, &<retval>, _7);
+
+  <bb 4> [local count: 1073741824]:
+  return <retval>;
+on a target where <retval> has gimple reg type but is
+aggregate_value_p and TREE_ADDRESSABLE too.
+fnsplit splits this into
+  <bb 2> [local count: 354334800]:
+  _1 = qux (42);
+  foo (0, &<retval>, _1);
+
+  <bb 3> [local count: 354334800]:
+  return <retval>;
+in the *.part.0 function and
+  if (x_4(D) != 0)
+    goto <bb 3>; [33.00%]
+  else
+    goto <bb 4>; [67.00%]
+
+  <bb 3> [local count: 354334800]:
+  <retval> = _Z3bari.part.0 ();
+
+  <bb 4> [local count: 1073741824]:
+  return <retval>;
+in the original function.  Now, dunno if already that isn't
+invalid because <retval> has TREE_ADDRESSABLE set in the latter, but
+at least it is accepted by tree-cfg.cc verification.
+  tree lhs = gimple_call_lhs (stmt);
+  if (lhs
+      && (!is_gimple_reg (lhs)
+          && (!is_gimple_lvalue (lhs)
+              || verify_types_in_gimple_reference
+                   (TREE_CODE (lhs) == WITH_SIZE_EXPR
+                    ? TREE_OPERAND (lhs, 0) : lhs, true))))
+    {
+      error ("invalid LHS in gimple call");
+      return true;
+    }
+While lhs is not is_gimple_reg, it is is_gimple_lvalue here.
+Now, inlining of the *.part.0 fn back into the original results
+in
+  <retval> = a;
+statement which already is diagnosed by verify_gimple_assign_single:
+    case VAR_DECL:
+    case PARM_DECL:
+      if (!is_gimple_reg (lhs)
+          && !is_gimple_reg (rhs1)
+          && is_gimple_reg_type (TREE_TYPE (lhs)))
+        {
+          error ("invalid RHS for gimple memory store: %qs", code_name);
+          debug_generic_stmt (lhs);
+          debug_generic_stmt (rhs1);
+          return true;
+        }
+__float128/long double are is_gimple_reg_type, but both operands
+aren't is_gimple_reg.
+
+The following patch fixes it by doing separate load and store, i.e.
+  _42 = a;
+  <retval> = 42;
+in this case.  If we want to change verify_gimple_assign to disallow
+!is_gimple_reg (lhs) for is_gimple_reg_type (TREE_TYPE (lhs)), we'd
+need to change fnsplit instead, but I'd be afraid such a change would
+be more stage1 material (and certainly nothing that should be
+even backported to release branches).
+
+2026-03-05  Jakub Jelinek  <jakub@redhat.com>
+
+	PR tree-optimization/124135
+	* tree-inline.cc (expand_call_inline): If both gimple_call_lhs (stmt)
+	and use_retvar aren't gimple regs but have gimple reg type, use
+	separate load of use_retva into SSA_NAME and then store of it
+	into gimple_call_lhs (stmt).
+
+	* g++.dg/torture/pr124135-1.C: New test.
+	* g++.dg/torture/pr124135-2.C: New test.
+
+(cherry picked from commit 46520c0d388611586452cce8843d0d466eb4bb10)
+---
+ gcc/testsuite/g++.dg/torture/pr124135-1.C | 20 +++++++++++++++++
+ gcc/testsuite/g++.dg/torture/pr124135-2.C | 27 +++++++++++++++++++++++
+ gcc/tree-inline.cc                        | 15 ++++++++++++-
+ 3 files changed, 61 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/g++.dg/torture/pr124135-1.C
+ create mode 100644 gcc/testsuite/g++.dg/torture/pr124135-2.C
+
+diff --git a/gcc/testsuite/g++.dg/torture/pr124135-1.C b/gcc/testsuite/g++.dg/torture/pr124135-1.C
+new file mode 100644
+index 000000000000..bf2d54e1a061
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/torture/pr124135-1.C
+@@ -0,0 +1,20 @@
++// PR tree-optimization/124135
++// { dg-do compile }
++
++void foo (char, long double *, int);
++int qux (int);
++
++long double
++bar (int x)
++{
++  long double a;
++  if (x)
++    foo (0, &a, qux (42));
++  return a;
++}
++
++void
++baz (int x)
++{
++  bar (x);
++}
+diff --git a/gcc/testsuite/g++.dg/torture/pr124135-2.C b/gcc/testsuite/g++.dg/torture/pr124135-2.C
+new file mode 100644
+index 000000000000..4cd46e15cdeb
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/torture/pr124135-2.C
+@@ -0,0 +1,27 @@
++// PR tree-optimization/124135
++// { dg-do compile }
++
++#ifdef __SIZEOF_FLOAT128__
++void foo (char, __float128 *, int);
++int qux (int);
++
++__float128
++bar (int x)
++{
++  __float128 a;
++  if (x)
++    foo (0, &a, qux (42));
++  return a;
++}
++
++void
++baz (int x)
++{
++  bar (x);
++}
++#else
++void
++baz ()
++{
++}
++#endif
+diff --git a/gcc/tree-inline.cc b/gcc/tree-inline.cc
+index 3289b4f6d050..05b3184dd77e 100644
+--- a/gcc/tree-inline.cc
++++ b/gcc/tree-inline.cc
+@@ -5303,7 +5303,20 @@ expand_call_inline (basic_block bb, gimple *stmt, copy_body_data *id,
+   if (use_retvar && gimple_call_lhs (stmt))
+     {
+       gimple *old_stmt = stmt;
+-      stmt = gimple_build_assign (gimple_call_lhs (stmt), use_retvar);
++      tree lhs = gimple_call_lhs (stmt);
++      if (!is_gimple_reg (lhs)
++	  && !is_gimple_reg (use_retvar)
++	  && is_gimple_reg_type (TREE_TYPE (lhs)))
++	{
++	  /* If both lhs and use_retvar aren't gimple regs, yet have
++	     gimple reg type, copy through a temporary SSA_NAME.  */
++	  gimple *g = gimple_build_assign (make_ssa_name (TREE_TYPE (lhs)),
++					   use_retvar);
++	  gimple_set_location (g, gimple_location (old_stmt));
++	  gsi_insert_before (&stmt_gsi, g, GSI_SAME_STMT);
++	  use_retvar = gimple_assign_lhs (g);
++	}
++      stmt = gimple_build_assign (lhs, use_retvar);
+       gimple_set_location (stmt, gimple_location (old_stmt));
+       gsi_replace (&stmt_gsi, stmt, false);
+       maybe_clean_or_replace_eh_stmt (old_stmt, stmt);
+-- 
+2.43.7
+
+

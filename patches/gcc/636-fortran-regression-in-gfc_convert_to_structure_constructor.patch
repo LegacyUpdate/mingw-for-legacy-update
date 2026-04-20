@@ -1,0 +1,137 @@
+From 4faae8cb938b8fc2cc897d5b729a91d2e435fe71 Mon Sep 17 00:00:00 2001
+From: Paul Thomas <pault@gcc.gnu.org>
+Date: Thu, 2 Apr 2026 10:00:37 +0100
+Subject: [PATCH] Fortran: Regression in gfc_convert_to_structure_constructor
+
+This patch is not the prettiest because it jumps across the normal
+wrapping up of the actual arguments in gfc_conv_procedure_call. However
+the alternatives, which required jumps past existing call and the logic
+for adding the pre and post blocks looked even uglier. The testcase has
+been checked with valgrind and does not cause memory leaks. The memory
+leaks in pr105168, mentioned in this pr, are fixed too.
+
+2026-04-02  Paul Thomas  <pault@gcc.gnu.org>
+
+gcc/fortran
+	PR fortran/100155
+	* trans-expr.cc (gfc_add_interface_mapping): 'new_sym' dummy
+	attribute set to zero.
+	(gfc_conv_procedure_call): Deallocate allocatable components of
+	a class argument, enclosed in parentheses,wrap up the parmse
+	and proceed to the next argument.
+
+gcc/testsuite/
+	PR fortran/100155
+	* gfortran.dg/pr100155.f90: New test.
+
+(cherry picked from commit 9e42a40bf1fa745765d7aceccc6fef3cee2d789c)
+---
+ gcc/fortran/trans-expr.cc              | 33 ++++++++++++++++++++
+ gcc/testsuite/gfortran.dg/pr100155.f90 | 43 ++++++++++++++++++++++++++
+ 2 files changed, 76 insertions(+)
+ create mode 100644 gcc/testsuite/gfortran.dg/pr100155.f90
+
+diff --git a/gcc/fortran/trans-expr.cc b/gcc/fortran/trans-expr.cc
+index e6ae71e64473..6a286fcc53e0 100644
+--- a/gcc/fortran/trans-expr.cc
++++ b/gcc/fortran/trans-expr.cc
+@@ -4882,6 +4882,7 @@ gfc_add_interface_mapping (gfc_interface_mapping * mapping,
+   new_sym->attr.allocatable = sym->attr.allocatable;
+   new_sym->attr.flavor = sym->attr.flavor;
+   new_sym->attr.function = sym->attr.function;
++  new_sym->attr.dummy = 0;
+ 
+   /* Ensure that the interface is available and that
+      descriptors are passed for array actual arguments.  */
+@@ -7642,6 +7643,38 @@ gfc_conv_procedure_call (gfc_se * se, gfc_symbol * sym,
+ 					     : &parmse.pre;
+ 	      gfc_add_block_to_block (class_pre_block, &class_se.pre);
+ 	      gfc_add_block_to_block (&parmse.post, &class_se.post);
++
++	      if (e->expr_type == EXPR_OP
++		  && POINTER_TYPE_P (TREE_TYPE (parmse.expr))
++		  && GFC_CLASS_TYPE_P (TREE_TYPE (TREE_OPERAND (parmse.expr, 0))))
++		{
++		  tree cond;
++		  tree dealloc_expr = gfc_finish_block (&parmse.post);
++		  tmp = TREE_OPERAND (parmse.expr, 0);
++		  gfc_init_block (&parmse.post);
++		  cond = gfc_class_data_get (tmp);
++		  tmp = gfc_deallocate_alloc_comp_no_caf (e->ts.u.derived,
++							  tmp, e->rank, true);
++		  gfc_add_expr_to_block (&parmse.post, tmp);
++		  cond = gfc_class_data_get (TREE_OPERAND (parmse.expr, 0));
++		  cond = gfc_conv_descriptor_data_get (cond);
++		  cond = fold_build2_loc (input_location, NE_EXPR,
++					  logical_type_node, cond,
++					  build_int_cst (TREE_TYPE (cond), 0));
++		  tmp = build3_v (COND_EXPR, cond, dealloc_expr,
++				  build_empty_stmt (input_location));
++
++		  /* This specific case should not be processed further and so
++		     bundle everything up and proceed to the next argument.  */
++		  if (fsym && need_interface_mapping && e)
++		    gfc_add_interface_mapping (&mapping, fsym, &parmse, e);
++		  gfc_add_expr_to_block (&parmse.post, tmp);
++		  gfc_add_block_to_block (&se->pre, &parmse.pre);
++		  gfc_add_block_to_block (&post, &parmse.post);
++		  gfc_add_block_to_block (&se->finalblock, &parmse.finalblock);
++		  vec_safe_push (arglist, parmse.expr);
++		  continue;
++		}
+ 	    }
+ 	  else
+ 	    {
+diff --git a/gcc/testsuite/gfortran.dg/pr100155.f90 b/gcc/testsuite/gfortran.dg/pr100155.f90
+new file mode 100644
+index 000000000000..4a77963353df
+--- /dev/null
++++ b/gcc/testsuite/gfortran.dg/pr100155.f90
+@@ -0,0 +1,43 @@
++! { dg-do run }
++! Test the fix for PR100155 in which the parentheses caused an ICE
++! in evaluation the specification expression for 'z'. Note that the
++! recursive attribute is not a factor in the ICE (see PR105168).
++! Contributed by Gerhard Steinmetz  <gscfq@t-online.de>
++!
++module m1
++   type t
++     integer, allocatable :: i
++   end type
++   integer :: ctr = 0, vals = 0
++   integer, parameter :: no_calls = 6
++contains
++   recursive function f(x) result(z)
++      class(t) :: x(:)
++      type(t) :: z(size(x)+1)
++      class(t), allocatable :: a(:)
++      type(t), allocatable :: b(:)
++      ctr = ctr + 1
++      allocate (t :: a(1))
++      a(1)%i = ctr
++      if (ctr <= no_calls - 1) then
++          b = f((a)) ! <== parentheses
++      else
++          allocate (b(a(1)%i))
++          b(1)%i = ctr
++      end if
++      vals = vals + b(1)%i
++      z(1) = t(b(1)%i)
++   end 
++end module m1
++
++  use m1
++  type (t) :: dummy(1)
++  type(t), allocatable :: res(:)
++  dummy = t(1)
++  res = f (dummy);
++  if (ctr /= no_calls) stop 1
++  if (vals /= (2 * sum ([(i, i = 1, no_calls)]) - no_calls)) stop 2
++  if (size (res) /= 2) stop 3
++  deallocate (res)
++  deallocate (dummy(1)%i)
++end
+-- 
+2.43.7
+
+

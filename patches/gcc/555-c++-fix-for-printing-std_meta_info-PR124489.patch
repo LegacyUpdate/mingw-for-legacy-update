@@ -1,0 +1,40 @@
+From f2f3673b0a31e38347abb60f21245862d8fea5ce Mon Sep 17 00:00:00 2001
+From: Marek Polacek <polacek@redhat.com>
+Date: Fri, 13 Mar 2026 13:00:46 -0400
+Subject: [PATCH] c++: fix for printing std::meta::info [PR124489]
+
+When printing the diagnostics in this test, we're saying
+"constexprstd::meta::info dm" which misses a space.  We
+should use pp_cxx_ws_string which does pp_c_maybe_whitespace
+when printing "std::meta::info".
+
+	PR c++/124489
+
+gcc/cp/ChangeLog:
+
+	* error.cc (dump_type) <case NULLPTR_TYPE>: Use pp_cxx_ws_string
+	instead of pp_string.
+
+Reviewed-by: Jason Merrill <jason@redhat.com>
+(cherry picked from commit a65cafbc522d97439ff58e939d88c2a0e83ea516)
+---
+ gcc/cp/error.cc | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/gcc/cp/error.cc b/gcc/cp/error.cc
+index 65b4b8de4059..57d94382789a 100644
+--- a/gcc/cp/error.cc
++++ b/gcc/cp/error.cc
+@@ -834,7 +834,7 @@ dump_type (cxx_pretty_printer *pp, tree t, int flags)
+       break;
+ 
+     case NULLPTR_TYPE:
+-      pp_string (pp, "std::nullptr_t");
++      pp_cxx_ws_string (pp, "std::nullptr_t");
+       break;
+ 
+     default:
+-- 
+2.43.7
+
+

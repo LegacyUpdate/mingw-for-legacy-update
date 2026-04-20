@@ -1,0 +1,86 @@
+From 19fd49b059dcb7d48ca007a6a6ce91feec4d593c Mon Sep 17 00:00:00 2001
+From: Patrick Palka <ppalka@redhat.com>
+Date: Mon, 9 Feb 2026 20:32:39 -0500
+Subject: [PATCH] c++: tf_partial and alias_ctad_tweaks [PR122621]
+
+Like in r15-6740-g27d620d6769715 for instantiate_template with dependent
+arguments, we also need to set tf_partial during the alias_ctad_tweaks
+transformation mainly for benefit of properly handling extra-args trees.
+
+In this testcase during alias_ctad_tweaks we substitute the dependent
+ElemTs={Tuple<Us...>}, Ts={Ts...} into the requires-clause, which
+tsubst_pack_expansion decides to defer via extra-args, and for the
+subsequent add_extra_args (during guide overload resolution) to merge
+the deferred dependent arguments correctly, tf_partial has to have been
+set.
+
+	PR c++/122621
+
+gcc/cp/ChangeLog:
+
+	* pt.cc (tsubst_pack_expansion): Use tf_partial instead of
+	tf_none, except when substituting outer (non-dependent) template
+	arguments.
+
+gcc/testsuite/ChangeLog:
+
+	* g++.dg/cpp2a/class-deduction-alias26.C: New test.
+
+Reviewed-by: Jason Merrill <jason@redhat.com>
+(cherry picked from commit bf2657d9d45e50c4eb82da3f6f8d9d26e288890f)
+---
+ gcc/cp/pt.cc                                    |  5 +++--
+ .../g++.dg/cpp2a/class-deduction-alias26.C      | 17 +++++++++++++++++
+ 2 files changed, 20 insertions(+), 2 deletions(-)
+ create mode 100644 gcc/testsuite/g++.dg/cpp2a/class-deduction-alias26.C
+
+diff --git a/gcc/cp/pt.cc b/gcc/cp/pt.cc
+index 7b8c887ac38a..3fa8d3b27fea 100644
+--- a/gcc/cp/pt.cc
++++ b/gcc/cp/pt.cc
+@@ -31039,7 +31039,7 @@ alias_ctad_tweaks (tree tmpl, tree uguides)
+ 			  (INNERMOST_TEMPLATE_PARMS (fullatparms)));
+     }
+ 
+-  tsubst_flags_t complain = tf_none;
++  tsubst_flags_t complain = tf_partial;
+   tree aguides = NULL_TREE;
+   tree atparms = INNERMOST_TEMPLATE_PARMS (fullatparms);
+   unsigned natparms = TREE_VEC_LENGTH (atparms);
+@@ -31152,7 +31152,8 @@ alias_ctad_tweaks (tree tmpl, tree uguides)
+ 	  if (ci)
+ 	    {
+ 	      if (tree outer_targs = outer_template_args (f))
+-		ci = tsubst_constraint_info (ci, outer_targs, complain, in_decl);
++		ci = tsubst_constraint_info (ci, outer_targs,
++					     complain & ~tf_partial, in_decl);
+ 	      ci = tsubst_constraint_info (ci, targs, complain, in_decl);
+ 	    }
+ 	  if (ci == error_mark_node)
+diff --git a/gcc/testsuite/g++.dg/cpp2a/class-deduction-alias26.C b/gcc/testsuite/g++.dg/cpp2a/class-deduction-alias26.C
+new file mode 100644
+index 000000000000..01fd1a4d5e25
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/cpp2a/class-deduction-alias26.C
+@@ -0,0 +1,17 @@
++// PR c++/122621
++// { dg-do compile { target c++20 } }
++
++template <class, class>
++concept constructible_from = true;
++
++template <class... ElemTs>
++struct Tuple {
++    template <class... Ts> requires (... && constructible_from<ElemTs, Ts>)
++    Tuple(Ts &&...) {}
++};
++
++template <class... Us>
++using A = Tuple<Tuple<Us...>>;
++
++using type = decltype(A{0});
++using type = Tuple<Tuple<>>;
+-- 
+2.43.7
+
+

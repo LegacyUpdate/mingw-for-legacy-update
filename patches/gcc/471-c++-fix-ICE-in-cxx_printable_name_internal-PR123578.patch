@@ -1,0 +1,93 @@
+From 8814fafd232f30f1b79f54cd0af39d1aae20b30f Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Tue, 27 Jan 2026 10:19:39 +0100
+Subject: [PATCH] c++: Fix ICE in cxx_printable_name_internal [PR123578]
+
+On the following testcase, we end up with cxx_printable_name_internal
+recursion, in particular
++../../gcc/cp/pt.cc:20736
++../../gcc/cp/error.cc:625
++template_args=<tree_vec 0x7fffe94b59b0>, flags=4) at ../../gcc/cp/error.cc:1876
+The ICE is due to double free, that function is doing caching of up to 4
+printed names, but if such a recursion happens, the inner call can change
+ring_counter etc. and the caller will then store the result in a different
+ring element from what was freed and so the freed one can be left
+unmodified.
+
+The patch fixes it by moving the lang_decl_name call earlier, after the:
+  /* See if this print name is lying around.  */
+  for (i = 0; i < PRINT_RING_SIZE; i++)
+    if (uid_ring[i] == DECL_UID (decl) && translate == trans_ring[i])
+      /* yes, so return it.  */
+      return print_ring[i];
+loop and repeating the loop again just for the theoretical case
+that some recursion would add the same entry.
+
+The ring_counter adjustment and decision which cache entry to reuse
+for the cache is then done without the possibility of ring_counter
+or the cache being changed in the middle.
+
+2026-01-27  Jakub Jelinek  <jakub@redhat.com>
+
+	PR c++/123578
+	* tree.cc (cxx_printable_name_internal): Call lang_decl_name before
+	finding the slot to cache it in and repeat search in the cache
+	after the call.
+
+	* g++.dg/cpp2a/pr123578.C: New test.
+
+(cherry picked from commit d341b0d57fc61e58598f072a5c2be1f8a5873ff3)
+---
+ gcc/cp/tree.cc                        | 11 ++++++++++-
+ gcc/testsuite/g++.dg/cpp2a/pr123578.C |  9 +++++++++
+ 2 files changed, 19 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/g++.dg/cpp2a/pr123578.C
+
+diff --git a/gcc/cp/tree.cc b/gcc/cp/tree.cc
+index 00f7a810fd1d..436a024589e4 100644
+--- a/gcc/cp/tree.cc
++++ b/gcc/cp/tree.cc
+@@ -2831,6 +2831,15 @@ cxx_printable_name_internal (tree decl, int v, bool translate)
+       /* yes, so return it.  */
+       return print_ring[i];
+ 
++  const char *ret = lang_decl_name (decl, v, translate);
++
++  /* The lang_decl_name call could have called this function recursively,
++     so check again.  */
++  for (i = 0; i < PRINT_RING_SIZE; i++)
++    if (uid_ring[i] == DECL_UID (decl) && translate == trans_ring[i])
++      /* yes, so return it.  */
++      return print_ring[i];
++
+   if (++ring_counter == PRINT_RING_SIZE)
+     ring_counter = 0;
+ 
+@@ -2850,7 +2859,7 @@ cxx_printable_name_internal (tree decl, int v, bool translate)
+ 
+   free (print_ring[ring_counter]);
+ 
+-  print_ring[ring_counter] = xstrdup (lang_decl_name (decl, v, translate));
++  print_ring[ring_counter] = xstrdup (ret);
+   uid_ring[ring_counter] = DECL_UID (decl);
+   trans_ring[ring_counter] = translate;
+   return print_ring[ring_counter];
+diff --git a/gcc/testsuite/g++.dg/cpp2a/pr123578.C b/gcc/testsuite/g++.dg/cpp2a/pr123578.C
+new file mode 100644
+index 000000000000..816a104c6bbe
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/cpp2a/pr123578.C
+@@ -0,0 +1,9 @@
++// PR c++/123578
++// { dg-do compile { target c++20 } }
++// { dg-options "-fdump-tree-all" }
++
++namespace {
++  template <typename>
++  struct A { A (decltype ([] { return 0; } ())) {} };
++  A <int> b = 0;
++}
+-- 
+2.43.7
+
+

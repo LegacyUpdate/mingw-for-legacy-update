@@ -1,0 +1,41 @@
+From 1a6b4f4da6703835a754140941049042737ef9ad Mon Sep 17 00:00:00 2001
+From: Alex Coplan <alex.coplan@arm.com>
+Date: Mon, 16 Mar 2026 11:57:23 +0000
+Subject: [PATCH] aarch64, testsuite: Add test for PR124491
+
+This adds a testcase for PR124491, which was fixed by backporting the
+following commits to the 15 branch:
+
+r16-6709-ga4716ece529dfd29d169ccc96979f7c747231f25
+r16-6743-ge787d5ace5cc315892868f3e5e2a2a16fd31bcc8
+
+as:
+
+g:fad99a08936 middle-end/123573 - fix VEC_PERM folding more
+g:bebd813a400 middle-end/123175 - fix parts of const VEC_PERM with relaxed input sizes
+
+gcc/testsuite/ChangeLog:
+
+	PR middle-end/124491
+	* gcc.target/aarch64/torture/pr124491.c: New test.
+---
+ gcc/testsuite/gcc.target/aarch64/torture/pr124491.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+ create mode 100644 gcc/testsuite/gcc.target/aarch64/torture/pr124491.c
+
+diff --git a/gcc/testsuite/gcc.target/aarch64/torture/pr124491.c b/gcc/testsuite/gcc.target/aarch64/torture/pr124491.c
+new file mode 100644
+index 000000000000..1fcad73b670f
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/aarch64/torture/pr124491.c
+@@ -0,0 +1,6 @@
++/* { dg-do compile } */
++/* { dg-options "-march=armv8.2-a+sve -msve-vector-bits=256" } */
++#include <arm_sve.h>
++svint64_t foo(long x, long y) {
++  return svdupq_n_s64(x, y);
++}
+-- 
+2.43.7
+
+

@@ -1,0 +1,100 @@
+From daa030592bdd082c8a4452df5fddc98686d51003 Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Tue, 17 Feb 2026 08:59:06 +0100
+Subject: [PATCH] c++: Don't support auto{x} and auto(x) for C++ < 23 in SFINAE
+ contexts [PR120685]
+
+The following testcase ICEs in C++ 20 and older, because during
+diagnostics dump_template_bindings attempts to tsubst with tf_none
+something and we try to emit a pedwarn during that.
+While the pedwarn could be just guarded with if (complain & tf_warning),
+I thought we shouldn't support extensions for tf_none and should
+instead return error_mark_node.
+
+The following patch does that.
+
+This is a backport version which instead of not supporting it just
+doesn't emit the pedwarn in SFINAE contexts for C++ < 23 but still
+supports it.
+
+2026-02-17  Jakub Jelinek  <jakub@redhat.com>
+
+	PR c++/120685
+	* typeck2.cc (build_functional_cast_1): For C++23 auto(x)
+	without tf_warning or tf_error return error_mark_node instead of
+	emitting pedwarn and handling it.
+	* semantics.cc (finish_compound_literal): Similarly for C++26
+	auto{x}.
+
+	* g++.dg/cpp23/auto-fncast19.C: New test.
+
+(cherry picked from commit f7efb7e62ac96c082ff72549d9b3789f5c955efe)
+---
+ gcc/cp/semantics.cc                        |  9 ++++++---
+ gcc/cp/typeck2.cc                          |  9 ++++++---
+ gcc/testsuite/g++.dg/cpp23/auto-fncast19.C | 12 ++++++++++++
+ 3 files changed, 24 insertions(+), 6 deletions(-)
+ create mode 100644 gcc/testsuite/g++.dg/cpp23/auto-fncast19.C
+
+diff --git a/gcc/cp/semantics.cc b/gcc/cp/semantics.cc
+index 0b5584c10e7c..46e7baaea1f7 100644
+--- a/gcc/cp/semantics.cc
++++ b/gcc/cp/semantics.cc
+@@ -3834,9 +3834,12 @@ finish_compound_literal (tree type, tree compound_literal,
+ 	  return error_mark_node;
+ 	}
+       else if (cxx_dialect < cxx23)
+-	pedwarn (input_location, OPT_Wc__23_extensions,
+-		 "%<auto{x}%> only available with "
+-		 "%<-std=c++23%> or %<-std=gnu++23%>");
++	{
++	  if ((complain & tf_warning_or_error) != 0)
++	    pedwarn (input_location, OPT_Wc__23_extensions,
++		     "%<auto{x}%> only available with "
++		     "%<-std=c++23%> or %<-std=gnu++23%>");
++	}
+       type = do_auto_deduction (type, compound_literal, type, complain,
+ 				adc_variable_type);
+       if (type == error_mark_node)
+diff --git a/gcc/cp/typeck2.cc b/gcc/cp/typeck2.cc
+index 45edd1801739..1ed20ce921c0 100644
+--- a/gcc/cp/typeck2.cc
++++ b/gcc/cp/typeck2.cc
+@@ -2509,9 +2509,12 @@ build_functional_cast_1 (location_t loc, tree exp, tree parms,
+ 	      return error_mark_node;
+ 	    }
+ 	  else if (cxx_dialect < cxx23)
+-	    pedwarn (loc, OPT_Wc__23_extensions,
+-		     "%<auto(x)%> only available with "
+-		     "%<-std=c++23%> or %<-std=gnu++23%>");
++	    {
++	      if ((complain & tf_warning_or_error) != 0)
++		pedwarn (loc, OPT_Wc__23_extensions,
++			 "%<auto(x)%> only available with "
++			 "%<-std=c++23%> or %<-std=gnu++23%>");
++	    }
+ 	}
+       else
+ 	{
+diff --git a/gcc/testsuite/g++.dg/cpp23/auto-fncast19.C b/gcc/testsuite/g++.dg/cpp23/auto-fncast19.C
+new file mode 100644
+index 000000000000..05a0dbd2f39e
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/cpp23/auto-fncast19.C
+@@ -0,0 +1,12 @@
++// PR c++/120685
++// { dg-do compile { target c++11 } }
++// { dg-options "" }
++
++template <typename T>
++void foo (decltype (auto (T ())) x) {}	// { dg-warning "'auto\\\(x\\\)' only available with" "" { target c++20_down } }
++
++int
++main ()
++{
++  foo <int> (1);
++}
+-- 
+2.43.7
+
+

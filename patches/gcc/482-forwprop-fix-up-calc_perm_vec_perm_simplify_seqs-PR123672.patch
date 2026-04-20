@@ -1,0 +1,331 @@
+From 264027678fb03d9209e39b43f43df0f2cf1becc5 Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Sat, 7 Feb 2026 18:45:13 +0100
+Subject: [PATCH] forwprop: Fix up calc_perm_vec_perm_simplify_seqs [PR123672]
+
+Since r15-5563-g1c4d39ada we have an optimization to try to blend 2
+sequences of 2xVEC_PERM_EXPR + 2x binop + 1x VEC_PERM where the first two
+VEC_PERMs are permuting a single input and the last one permutes result from
+those 2 binops into 2 VEC_PERM_EXPRs from 2 inputs, 2 binops and 2 final
+VEC_PERMs.
+On the following testcase, the intended change (i.e. after patch) is
+(including DCE after it which the optimizations relies on):
+   a_7 = *x_6(D);
+   b_9 = *y_8(D);
+-  c_10 = VEC_PERM_EXPR <a_7, a_7, { 0, 2, 0, 2 }>;
+-  d_11 = VEC_PERM_EXPR <a_7, a_7, { 1, 3, 1, 3 }>;
+-  e_12 = VEC_PERM_EXPR <b_9, b_9, { 0, 2, 0, 2 }>;
+-  f_13 = VEC_PERM_EXPR <b_9, b_9, { 1, 3, 1, 3 }>;
++  c_10 = VEC_PERM_EXPR <a_7, b_9, { 0, 2, 4, 6 }>;
++  d_11 = VEC_PERM_EXPR <a_7, b_9, { 1, 3, 5, 7 }>;
+   _1 = c_10 + d_11;
+   _2 = c_10 - d_11;
+   g_14 = VEC_PERM_EXPR <_1, _2, { 0, 4, 1, 5 }>;
+-  _3 = e_12 + f_13;
+-  _4 = e_12 - f_13;
+-  h_15 = VEC_PERM_EXPR <_3, _4, { 0, 4, 1, 5 }>;
++  h_15 = VEC_PERM_EXPR <_1, _2, { 2, 6, 3, 7 }>;
+   *x_6(D) = g_14;
+   *y_8(D) = h_15;
+This works by first identifying the two sequences, attempting to use vect
+elem redundancies to only use at most half of the vector elements
+(in this testcase a nop because 0, 4, 1, 5 perms already use only half of
+the vector elts), remembering details of such sequences and later comparing
+them if there are at least two (up to 8 I think) and trying to merge them.
+The optimization is meant to improve SPEC x264.
+Anyway, in r15-6387-geee289131 the optimization was changed to fix some
+regressions but regressed this testcase, instead of the desirable
+{ 0, 2, 4, 6 } and { 1, 3, 5, 7 } first 2 VEC_PERMs 15 branch and trunk
+uses { 0, 2, 4, 4 } and { 1, 3, 5, 5 } and on this testcase that means
+computing incorrect result.
+On this testcase, it identified the two sequences (one ending with g_14
+and one with h_15 with no changes (see above).  The first one (it has
+some code to attempt to swap them if needed, but here the first one remains
+g_14) keeps using the final VEC_PERM_EXPR as is (or with whatever
+simplification recognise_vec_perm_simplify_seq performed on just that to
+reduce to at most half of nelts) and the second one is modified so that
+it uses the other elts of the two vectors.
+So, we have { 0, 4, 1, 5 } (i.e. twice first lanes and twice second lanes)
+from the first sequence and look up unused lanes (third and fourth) to
+transform the other { 0, 4, 1, 5 } to, and find that is { 2, 6, 3, 7 }.
+So far good.  But the next operation is to compute the new selectors
+for the first 2 VEC_PERM_EXPRs, which are changed from single input to
+two input ones.  For that, the code correctly uses the VECTOR_CST elts
+unmodified for the lanes used by the first sequence (in this
+testcase first/second lanes), so { 0, 2, X, X } and { 1, 3, X, X }
+and then need to find out what to use for the needs of the second sequence.
+Here is what it does currently:
+  for (i = 0; i < nelts; i++)
+    {
+      bool use_seq1 = lane_assignment[i] != 2;
+      unsigned int l1, l2;
+
+      if (use_seq1)
+        {
+          /* Just reuse the selector indices.  */
+          tree s1 = gimple_assign_rhs3 (seq1->v_1_stmt);
+          tree s2 = gimple_assign_rhs3 (seq1->v_2_stmt);
+          l1 = TREE_INT_CST_LOW (VECTOR_CST_ELT (s1, i));
+          l2 = TREE_INT_CST_LOW (VECTOR_CST_ELT (s2, i));
+        }
+      else
+        {
+          /* We moved the lanes for seq2, so we need to adjust for that.  */
+          tree s1 = gimple_assign_rhs3 (seq2->v_1_stmt);
+          tree s2 = gimple_assign_rhs3 (seq2->v_2_stmt);
+
+          unsigned int j = 0;
+          for (; j < i; j++)
+            {
+              unsigned int sel_new;
+              sel_new = seq2_stmt_sel_perm[j].to_constant ();
+              sel_new %= nelts;
+              if (sel_new == i)
+                break;
+            }
+
+          /* This should not happen.  Test anyway to guarantee correctness.  */
+          if (j == i)
+            return false;
+
+          l1 = TREE_INT_CST_LOW (VECTOR_CST_ELT (s1, j));
+          l2 = TREE_INT_CST_LOW (VECTOR_CST_ELT (s2, j));
+        }
+
+      seq1_v_1_stmt_sel_perm.quick_push (l1 + (use_seq1 ? 0 : nelts));
+      seq1_v_2_stmt_sel_perm.quick_push (l2 + (use_seq1 ? 0 : nelts));
+    }
+seq2_stmt_sel_perm is the newly computed { 2, 6, 3, 7 } selector and
+seq1->v_{1,2}_stmt are def stmts of {c_10,d_11} and seq2->v_{1,2}_stmt
+are def stmts of {e_12,f_13}.  For i 0 and 1 it is use_seq1 and
+correct, then for i 2 the loop checks first seq2_stmt_sel_perm[0],
+it is 2 % 4, equal to i, so picks up VECTOR_CST_ELTS (s{1,2}, 2),
+which happens to be correct in this case, for i 3 the loop loops until
+seq2_stmt_sel_perm[2] which is 3 % 4, stops and picks the wrong
+VECTOR_CST_ELTS (s{1,2}, 2) which has the same value as
+VECTOR_CST_ELTS (s{1,2}, 0), when the correct value would be in this
+case either 1 or 3 (due to the duplication).
+What the loop should do for !use_seq1 is to take the lane transformations
+into account, we've changed { 0, 4, 1, 5 } to { 2, 6, 3, 7 }, so instead
+of using lanes 0, 0, 1, 1 we now use lanes 2, 2, 3, 3 (x / 4 is about
+which input it is picked from, here + or -).  So, for 2 which got remapped
+from 0 we want to use 0 and for 3 which got remapped from 1 we want to use
+1.
+The function uses an auto_vec lane_assignment with values 0 (unused lane,
+so far or altogether), 1 (used by first sequence) and 2 (used by second
+sequence).  When we store in there 2, we know exactly which lane we are
+remapping to which lane, so instead of computing it again the following
+patch stores there 2 + l_orig, such that value >= 2 means second lane
+and lane_assignment[i] - 2 in that case is the lane that got remapped to i.
+And then the last loop doesn't need to recompute anything and can just use
+the remembered transformation.
+The rest of the changes (hunks 1-5 and 7) are just random small fixes I've
+noticed while trying to understand the code.  The real fix is
+- lane_assignment[lane] = 2;
++ lane_assignment[lane] = 2 + l_orig;
+and
+- bool use_seq1 = lane_assignment[i] != 2;
++ bool use_seq1 = lane_assignment[i] < 2;
+and the rest of the last hunk.  Also, the last loop was kind of assuming
+VEC_PERM_EXPR canonicalization happened and for single input perm the
+selector elts are never >= nelts, I've added %= nelts just to be sure.
+
+2026-02-07  Jakub Jelinek  <jakub@redhat.com>
+
+	PR tree-optimization/123672
+	* tree-ssa-forwprop.cc (recognise_vec_perm_simplify_seq): Use std::swap
+	instead of fetching gimple_assign_rhs{1,2} again.  Change type of lanes
+	vector from auto_vec<unsigned int> to auto_vec<bool> and store true
+	instead of 1 into it.  Fix comment typo and formatting fix.
+	(can_blend_vec_perm_simplify_seqs_p): Put end of comment on the same
+	line as the last sentence in it.
+	(calc_perm_vec_perm_simplify_seqs): Change lane_assignment type from
+	auto_vec<int> to auto_vec<unsigned> and store 2 + l_orig into it
+	instead of true.  Fix comment typo and formatting fix.  Set use_seq1
+	to line_assignment[i] < 2 instead of line_assignment[i] != 2.  Replace
+	bogus computation of index for !use_seq with using
+	line_assignment[i] - 2.  Set l1 to l1 % nelts and similarly for l2.
+
+	* gcc.dg/pr123672.c: New test.
+
+(cherry picked from commit 7f4476239b1f8337a88844fb6dd98a9b1906c1d7)
+---
+ gcc/testsuite/gcc.dg/pr123672.c | 33 ++++++++++++++++++++++++
+ gcc/tree-ssa-forwprop.cc        | 45 +++++++++++----------------------
+ 2 files changed, 48 insertions(+), 30 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.dg/pr123672.c
+
+diff --git a/gcc/testsuite/gcc.dg/pr123672.c b/gcc/testsuite/gcc.dg/pr123672.c
+new file mode 100644
+index 000000000000..8c54457a422f
+--- /dev/null
++++ b/gcc/testsuite/gcc.dg/pr123672.c
+@@ -0,0 +1,33 @@
++/* PR tree-optimization/123672 */
++/* { dg-do run } */
++/* { dg-options "-O2 -fdump-tree-forwprop1-details" } */
++/* { dg-additional-options "-msse2" { target i?86-*-* x86_64-*-* } } */
++/* { dg-final { scan-tree-dump "Vec perm simplify sequences have been blended" "forwprop1" { target { aarch64*-*-* i?86-*-* x86_64-*-* } } } } */
++
++typedef int V __attribute__((vector_size (4 * sizeof (int))));
++
++[[gnu::noipa]] void
++foo (V *x, V *y)
++{
++  V a = *x;
++  V b = *y;
++  V c = __builtin_shufflevector (a, a, 0, 2, 0, 2);
++  V d = __builtin_shufflevector (a, a, 1, 3, 1, 3);
++  V e = __builtin_shufflevector (b, b, 0, 2, 0, 2);
++  V f = __builtin_shufflevector (b, b, 1, 3, 1, 3);
++  V g = __builtin_shufflevector (c + d, c - d, 0, 4, 1, 5);
++  V h = __builtin_shufflevector (e + f, e - f, 0, 4, 1, 5);
++  *x = g;
++  *y = h;
++}
++
++int
++main ()
++{
++  V a = { 1, 21, 2, 32 };
++  V b = { 3, 43, 4, 54 };
++  foo (&a, &b);
++  if (a[0] != 22 || a[1] != -20 || a[2] != 34 || a[3] != -30
++      || b[0] != 46 || b[1] != -40 || b[2] != 58 || b[3] != -50)
++    __builtin_abort ();
++}
+diff --git a/gcc/tree-ssa-forwprop.cc b/gcc/tree-ssa-forwprop.cc
+index fafc4d6b77ab..4f5f1b94184a 100644
+--- a/gcc/tree-ssa-forwprop.cc
++++ b/gcc/tree-ssa-forwprop.cc
+@@ -3484,8 +3484,7 @@ recognise_vec_perm_simplify_seq (gassign *stmt, vec_perm_simplify_seq *seq)
+       if (commutative_tree_code (gimple_assign_rhs_code (v_x_stmt)))
+ 	{
+ 	  /* Keep v_x_1 the first operand for non-commutative operators.  */
+-	  v_x_1 = gimple_assign_rhs2 (v_x_stmt);
+-	  v_x_2 = gimple_assign_rhs1 (v_x_stmt);
++	  std::swap (v_x_1, v_x_2);
+ 	  if (v_x_1 != v_y_1 || v_x_2 != v_y_2)
+ 	    return false;
+ 	}
+@@ -3528,7 +3527,7 @@ recognise_vec_perm_simplify_seq (gassign *stmt, vec_perm_simplify_seq *seq)
+ 
+   /* Create the new selector.  */
+   vec_perm_builder new_sel_perm (nelts, nelts, 1);
+-  auto_vec<unsigned int> lanes (nelts);
++  auto_vec<bool> lanes (nelts);
+   lanes.quick_grow_cleared (nelts);
+   for (unsigned int i = 0; i < nelts; i++)
+     {
+@@ -3554,7 +3553,7 @@ recognise_vec_perm_simplify_seq (gassign *stmt, vec_perm_simplify_seq *seq)
+       new_sel_perm.quick_push (l + offs * nelts);
+ 
+       /* Mark lane as used.  */
+-      lanes[l] = 1;
++      lanes[l] = true;
+     }
+ 
+   /* Count how many lanes are need.  */
+@@ -3566,12 +3565,12 @@ recognise_vec_perm_simplify_seq (gassign *stmt, vec_perm_simplify_seq *seq)
+   if (cnt > nelts / 2)
+     return false;
+ 
+-  /* Check if the resulting permuation is cheap.  */
++  /* Check if the resulting permutation is cheap.  */
+   vec_perm_indices new_indices (new_sel_perm, 2, nelts);
+   tree vectype = TREE_TYPE (gimple_assign_lhs (stmt));
+   machine_mode vmode = TYPE_MODE (vectype);
+   if (!can_vec_perm_const_p (vmode, vmode, new_indices, false))
+-      return false;
++    return false;
+ 
+   *seq = XNEW (struct _vec_perm_simplify_seq);
+   (*seq)->stmt = stmt;
+@@ -3661,8 +3660,7 @@ can_blend_vec_perm_simplify_seqs_p (vec_perm_simplify_seq seq1,
+      seq1->v_x_stmt and seq1->v_y_stmt are before it.
+ 
+      Note, that we don't need to check the BBs here, because all
+-     statements of both sequences have to be in the same BB.
+-     */
++     statements of both sequences have to be in the same BB.  */
+ 
+   tree seq2_v_in = gimple_assign_rhs1 (seq2->v_1_stmt);
+   if (TREE_CODE (seq2_v_in) != SSA_NAME)
+@@ -3710,7 +3708,7 @@ calc_perm_vec_perm_simplify_seqs (vec_perm_simplify_seq seq1,
+ {
+   unsigned int i;
+   unsigned int nelts = seq1->nelts;
+-  auto_vec<int> lane_assignment;
++  auto_vec<unsigned int> lane_assignment;
+   lane_assignment.create (nelts);
+ 
+   /* Mark all lanes as free.  */
+@@ -3722,7 +3720,7 @@ calc_perm_vec_perm_simplify_seqs (vec_perm_simplify_seq seq1,
+       unsigned int l = TREE_INT_CST_LOW (VECTOR_CST_ELT (seq1->new_sel, i));
+       l %= nelts;
+       lane_assignment[l] = 1;
+-}
++    }
+ 
+   /* Allocate lanes for seq2 and calculate selector for seq2->stmt.  */
+   vec_perm_builder seq2_stmt_sel_perm (nelts, nelts, 1);
+@@ -3763,14 +3761,14 @@ calc_perm_vec_perm_simplify_seqs (vec_perm_simplify_seq seq1,
+ 	    }
+ 
+ 	  /* Allocate lane.  */
+-	  lane_assignment[lane] = 2;
++	  lane_assignment[lane] = 2 + l_orig;
+ 	  new_sel = lane + offs * nelts;
+ 	}
+ 
+       seq2_stmt_sel_perm.quick_push (new_sel);
+     }
+ 
+-  /* Check if the resulting permuation is cheap.  */
++  /* Check if the resulting permutation is cheap.  */
+   seq2_stmt_indices->new_vector (seq2_stmt_sel_perm, 2, nelts);
+   tree vectype = TREE_TYPE (gimple_assign_lhs (seq2->stmt));
+   machine_mode vmode = TYPE_MODE (vectype);
+@@ -3782,7 +3780,7 @@ calc_perm_vec_perm_simplify_seqs (vec_perm_simplify_seq seq1,
+   vec_perm_builder seq1_v_2_stmt_sel_perm (nelts, nelts, 1);
+   for (i = 0; i < nelts; i++)
+     {
+-      bool use_seq1 = lane_assignment[i] != 2;
++      bool use_seq1 = lane_assignment[i] < 2;
+       unsigned int l1, l2;
+ 
+       if (use_seq1)
+@@ -3798,25 +3796,12 @@ calc_perm_vec_perm_simplify_seqs (vec_perm_simplify_seq seq1,
+ 	  /* We moved the lanes for seq2, so we need to adjust for that.  */
+ 	  tree s1 = gimple_assign_rhs3 (seq2->v_1_stmt);
+ 	  tree s2 = gimple_assign_rhs3 (seq2->v_2_stmt);
+-
+-	  unsigned int j = 0;
+-	  for (; j < i; j++)
+-	    {
+-	      unsigned int sel_new;
+-	      sel_new = seq2_stmt_sel_perm[j].to_constant ();
+-	      sel_new %= nelts;
+-	      if (sel_new == i)
+-		break;
+-	    }
+-
+-	  /* This should not happen.  Test anyway to guarantee correctness.  */
+-	  if (j == i)
+-	    return false;
+-
+-	  l1 = TREE_INT_CST_LOW (VECTOR_CST_ELT (s1, j));
+-	  l2 = TREE_INT_CST_LOW (VECTOR_CST_ELT (s2, j));
++	  l1 = TREE_INT_CST_LOW (VECTOR_CST_ELT (s1, lane_assignment[i] - 2));
++	  l2 = TREE_INT_CST_LOW (VECTOR_CST_ELT (s2, lane_assignment[i] - 2));
+ 	}
+ 
++      l1 %= nelts;
++      l2 %= nelts;
+       seq1_v_1_stmt_sel_perm.quick_push (l1 + (use_seq1 ? 0 : nelts));
+       seq1_v_2_stmt_sel_perm.quick_push (l2 + (use_seq1 ? 0 : nelts));
+     }
+-- 
+2.43.7
+
+

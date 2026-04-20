@@ -1,0 +1,96 @@
+From 627283aa16cd2825763d4f9919343cf823d2feac Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Mon, 9 Feb 2026 09:06:47 +0100
+Subject: [PATCH] c++: Fix up diagnostics of wrong constexpr bodies in C++11 in
+ templates [PR123889]
+
+We emit weird diagnostics on the following testcase in C++11.
+If it is not a template, maybe_save_constexpr_fundef calls first
+  if (!is_valid_constexpr_fn (fun, complain))
+    return;
+(which doesn't fail) and then
+  tree massaged = massage_constexpr_body (fun, DECL_SAVED_TREE (fun));
+  if (massaged == NULL_TREE || massaged == error_mark_node)
+    {
+      if (!DECL_CONSTRUCTOR_P (fun) && complain)
+        error ("body of %<constexpr%> function %qD not a return-statement",
+               fun);
+      return;
+    }
+which diagnoses it and if even that would succeed, go on with
+  bool potential = potential_rvalue_constant_expression (massaged);
+  if (!potential && complain)
+    require_potential_rvalue_constant_expression_fncheck (massaged);
+In templates, maybe_save_constexpr_fundef returns early:
+  if (processing_template_decl
+      || cp_function_chain->invalid_constexpr
+      || (DECL_CLONED_FUNCTION_P (fun) && !DECL_DELETING_DESTRUCTOR_P (fun)))
+    return;
+and then it is called again during instantiation.
+But in that case DECL_GENERATED_P (fun) is true and so we silently return
+on errors without diagnosing them:
+  bool complain = !DECL_GENERATED_P (fun) && !implicit;
+Now, when we actually try to constexpr evaluate those (if at all), we
+emit an error and then
+'constexpr ...' is not usable as a 'constexpr' function because:
+message and then explain_invalid_constexpr_fn tries to diagnose
+the errors by calling is_valid_constexpr_fn (fun, true) and
+require_potential_rvalue_constant_expression (massaged).  So it diagnoses
+those 2 cases, but misses the one where massaged was NULL or error_mark_node
+for a non-constructor, so after the because: there is no reason emitted.
+
+The following patch diagnoses even that.
+
+2026-02-09  Jakub Jelinek  <jakub@redhat.com>
+
+	PR c++/123889
+	* constexpr.cc (explain_invalid_constexpr_fn): Diagnose
+	NULL or error_mark_node massaged on non-constructor.
+
+	* g++.dg/cpp0x/constexpr-123889.C: New test.
+
+(cherry picked from commit 4e13b78bf0e28120d4b1595313c42a1de83fc3ed)
+---
+ gcc/cp/constexpr.cc                           |  3 +++
+ gcc/testsuite/g++.dg/cpp0x/constexpr-123889.C | 14 ++++++++++++++
+ 2 files changed, 17 insertions(+)
+ create mode 100644 gcc/testsuite/g++.dg/cpp0x/constexpr-123889.C
+
+diff --git a/gcc/cp/constexpr.cc b/gcc/cp/constexpr.cc
+index a5078fc2fd67..fb8a9a4211b2 100644
+--- a/gcc/cp/constexpr.cc
++++ b/gcc/cp/constexpr.cc
+@@ -1114,6 +1114,9 @@ explain_invalid_constexpr_fn (tree fun)
+ 		  require_potential_rvalue_constant_expression (body);
+ 		}
+ 	    }
++	  else if (body == NULL_TREE || body == error_mark_node)
++	    error ("body of %<constexpr%> function %qD not a return-statement",
++		   fun);
+ 	}
+     }
+ }
+diff --git a/gcc/testsuite/g++.dg/cpp0x/constexpr-123889.C b/gcc/testsuite/g++.dg/cpp0x/constexpr-123889.C
+new file mode 100644
+index 000000000000..c7ca8cdf41d5
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/cpp0x/constexpr-123889.C
+@@ -0,0 +1,14 @@
++// PR c++/123889
++// { dg-do compile { target c++11 } }
++
++template <class T>
++constexpr int func (T) {
++// { dg-message "'constexpr int func\\\(T\\\) \\\[with T = int\\\]' is not usable as a 'constexpr' function because:" "" { target c++11_only } .-1 }
++// { dg-error "body of 'constexpr' function 'constexpr int func\\\(T\\\) \\\[with T = int\\\]' not a return-statement" "" { target c++11_only } .-2 }
++  return 1;
++  return 2;
++}
++
++static_assert (func (1) == 1, "");
++// { dg-error "non-constant condition for static assertion" "" { target c++11_only } .-1 }
++// { dg-error "'constexpr int func\\\(T\\\) \\\[with T = int\\\]' called in a constant expression" "" { target c++11_only } .-2 }
+-- 
+2.43.7
+
+

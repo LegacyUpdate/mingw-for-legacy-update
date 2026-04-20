@@ -1,0 +1,88 @@
+From a05455f6e8a73b76a9c1b93d9f57cad78fa8c37a Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Thu, 5 Mar 2026 09:35:39 +0100
+Subject: [PATCH] i386: Fix operand order for @wrss<mode> and @wruss<mode>
+ [PR124366]
+
+These two insns were using the same operand order for both -masm=att
+and -masm=intel, which is ok if using the same operand for both, but not
+when they are different.
+
+2026-03-05  Jakub Jelinek  <jakub@redhat.com>
+
+	PR target/124366
+	* config/i386/i386.md (@wrss<mode>, @wruss<mode>): Swap operand
+	order for -masm=intel.
+
+	* gcc.target/i386/cet-pr124366.c: New test.
+
+(cherry picked from commit 860da841585bcd722ec5a51dfc86efdb5b52f1aa)
+---
+ gcc/config/i386/i386.md                      |  4 +--
+ gcc/testsuite/gcc.target/i386/cet-pr124366.c | 31 ++++++++++++++++++++
+ 2 files changed, 33 insertions(+), 2 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.target/i386/cet-pr124366.c
+
+diff --git a/gcc/config/i386/i386.md b/gcc/config/i386/i386.md
+index 0a7f05c0bea8..cb1d4cc98143 100644
+--- a/gcc/config/i386/i386.md
++++ b/gcc/config/i386/i386.md
+@@ -29590,7 +29590,7 @@
+ 		     (match_operand:SWI48 1 "memory_operand" "m")]
+ 		    UNSPECV_WRSS)]
+   "TARGET_SHSTK"
+-  "wrss<mskmodesuffix>\t%0, %1"
++  "wrss<mskmodesuffix>\t{%0, %1|%1, %0}"
+   [(set_attr "length" "3")
+    (set_attr "type" "other")])
+ 
+@@ -29599,7 +29599,7 @@
+ 		     (match_operand:SWI48 1 "memory_operand" "m")]
+ 		    UNSPECV_WRUSS)]
+   "TARGET_SHSTK"
+-  "wruss<mskmodesuffix>\t%0, %1"
++  "wruss<mskmodesuffix>\t{%0, %1|%1, %0}"
+   [(set_attr "length" "4")
+    (set_attr "type" "other")])
+ 
+diff --git a/gcc/testsuite/gcc.target/i386/cet-pr124366.c b/gcc/testsuite/gcc.target/i386/cet-pr124366.c
+new file mode 100644
+index 000000000000..30a528299c1e
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/i386/cet-pr124366.c
+@@ -0,0 +1,31 @@
++/* PR target/124366 */
++/* { dg-do assemble { target { cet && masm_intel } } } */
++/* { dg-options "-O2 -mshstk -masm=intel" } */
++
++#include <x86intrin.h>
++
++void
++wrssd (unsigned int x, void *y)
++{
++  _wrssd (x, y);
++}
++
++void
++wrussd (unsigned int x, void *y)
++{
++  _wrussd (x, y);
++}
++
++#ifdef __x86_64__
++void
++wrssq (unsigned long long x, void *y)
++{
++  _wrssq (x, y);
++}
++
++void
++wrussq (unsigned long long x, void *y)
++{
++  _wrussq (x, y);
++}
++#endif
+-- 
+2.43.7
+
+

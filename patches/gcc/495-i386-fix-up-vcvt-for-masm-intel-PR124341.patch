@@ -1,0 +1,125 @@
+From bbfd5eba174ad038fe9a4bbf8ec42dfdfb058b5b Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Wed, 4 Mar 2026 09:38:28 +0100
+Subject: [PATCH] i386: Fix up vcvt<convertfp8_pack><mode><mask_name> for
+ -masm=intel [PR124341]
+
+The vcvt<convertfp8_pack><mode><mask_name> pattern uses wrong <mask_operand?>
+for -masm=intel, so the testcase fails to assemble, it emits something
+like {ymm1} instead of {k1}.
+
+2026-03-04  Jakub Jelinek  <jakub@redhat.com>
+
+	PR target/124341
+	* config/i386/sse.md (vcvt<convertfp8_pack><mode><mask_name>): Use
+	<mask_operand3> rather than <mask_operand2> for -masm=intel.
+
+	* gcc.target/i386/avx10_2-pr124341.c: New test.
+
+(cherry picked from commit e4bd889001388ae9d2fee901b219f37eeeddf6b3)
+---
+ gcc/config/i386/sse.md                        |  2 +-
+ .../gcc.target/i386/avx10_2-pr124341.c        | 77 +++++++++++++++++++
+ 2 files changed, 78 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/gcc.target/i386/avx10_2-pr124341.c
+
+diff --git a/gcc/config/i386/sse.md b/gcc/config/i386/sse.md
+index 707d92d28f6b..5fb249c2c39c 100644
+--- a/gcc/config/i386/sse.md
++++ b/gcc/config/i386/sse.md
+@@ -31986,7 +31986,7 @@
+ 	   (match_operand:VHF_AVX10_2 2 "nonimmediate_operand" "vm")]
+ 	  UNSPEC_CONVERTFP8_PACK))]
+   "TARGET_AVX10_2"
+-  "vcvt<convertfp8_pack>\t{%2, %1, %0<mask_operand3>|%0<mask_operand2>, %1, %2}"
++  "vcvt<convertfp8_pack>\t{%2, %1, %0<mask_operand3>|%0<mask_operand3>, %1, %2}"
+   [(set_attr "prefix" "evex")])
+ 
+ (define_mode_attr ssebvecmode_2
+diff --git a/gcc/testsuite/gcc.target/i386/avx10_2-pr124341.c b/gcc/testsuite/gcc.target/i386/avx10_2-pr124341.c
+new file mode 100644
+index 000000000000..2594ee7dcc70
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/i386/avx10_2-pr124341.c
+@@ -0,0 +1,77 @@
++/* PR target/124341 */
++/* { dg-do assemble { target { avx10_2 && masm_intel } } } */
++/* { dg-options "-O2 -mavx10.2 -masm=intel" } */
++
++#include <x86intrin.h>
++
++__m128i
++mm_mask_cvt2ph_bf8 (__m128i w, __mmask16 u, __m128h a, __m128h b)
++{
++  return _mm_mask_cvt2ph_bf8 (w, u, a, b);
++}
++
++__m256i
++mm256_mask_cvt2ph_bf8 (__m256i w, __mmask32 u, __m256h a, __m256h b)
++{
++  return _mm256_mask_cvt2ph_bf8 (w, u, a, b);
++}
++
++__m512i
++mm512_mask_cvt2ph_bf8 (__m512i w, __mmask64 u, __m512h a, __m512h b)
++{
++  return _mm512_mask_cvt2ph_bf8 (w, u, a, b);
++}
++
++__m128i
++mm_mask_cvts_2ph_bf8 (__m128i w, __mmask16 u, __m128h a, __m128h b)
++{
++  return _mm_mask_cvts_2ph_bf8 (w, u, a, b);
++}
++
++__m256i
++mm256_mask_cvts_2ph_bf8 (__m256i w, __mmask32 u, __m256h a, __m256h b)
++{
++  return _mm256_mask_cvts_2ph_bf8 (w, u, a, b);
++}
++
++__m512i
++mm512_mask_cvts_2ph_bf8 (__m512i w, __mmask64 u, __m512h a, __m512h b)
++{
++  return _mm512_mask_cvts_2ph_bf8 (w, u, a, b);
++}
++
++__m128i
++mm_mask_cvt2ph_hf8 (__m128i w, __mmask16 u, __m128h a, __m128h b)
++{
++  return _mm_mask_cvt2ph_hf8 (w, u, a, b);
++}
++
++__m256i
++mm256_mask_cvt2ph_hf8 (__m256i w, __mmask32 u, __m256h a, __m256h b)
++{
++  return _mm256_mask_cvt2ph_hf8 (w, u, a, b);
++}
++
++__m512i
++mm512_mask_cvt2ph_hf8 (__m512i w, __mmask64 u, __m512h a, __m512h b)
++{
++  return _mm512_mask_cvt2ph_hf8 (w, u, a, b);
++}
++
++__m128i
++mm_mask_cvts_2ph_hf8 (__m128i w, __mmask16 u, __m128h a, __m128h b)
++{
++  return _mm_mask_cvts_2ph_hf8 (w, u, a, b);
++}
++
++__m256i
++mm256_mask_cvts_2ph_hf8 (__m256i w, __mmask32 u, __m256h a, __m256h b)
++{
++  return _mm256_mask_cvts_2ph_hf8 (w, u, a, b);
++}
++
++__m512i
++mm512_mask_cvts_2ph_hf8 (__m512i w, __mmask64 u, __m512h a, __m512h b)
++{
++  return _mm512_mask_cvts_2ph_hf8 (w, u, a, b);
++}
+-- 
+2.43.7
+
+

@@ -1,0 +1,172 @@
+From 23778e7bf498c5b7c132ecd6e22048af4a4d488b Mon Sep 17 00:00:00 2001
+From: "Hu, Lin1" <lin1.hu@intel.com>
+Date: Wed, 1 Apr 2026 10:14:30 +0800
+Subject: [PATCH] i386: Fix Intel syntax memory operand modifiers for AVX10.2
+ saturation conversions
+
+The AVX10.2 saturation conversion instructions vcvttps2[u]qqs,
+vcvttsd2[u]sis and vcvttss2[u]sis are missing operand size modifiers in
+their Intel syntax output templates.  This causes assembler errors when
+using -masm=intel with memory operands, because Intel Syntax output
+wrong memory size.
+
+gcc/ChangeLog:
+
+	PR target/124710
+	* config/i386/sse.md (iptrps2qq): New mode attribute for
+	ps2qq Intel syntax memory operand size override.
+	(avx10_2_vcvttps2<sat_cvt_sign_prefix>qqs<mode><mask_name><round_saeonly_name>):
+	Use %<iptrps2qq>1 in Intel syntax to emit qword ptr for V2DI (128-bit)
+	memory operands.
+	(avx10_2_vcvttsd2<sat_cvt_sign_prefix>sis<mode><round_saeonly_name>):
+	Use %q1 in Intel syntax to emit qword ptr for scalar double memory
+	operands.
+	(avx10_2_vcvttss2<sat_cvt_sign_prefix>sis<mode><round_saeonly_name>):
+	Use %k1 in Intel syntax to emit dword ptr for scalar single memory
+	operands.
+
+gcc/testsuite/ChangeLog:
+
+	PR target/124710
+	* gcc.target/i386/pr124710-1.c: New test.
+	* gcc.target/i386/pr124710-2.c: Ditto.
+---
+ gcc/config/i386/sse.md                     | 11 +++--
+ gcc/testsuite/gcc.target/i386/pr124710-1.c | 16 ++++++
+ gcc/testsuite/gcc.target/i386/pr124710-2.c | 57 ++++++++++++++++++++++
+ 3 files changed, 81 insertions(+), 3 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.target/i386/pr124710-1.c
+ create mode 100644 gcc/testsuite/gcc.target/i386/pr124710-2.c
+
+diff --git a/gcc/config/i386/sse.md b/gcc/config/i386/sse.md
+index bb42952a6b07..dfece7aecaf6 100644
+--- a/gcc/config/i386/sse.md
++++ b/gcc/config/i386/sse.md
+@@ -32817,6 +32817,11 @@
+   [(V16SF "") (V8SF "") (V4SF "")
+    (V8DF "") (V4DF "{y}") (V2DF "{x}")])
+ 
++;; Pointer size override for ps2qq conversions: V2DI uses half-width (64-bit)
++;; source, needing %q for Intel syntax memory operand disambiguation.
++(define_mode_attr iptrps2qq
++  [(V8DI "") (V4DI "") (V2DI "q")])
++
+ (define_insn "avx10_2_vcvtt<castmode>2<sat_cvt_sign_prefix>dqs<mode><mask_name><round_saeonly_name>"
+  [(set (match_operand:<VEC_GATHER_IDXSI> 0 "register_operand" "=v")
+        (unspec:<VEC_GATHER_IDXSI>
+@@ -32845,7 +32850,7 @@
+ 	  [(match_operand:<vpckfloat_temp_mode> 1 "<round_saeonly_nimm_predicate>" "<round_saeonly_constraint>")]
+ 	  UNSPEC_SAT_CVT_DS_SIGN_ITER))]
+  "TARGET_AVX10_2 && <round_saeonly_mode512bit_condition>"
+- "vcvttps2<sat_cvt_sign_prefix>qqs\t{<round_saeonly_mask_op2>%1, %0<mask_operand2>|%0<mask_operand2>, %1<round_saeonly_mask_op2>}"
++ "vcvttps2<sat_cvt_sign_prefix>qqs\t{<round_saeonly_mask_op2>%1, %0<mask_operand2>|%0<mask_operand2>, %<iptrps2qq>1<round_saeonly_mask_op2>}"
+  [(set_attr "type" "ssecvt")
+   (set_attr "prefix" "evex")
+   (set_attr "mode" "<sseinsnmode>")])
+@@ -32858,7 +32863,7 @@
+       (parallel [(const_int 0)]))]
+     UNSPEC_SAT_CVT_DS_SIGN_ITER))]
+  "TARGET_AVX10_2"
+- "vcvttsd2<sat_cvt_sign_prefix>sis\t{<round_saeonly_op2>%1, %0|%0, %1<round_saeonly_op2>}"
++ "vcvttsd2<sat_cvt_sign_prefix>sis\t{<round_saeonly_op2>%1, %0|%0, %q1<round_saeonly_op2>}"
+  [(set_attr "type" "ssecvt")
+  (set_attr "prefix" "evex")
+  (set_attr "mode" "<MODE>")])
+@@ -32871,7 +32876,7 @@
+       (parallel [(const_int 0)]))]
+     UNSPEC_SAT_CVT_DS_SIGN_ITER))]
+  "TARGET_AVX10_2"
+- "vcvttss2<sat_cvt_sign_prefix>sis\t{<round_saeonly_op2>%1, %0|%0, %1<round_saeonly_op2>}"
++ "vcvttss2<sat_cvt_sign_prefix>sis\t{<round_saeonly_op2>%1, %0|%0, %k1<round_saeonly_op2>}"
+  [(set_attr "type" "ssecvt")
+  (set_attr "prefix" "evex")
+  (set_attr "mode" "<MODE>")])
+diff --git a/gcc/testsuite/gcc.target/i386/pr124710-1.c b/gcc/testsuite/gcc.target/i386/pr124710-1.c
+new file mode 100644
+index 000000000000..aea176dffba7
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/i386/pr124710-1.c
+@@ -0,0 +1,16 @@
++/* PR target/124710 */
++/* { dg-do assemble } */
++/* { dg-options "-O -masm=intel -mavx10.2" } */
++/* { dg-require-effective-target masm_intel } */
++/* { dg-require-effective-target avx10_2 } */
++
++#include <immintrin.h>
++
++__m128i v;
++__m128 w;
++
++void
++foo()
++{
++  v = _mm_mask_cvtts_ps_epi64(v, -1, w);
++}
+diff --git a/gcc/testsuite/gcc.target/i386/pr124710-2.c b/gcc/testsuite/gcc.target/i386/pr124710-2.c
+new file mode 100644
+index 000000000000..3d331448ef8e
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/i386/pr124710-2.c
+@@ -0,0 +1,57 @@
++/* PR target/124710 */
++/* { dg-do assemble } */
++/* { dg-options "-O2 -masm=intel -mavx10.2" } */
++/* { dg-require-effective-target masm_intel } */
++/* { dg-require-effective-target avx10_2 } */
++
++typedef float __v4sf __attribute__ ((__vector_size__ (16)));
++typedef double __v2df __attribute__ ((__vector_size__ (16)));
++typedef long long __v2di __attribute__ ((__vector_size__ (16)));
++
++/* vcvttps2qqs 128-bit: source V4SF is half-width of dest V2DI,
++   Intel syntax needs "qword ptr" for memory operand.
++   At -O2 the compiler folds *p into the instruction.  */
++
++__v2di
++test_vcvttps2qqs128 (__v4sf *p)
++{
++  return (__v2di) __builtin_ia32_cvttps2qqs128_mask (*p, (__v2di) { 0, 0 },
++						     (unsigned char) -1);
++}
++
++__v2di
++test_vcvttps2uqqs128 (__v4sf *p)
++{
++  return (__v2di) __builtin_ia32_cvttps2uqqs128_mask (*p, (__v2di) { 0, 0 },
++						      (unsigned char) -1);
++}
++
++/* vcvttsd2sis: source V2DF extracts scalar double (64-bit),
++   Intel syntax needs "qword ptr" for memory operand.  */
++
++int
++test_vcvttsd2sis32 (__v2df *p)
++{
++  return (int) __builtin_ia32_cvttsd2sis32_round (*p, 4);
++}
++
++unsigned int
++test_vcvttsd2usis32 (__v2df *p)
++{
++  return (unsigned int) __builtin_ia32_cvttsd2usis32_round (*p, 4);
++}
++
++/* vcvttss2sis: source V4SF extracts scalar float (32-bit),
++   Intel syntax needs "dword ptr" for memory operand.  */
++
++int
++test_vcvttss2sis32 (__v4sf *p)
++{
++  return (int) __builtin_ia32_cvttss2sis32_round (*p, 4);
++}
++
++unsigned int
++test_vcvttss2usis32 (__v4sf *p)
++{
++  return (unsigned int) __builtin_ia32_cvttss2usis32_round (*p, 4);
++}
+-- 
+2.43.7
+
+

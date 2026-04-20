@@ -1,0 +1,490 @@
+From d6a1eaafb6ba95cdd91d95130aa6af9a35e23634 Mon Sep 17 00:00:00 2001
+From: Tamar Christina <tamar.christina@arm.com>
+Date: Mon, 30 Mar 2026 15:55:01 +0100
+Subject: [PATCH] AArch64: Add if-conversion target cost model [PR123017][GCC
+ 15 backport]
+
+This patch implements an if-conversion cost model for AArch64.   AArch64 has a
+number of conditional instructions that need to be accounted for, however this
+initial version keeps things simple and is only really concerned about csel.
+
+The issue specifically with csel is that it may have to wait for two argument
+to be evaluated before it can be executed.  This means it has a direct
+correlation to increases in dynamic instructions.
+
+To fix this I add a new tuning parameter that indicates a rough estimation of
+the branch misprediction cost of a branch.   We then accept if-conversion while
+the cost of this multiplied by the cost of branches is cheaper.
+
+There is a basic detection of CINC and CSET because these usually are ok.  We
+also accept all if-conversion when not inside a loop.  Because CE is not an RTL
+SSA pass we can't do more extensive checks like checking if the csel is a loop
+carried dependency.  As such this is a best effort thing and intends to catch the
+most egregious cases like the above.
+
+This recovers the ~25% performance loss in zstd decoding and gives better
+results than GCC 14 which was before the regression happened.
+
+Additionally I've benchmarked on a number of cores all the attached examples
+and checked various cases.  On average the patch gives an improvement between
+20-40%.
+
+[1] https://github.com/facebook/zstd/pull/4418#issuecomment-3004606000
+
+gcc/ChangeLog:
+
+	PR target/123017
+	* config/aarch64/aarch64-protos.h (struct cpu_branch_cost): Add
+	br_mispredict_factor.
+	* config/aarch64/aarch64.cc (aarch64_max_noce_ifcvt_seq_cost,
+	aarch64_noce_conversion_profitable_p,
+	TARGET_MAX_NOCE_IFCVT_SEQ_COST,
+	TARGET_NOCE_CONVERSION_PROFITABLE_P): New.
+	* config/aarch64/tuning_models/generic.h (generic_branch_cost): Add
+	br_mispredict_factor.
+	* config/aarch64/tuning_models/generic_armv8_a.h: Remove
+	generic_armv8_a_branch_cost and use generic_branch_cost.
+
+gcc/testsuite/ChangeLog:
+
+	PR target/123017
+	* gcc.target/aarch64/pr123017_1.c: New test.
+	* gcc.target/aarch64/pr123017_2.c: New test.
+	* gcc.target/aarch64/pr123017_3.c: New test.
+	* gcc.target/aarch64/pr123017_4.c: New test.
+	* gcc.target/aarch64/pr123017_5.c: New test.
+	* gcc.target/aarch64/pr123017_6.c: New test.
+	* gcc.target/aarch64/pr123017_7.c: New test.
+---
+ gcc/config/aarch64/aarch64-protos.h           |   1 +
+ gcc/config/aarch64/aarch64.cc                 | 118 ++++++++++++++++++
+ gcc/config/aarch64/tuning_models/generic.h    |   3 +-
+ .../aarch64/tuning_models/generic_armv8_a.h   |   9 +-
+ gcc/testsuite/gcc.target/aarch64/pr123017_1.c |  38 ++++++
+ gcc/testsuite/gcc.target/aarch64/pr123017_2.c |  16 +++
+ gcc/testsuite/gcc.target/aarch64/pr123017_3.c |  32 +++++
+ gcc/testsuite/gcc.target/aarch64/pr123017_4.c |  17 +++
+ gcc/testsuite/gcc.target/aarch64/pr123017_5.c |  20 +++
+ gcc/testsuite/gcc.target/aarch64/pr123017_6.c |  22 ++++
+ gcc/testsuite/gcc.target/aarch64/pr123017_7.c |  25 ++++
+ 11 files changed, 292 insertions(+), 9 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.target/aarch64/pr123017_1.c
+ create mode 100644 gcc/testsuite/gcc.target/aarch64/pr123017_2.c
+ create mode 100644 gcc/testsuite/gcc.target/aarch64/pr123017_3.c
+ create mode 100644 gcc/testsuite/gcc.target/aarch64/pr123017_4.c
+ create mode 100644 gcc/testsuite/gcc.target/aarch64/pr123017_5.c
+ create mode 100644 gcc/testsuite/gcc.target/aarch64/pr123017_6.c
+ create mode 100644 gcc/testsuite/gcc.target/aarch64/pr123017_7.c
+
+diff --git a/gcc/config/aarch64/aarch64-protos.h b/gcc/config/aarch64/aarch64-protos.h
+index e1caf802d661..eeaafd5d25b9 100644
+--- a/gcc/config/aarch64/aarch64-protos.h
++++ b/gcc/config/aarch64/aarch64-protos.h
+@@ -481,6 +481,7 @@ struct cpu_branch_cost
+ {
+   const int predictable;    /* Predictable branch or optimizing for size.  */
+   const int unpredictable;  /* Unpredictable branch or optimizing for speed.  */
++  const int br_mispredict_factor;  /* Scale factor for cost of misprediction on branches.  */
+ };
+ 
+ /* Control approximate alternatives to certain FP operators.  */
+diff --git a/gcc/config/aarch64/aarch64.cc b/gcc/config/aarch64/aarch64.cc
+index a39e7c0eaef6..c2fe272d18cd 100644
+--- a/gcc/config/aarch64/aarch64.cc
++++ b/gcc/config/aarch64/aarch64.cc
+@@ -97,6 +97,7 @@
+ #include "ipa-prop.h"
+ #include "ipa-fnsummary.h"
+ #include "hash-map.h"
++#include "ifcvt.h"
+ 
+ /* This file should be included last.  */
+ #include "target-def.h"
+@@ -2097,6 +2098,116 @@ aarch64_preferred_else_value (unsigned, tree, unsigned int nops, tree *ops)
+   return nops == 3 ? ops[2] : ops[0];
+ }
+ 
++/* Implement TARGET_MAX_NOCE_IFCVT_SEQ_COST.  If an explicit max was set then
++   honor it, otherwise apply a tuning specific scale to branch costs.  */
++
++static unsigned int
++aarch64_max_noce_ifcvt_seq_cost (edge e)
++{
++  bool predictable_p = predictable_edge_p (e);
++  if (predictable_p)
++    {
++      if (OPTION_SET_P (param_max_rtl_if_conversion_predictable_cost))
++	return param_max_rtl_if_conversion_predictable_cost;
++    }
++  else
++    {
++      if (OPTION_SET_P (param_max_rtl_if_conversion_unpredictable_cost))
++	return param_max_rtl_if_conversion_unpredictable_cost;
++    }
++
++  /* For modern machines with long speculative execution chains and modern
++     branch prediction the penalty of the branch misprediction needs to weighed
++     against the cost of executing the instructions unconditionally.  RISC cores
++     tend to not have that deep pipelines and so the cost of mispredictions can
++     be reasonably cheap.  */
++
++  bool speed_p = optimize_function_for_speed_p (cfun);
++  return BRANCH_COST (speed_p, predictable_p)
++	 * aarch64_tune_params.branch_costs->br_mispredict_factor;
++}
++
++/* Return true if SEQ is a good candidate as a replacement for the
++   if-convertible sequence described in IF_INFO.  AArch64 has a range of
++   branchless statements and not all of them are potentially problematic.  For
++   instance a cset is usually beneficial whereas a csel is more complicated.  */
++
++static bool
++aarch64_noce_conversion_profitable_p (rtx_insn *seq,
++				      struct noce_if_info *if_info)
++{
++  /* If not in a loop, just accept all if-conversion as the branch predictor
++     won't have anything to train on.  So assume sequences are essentially
++     unpredictable.  ce1 is in CFG mode still while ce2 is outside.  For ce2
++     accept limited if-conversion based on the shape of the instruction.  */
++  if (current_loops
++      && (!if_info->test_bb->loop_father
++	  || !if_info->test_bb->loop_father->header
++	  || bb_loop_depth (if_info->test_bb->loop_father->header) == 0))
++    return true;
++
++  /* For now we only care about csel speciifcally.  */
++  bool is_csel_p = true;
++
++  if (if_info->then_simple
++      && if_info->a != NULL_RTX
++      && !REG_P (if_info->a)
++      && !SUBREG_P (if_info->a))
++    is_csel_p = false;
++
++  if (if_info->else_simple
++      && if_info->b != NULL_RTX
++      && !REG_P (if_info->b)
++      && !SUBREG_P (if_info->b))
++    is_csel_p = false;
++
++  for (rtx_insn *insn = seq; is_csel_p && insn; insn = NEXT_INSN (insn))
++    {
++      rtx set = single_set (insn);
++      if (!set)
++	continue;
++
++      rtx src = SET_SRC (set);
++      rtx dst = SET_DEST (set);
++      machine_mode mode = GET_MODE (src);
++      if (GET_MODE_CLASS (mode) != MODE_INT)
++	continue;
++
++      switch (GET_CODE (src))
++	{
++	case PLUS:
++	case MINUS:
++	  {
++	    /* Likely a CINC.  */
++	    if (REG_P (dst)
++		&& (REG_P (XEXP (src, 0)) || SUBREG_P (XEXP (src, 0)))
++		&& (XEXP (src, 1) == CONST1_RTX (mode)
++		    || XEXP (src, 1) == CONSTM1_RTX (mode)))
++	      is_csel_p = false;
++	    break;
++	  }
++	default:
++	  break;
++	}
++    }
++
++  /* For now accept every variant but csel unconditionally because CSEL usually
++     means you have to wait for two values to be computed.  */
++  if (!is_csel_p)
++    return true;
++
++  /* TODO: Add detecting of csel, cinc, cset etc and take profiling in
++	   consideration.  For now this basic costing is enough to cover
++	   most cases.  */
++  if (if_info->speed_p)
++    {
++      unsigned cost = seq_cost (seq, true);
++      return cost <= if_info->max_seq_cost;
++    }
++
++  return default_noce_conversion_profitable_p (seq, if_info);
++}
++
+ /* Implement TARGET_HARD_REGNO_NREGS.  */
+ 
+ static unsigned int
+@@ -31993,6 +32104,13 @@ aarch64_libgcc_floating_mode_supported_p
+ #define TARGET_ATOMIC_ASSIGN_EXPAND_FENV \
+   aarch64_atomic_assign_expand_fenv
+ 
++/* If-conversion costs.  */
++#undef TARGET_MAX_NOCE_IFCVT_SEQ_COST
++#define TARGET_MAX_NOCE_IFCVT_SEQ_COST aarch64_max_noce_ifcvt_seq_cost
++
++#undef TARGET_NOCE_CONVERSION_PROFITABLE_P
++#define TARGET_NOCE_CONVERSION_PROFITABLE_P aarch64_noce_conversion_profitable_p
++
+ /* Section anchor support.  */
+ 
+ #undef TARGET_MIN_ANCHOR_OFFSET
+diff --git a/gcc/config/aarch64/tuning_models/generic.h b/gcc/config/aarch64/tuning_models/generic.h
+index a822c055fe99..c5f328a829c3 100644
+--- a/gcc/config/aarch64/tuning_models/generic.h
++++ b/gcc/config/aarch64/tuning_models/generic.h
+@@ -128,7 +128,8 @@ static const struct cpu_vector_cost generic_vector_cost =
+ static const struct cpu_branch_cost generic_branch_cost =
+ {
+   1,  /* Predictable.  */
+-  3   /* Unpredictable.  */
++  3,  /* Unpredictable.  */
++  7, /* br_mispredict_factor.  */
+ };
+ 
+ /* Generic approximation modes.  */
+diff --git a/gcc/config/aarch64/tuning_models/generic_armv8_a.h b/gcc/config/aarch64/tuning_models/generic_armv8_a.h
+index 01080cade464..0f00d72dddf8 100644
+--- a/gcc/config/aarch64/tuning_models/generic_armv8_a.h
++++ b/gcc/config/aarch64/tuning_models/generic_armv8_a.h
+@@ -125,13 +125,6 @@ static const struct cpu_vector_cost generic_armv8_a_vector_cost =
+   nullptr /* issue_info  */
+ };
+ 
+-/* Generic costs for branch instructions.  */
+-static const struct cpu_branch_cost generic_armv8_a_branch_cost =
+-{
+-  1,  /* Predictable.  */
+-  3   /* Unpredictable.  */
+-};
+-
+ /* Generic approximation modes.  */
+ static const cpu_approx_modes generic_armv8_a_approx_modes =
+ {
+@@ -158,7 +151,7 @@ static const struct tune_params generic_armv8_a_tunings =
+   &generic_armv8_a_addrcost_table,
+   &generic_armv8_a_regmove_cost,
+   &generic_armv8_a_vector_cost,
+-  &generic_armv8_a_branch_cost,
++  &generic_branch_cost,
+   &generic_armv8_a_approx_modes,
+   SVE_NOT_IMPLEMENTED, /* sve_width  */
+   { 4, /* load_int.  */
+diff --git a/gcc/testsuite/gcc.target/aarch64/pr123017_1.c b/gcc/testsuite/gcc.target/aarch64/pr123017_1.c
+new file mode 100644
+index 000000000000..38e4334c1ea7
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/aarch64/pr123017_1.c
+@@ -0,0 +1,38 @@
++/* { dg-do compile } */
++/* { dg-options "-O2" } */
++/* { dg-final { scan-assembler-times "csel\t" 2 } } */
++
++#include <stdint.h>
++#include <stddef.h>
++
++// Branchy: compiler can emit a short compare+branch.
++size_t branchy(size_t cur, size_t dist, size_t fallback, const uint8_t *src, uint8_t *dst, size_t len) {
++    if (dist < cur && dist < fallback) {
++        const uint8_t *p = src - dist;
++        for (size_t i = 0; i < len; ++i)
++	  dst[i] = p[i];
++        return dist;
++    } else {
++        const uint8_t *p = src - fallback;
++        for (size_t i = 0; i < len; ++i)
++	  dst[i] = p[i];
++        return fallback;
++    }
++}
++
++// CSEL-heavy: chain ternaries so both paths stay live; compilers emit cmps + csel.
++size_t selecty(size_t cur, size_t dist, size_t fallback, const uint8_t *src, uint8_t *dst, size_t len) {
++    // Compute both candidates unconditionally, then pick with ternaries.
++    size_t candA_off = dist;
++    size_t candB_off = fallback;
++    const uint8_t *candA = src - candA_off;
++    const uint8_t *candB = src - candB_off;
++
++    size_t useA = (dist < cur && dist < fallback);
++    const uint8_t *p = useA ? candA : candB;
++    size_t chosen = useA ? candA_off : candB_off;
++
++    for (size_t i = 0; i < len; ++i)
++      dst[i] = p[i];
++    return chosen;
++}
+diff --git a/gcc/testsuite/gcc.target/aarch64/pr123017_2.c b/gcc/testsuite/gcc.target/aarch64/pr123017_2.c
+new file mode 100644
+index 000000000000..72adb418e9e8
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/aarch64/pr123017_2.c
+@@ -0,0 +1,16 @@
++/* { dg-do compile } */
++/* { dg-options "-O2" } */
++/* { dg-final { scan-assembler-times "csel\t" 0 } } */
++
++void f(const int *restrict in,
++   int *restrict out,
++   int n, int threshold)
++{
++  for (int i = 0; i < n; i+=4) {
++    out[i+0] = in[i+0] > threshold ? in[i+0] : in[i+0] + i;
++    out[i+1] = in[i+1] > threshold ? in[i+1] : in[i+1] + i;
++    out[i+2] = in[i+2] > threshold ? in[i+2] : in[i+2] + i;
++    out[i+3] = in[i+3] > threshold ? in[i+3] : in[i+3] + i;
++  }
++}
++
+diff --git a/gcc/testsuite/gcc.target/aarch64/pr123017_3.c b/gcc/testsuite/gcc.target/aarch64/pr123017_3.c
+new file mode 100644
+index 000000000000..ec39d785ee80
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/aarch64/pr123017_3.c
+@@ -0,0 +1,32 @@
++/* { dg-do compile } */
++/* { dg-options "-O2" } */
++/* { dg-final { scan-assembler-times "csel\t" 0 } } */
++
++void f(const int *restrict in,
++   int *restrict out,
++   int n, int threshold)
++{
++  for (int i = 0; i < n; ++i) {
++    int v = in[i];
++    if (v > threshold) {
++      int t = v * 3;
++      t += 7;
++      t ^= 0x55;
++      t *= 0x55;
++      t -= 0x5;
++      t &= 0xFE;
++      t ^= 0x55;
++      out[i] = t;
++    } else {
++      int t = v * 5;
++      t += 4;
++      t ^= 0x65;
++      t *= 0x35;
++      t -= 0x7;
++      t &= 0x0E;
++      t ^= 0x45;
++      out[i] = t;
++    }
++  }
++}
++
+diff --git a/gcc/testsuite/gcc.target/aarch64/pr123017_4.c b/gcc/testsuite/gcc.target/aarch64/pr123017_4.c
+new file mode 100644
+index 000000000000..b350d492ae46
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/aarch64/pr123017_4.c
+@@ -0,0 +1,17 @@
++/* { dg-do compile } */
++/* { dg-options "-O2" } */
++/* { dg-final { scan-assembler-times "csel\t" 0 } } */
++
++void f(const int *restrict in,
++   int *restrict out,
++   int n, int threshold)
++{
++  for (int i = 0; i < n; ++i) {
++    int v = in[i];
++    if (v > threshold) {
++      int t = v * 3;
++      out[i] = t;
++    }
++  }
++}
++
+diff --git a/gcc/testsuite/gcc.target/aarch64/pr123017_5.c b/gcc/testsuite/gcc.target/aarch64/pr123017_5.c
+new file mode 100644
+index 000000000000..6d7cd088bd02
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/aarch64/pr123017_5.c
+@@ -0,0 +1,20 @@
++/* { dg-do compile } */
++/* { dg-options "-O2" } */
++/* { dg-final { scan-assembler-times "csel\t" 1 } } */
++
++void f(const int *restrict in,
++   int *restrict out,
++   int n, int threshold)
++{
++  for (int i = 0; i < n; ++i) {
++    int v = in[i];
++    if (v > threshold) {
++      int t = v * 3;
++      t += 7;
++      out[i] = t;
++    } else {
++      out[i] = v;
++    }
++  }
++}
++
+diff --git a/gcc/testsuite/gcc.target/aarch64/pr123017_6.c b/gcc/testsuite/gcc.target/aarch64/pr123017_6.c
+new file mode 100644
+index 000000000000..0402c4fdd86d
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/aarch64/pr123017_6.c
+@@ -0,0 +1,22 @@
++/* { dg-do compile } */
++/* { dg-options "-O2" } */
++/* { dg-final { scan-assembler-times "csel\t" 0 } } */
++
++void f(const int *restrict in,
++   int *restrict out,
++   int n, int threshold)
++{
++  for (int i = 0; i < n; ++i) {
++    int v = in[i];
++    if (v > threshold) {
++      int t = v * 3;
++      t += 7;
++      t ^= 0x55;
++      t *= 0x55;
++      out[i] = t;
++    } else {
++      out[i] = v;
++    }
++  }
++}
++
+diff --git a/gcc/testsuite/gcc.target/aarch64/pr123017_7.c b/gcc/testsuite/gcc.target/aarch64/pr123017_7.c
+new file mode 100644
+index 000000000000..048a69e1c79c
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/aarch64/pr123017_7.c
+@@ -0,0 +1,25 @@
++/* { dg-do compile } */
++/* { dg-options "-O2" } */
++/* { dg-final { scan-assembler-times "csel\t" 0 } } */
++
++void f(const int *restrict in,
++   int *restrict out,
++   int n, int threshold)
++{
++  for (int i = 0; i < n; ++i) {
++    int v = in[i];
++    if (v > threshold) {
++      int t = v * 3;
++      t += 7;
++      t ^= 0x55;
++      t *= 0x55;
++      t -= 0x5;
++      t &= 0xFE;
++      t ^= 0x55;
++      out[i] = t;
++    } else {
++      out[i] = v;
++    }
++  }
++}
++
+-- 
+2.43.7
+
+

@@ -1,0 +1,207 @@
+From a6b27f10765c3b249546ed5b4c86cdda7a4db621 Mon Sep 17 00:00:00 2001
+From: Christophe Lyon <christophe.lyon@linaro.org>
+Date: Fri, 18 Apr 2025 21:10:10 +0000
+Subject: [PATCH] testsuite: arm: remove arm32 check from a few
+ effective-targets
+
+A few arm effective-targets call check_effective_target_arm32 even
+though they would force a -march=XXX flag which supports Arm and/or
+Thumb-2, thus making the arm32 check useless.  This has an impact when
+the toolchain is configured with a default -march or -mcpu which
+supports Thumb-1 only: in such a case, arm32 is false and we skip many
+tests, thus reducing coverage.
+
+This patch removes the call to check_effective_target_arm32 where it
+is useless, enabling about 2000 tests.
+
+In addition, add an early exit if the target is not an arm one, thus
+saving a few compilation cycles where not needed.  In all callers of
+arm_neon_ok, remove the now useless "istarget arm*-*-*.
+
+gcc/testsuite/ChangeLog:
+
+	* lib/target-supports.exp
+	(check_effective_target_arm_neon_ok_nocache): Remove arm32 check.
+	Add istarget arm*-*-* check.
+	(check_effective_target_arm_neon_fp16_ok_nocache): Likewise.
+	(check_effective_target_arm_neon_softfp_fp16_ok_nocache): Likewise.
+	(check_effective_target_arm_v8_neon_ok_nocache): Likewise.
+	(check_effective_target_arm_neonv2_ok_nocache): Likewise.
+	(check_effective_target_vect_pack_trunc): Remove istarget arm*-*-*
+	check.
+	(check_effective_target_vect_unpack): Likewise.
+	(check_effective_target_vect_condition): Likewise.
+	(check_effective_target_vect_cond_mixed): Likewise.
+	(available_vector_sizes): Likewise.
+
+(cherry picked from commit 3cb6c01d2a9ab0ff44767a5866a4a7b929334263)
+---
+ gcc/testsuite/lib/target-supports.exp | 85 ++++++++++++---------------
+ 1 file changed, 39 insertions(+), 46 deletions(-)
+
+diff --git a/gcc/testsuite/lib/target-supports.exp b/gcc/testsuite/lib/target-supports.exp
+index 76429d88ed0e..f45c3a7a428d 100644
+--- a/gcc/testsuite/lib/target-supports.exp
++++ b/gcc/testsuite/lib/target-supports.exp
+@@ -5427,25 +5427,26 @@ proc add_options_for_arm_vfp3 { flags } {
+ # best options to add.
+ 
+ proc check_effective_target_arm_neon_ok_nocache { } {
++    if { ![istarget arm*-*-*] } {
++	return 0
++    }
+     global et_arm_neon_flags
+     set et_arm_neon_flags ""
+-    if { [check_effective_target_arm32] } {
+-	foreach flags {"" "-mfloat-abi=softfp" "-mfpu=neon" "-mfpu=neon -mfloat-abi=softfp" "-mfpu=neon -mfloat-abi=softfp -mcpu=unset -march=armv7-a" "-mfloat-abi=hard" "-mfpu=neon -mfloat-abi=hard" "-mfpu=neon -mfloat-abi=hard -mcpu=unset -march=armv7-a"} {
+-	    if { [check_no_compiler_messages_nocache arm_neon_ok object {
+-		#include <arm_neon.h>
+-		int dummy;
+-		#ifndef __ARM_NEON__
+-		#error not NEON
+-		#endif
+-		/* Avoid the case where a test adds -mfpu=neon, but the toolchain is
+-		   configured for -mcpu=arm926ej-s, for example.  */
+-		#if __ARM_ARCH < 7 || __ARM_ARCH_PROFILE == 'M'
+-		#error Architecture does not support NEON.
+-		#endif
+-	    } "$flags"] } {
+-		set et_arm_neon_flags $flags
+-		return 1
+-	    }
++    foreach flags {"" "-mfloat-abi=softfp" "-mfpu=neon" "-mfpu=neon -mfloat-abi=softfp" "-mfpu=neon -mfloat-abi=softfp -mcpu=unset -march=armv7-a" "-mfloat-abi=hard" "-mfpu=neon -mfloat-abi=hard" "-mfpu=neon -mfloat-abi=hard -mcpu=unset -march=armv7-a"} {
++	if { [check_no_compiler_messages_nocache arm_neon_ok object {
++	    #include <arm_neon.h>
++	    int dummy;
++	    #ifndef __ARM_NEON__
++	    #error not NEON
++	    #endif
++	    /* Avoid the case where a test adds -mfpu=neon, but the toolchain is
++	    configured for -mcpu=arm926ej-s, for example.  */
++	    #if __ARM_ARCH < 7 || __ARM_ARCH_PROFILE == 'M'
++	    #error Architecture does not support NEON.
++	    #endif
++	} "$flags"] } {
++	    set et_arm_neon_flags $flags
++	    return 1
+ 	}
+     }
+ 
+@@ -5631,8 +5632,7 @@ proc check_effective_target_arm_neon_fp16_ok_nocache { } {
+     global et_arm_neon_fp16_flags
+     global et_arm_neon_flags
+     set et_arm_neon_fp16_flags ""
+-    if { [check_effective_target_arm32]
+-	 && [check_effective_target_arm_neon_ok] } {
++    if { [check_effective_target_arm_neon_ok] } {
+ 	foreach flags {"" "-mfloat-abi=softfp" "-mfpu=neon-fp16"
+ 		       "-mfpu=neon-fp16 -mfloat-abi=softfp"
+ 		       "-mfp16-format=ieee"
+@@ -5670,8 +5670,7 @@ proc check_effective_target_arm_neon_softfp_fp16_ok_nocache { } {
+     global et_arm_neon_softfp_fp16_flags
+     global et_arm_neon_flags
+     set et_arm_neon_softfp_fp16_flags ""
+-    if { [check_effective_target_arm32]
+-	 && [check_effective_target_arm_neon_ok] } {
++    if { [check_effective_target_arm_neon_ok] } {
+ 	foreach flags {"-mfpu=neon-fp16 -mfloat-abi=softfp"
+ 		       "-mfpu=neon-fp16 -mfloat-abi=softfp -mfp16-format=ieee"} {
+ 	    if { [check_no_compiler_messages_nocache arm_neon_softfp_fp16_ok object {
+@@ -5814,22 +5813,20 @@ proc check_effective_target_arm_fp16_none_ok { } {
+ proc check_effective_target_arm_v8_neon_ok_nocache { } {
+     global et_arm_v8_neon_flags
+     set et_arm_v8_neon_flags ""
+-    if { [check_effective_target_arm32] } {
+-	foreach flags {"" "-mfloat-abi=softfp" "-mfpu=neon-fp-armv8" "-mfpu=neon-fp-armv8 -mfloat-abi=softfp"} {
+-	    if { [check_no_compiler_messages_nocache arm_v8_neon_ok object {
+-		#if __ARM_ARCH < 8
+-		#error not armv8 or later
+-		#endif
+-		#include "arm_neon.h"
+-		void
+-		foo ()
+-		{
+-		  __asm__ volatile ("vrintn.f32 q0, q0");
+-		}
+-	    } "$flags -mcpu=unset -march=armv8-a"] } {
+-		set et_arm_v8_neon_flags $flags
+-		return 1
++    foreach flags {"" "-mfloat-abi=softfp" "-mfpu=neon-fp-armv8" "-mfpu=neon-fp-armv8 -mfloat-abi=softfp"} {
++	if { [check_no_compiler_messages_nocache arm_v8_neon_ok object {
++	    #if __ARM_ARCH < 8
++	    #error not armv8 or later
++	    #endif
++	    #include "arm_neon.h"
++	    void
++	    foo ()
++	    {
++		__asm__ volatile ("vrintn.f32 q0, q0");
+ 	    }
++	} "$flags -mcpu=unset -march=armv8-a"] } {
++	    set et_arm_v8_neon_flags $flags
++	    return 1
+ 	}
+     }
+ 
+@@ -5850,8 +5847,7 @@ proc check_effective_target_arm_neonv2_ok_nocache { } {
+     global et_arm_neonv2_flags
+     global et_arm_neon_flags
+     set et_arm_neonv2_flags ""
+-    if { [check_effective_target_arm32]
+-	 && [check_effective_target_arm_neon_ok] } {
++    if { [check_effective_target_arm_neon_ok] } {
+ 	foreach flags {"" "-mfloat-abi=softfp" "-mfpu=neon-vfpv4" "-mfpu=neon-vfpv4 -mfloat-abi=softfp"} {
+ 	    if { [check_no_compiler_messages_nocache arm_neonv2_ok object {
+ 		#include "arm_neon.h"
+@@ -8745,7 +8741,7 @@ proc check_effective_target_vect_pack_trunc { } {
+       expr { [istarget powerpc*-*-*]
+ 	     || [check_effective_target_x86]
+ 	     || [istarget aarch64*-*-*]
+-	     || ([istarget arm*-*-*] && [check_effective_target_arm_neon_ok]
++	     || ([check_effective_target_arm_neon_ok]
+ 		 && [check_effective_target_arm_little_endian])
+ 	     || ([istarget mips*-*-*]
+ 		 && [et-is-effective-target mips_msa])
+@@ -8771,7 +8767,7 @@ proc check_effective_target_vect_unpack { } {
+ 	     || [istarget aarch64*-*-*]
+ 	     || ([istarget mips*-*-*]
+ 		 && [et-is-effective-target mips_msa])
+-	     || ([istarget arm*-*-*] && [check_effective_target_arm_neon_ok]
++	     || ([check_effective_target_arm_neon_ok]
+ 		 && [check_effective_target_arm_little_endian])
+ 	     || ([istarget s390*-*-*]
+ 		 && [check_effective_target_s390_vx])
+@@ -9458,8 +9454,7 @@ proc check_effective_target_vect_condition { } {
+ 	     || [check_effective_target_x86]
+ 	     || ([istarget mips*-*-*]
+ 		 && [et-is-effective-target mips_msa])
+-	     || ([istarget arm*-*-*]
+-		 && [check_effective_target_arm_neon_ok])
++	     || [check_effective_target_arm_neon_ok]
+ 	     || ([istarget s390*-*-*]
+ 		 && [check_effective_target_s390_vx])
+ 	     || [istarget amdgcn-*-*]
+@@ -9477,8 +9472,7 @@ proc check_effective_target_vect_cond_mixed { } {
+       expr { [check_effective_target_x86]
+ 	     || [istarget aarch64*-*-*]
+ 	     || [istarget powerpc*-*-*]
+-	     || ([istarget arm*-*-*]
+-		 && [check_effective_target_arm_neon_ok])
++	     || [check_effective_target_arm_neon_ok]
+ 	     || ([istarget mips*-*-*]
+ 		 && [et-is-effective-target mips_msa])
+ 	     || ([istarget s390*-*-*]
+@@ -9659,8 +9653,7 @@ proc available_vector_sizes { } {
+ 	    lappend result [aarch64_sve_bits]
+ 	}
+ 	lappend result 128 64
+-    } elseif { [istarget arm*-*-*]
+-		&& [check_effective_target_arm_neon_ok] } {
++    } elseif { [check_effective_target_arm_neon_ok] } {
+ 	lappend result 128 64
+     } elseif { [check_effective_target_x86] } {
+ 	if { [check_avx_available] && ![check_prefer_avx128] } {
+-- 
+2.43.7
+
+

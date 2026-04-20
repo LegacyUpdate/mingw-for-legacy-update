@@ -1,0 +1,49 @@
+From b488a58895409bf949eb2f9fd6c090592b2e6c4a Mon Sep 17 00:00:00 2001
+From: Patrick Palka <ppalka@redhat.com>
+Date: Thu, 2 Apr 2026 16:51:09 -0400
+Subject: [PATCH] libstdc++/ranges: Uglify 'sizes' function parameter
+
+libstdc++-v3/ChangeLog:
+
+	* include/std/ranges (zip_view::size): Uglify 'sizes'
+	parameter.
+
+Reviewed-by: Jonathan Wakely <jwakely@redhat.com>
+(cherry picked from commit d130e9bf3dc4b1f670340f8ae4a02419481fe982)
+---
+ libstdc++-v3/include/std/ranges | 12 ++++++------
+ 1 file changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/libstdc++-v3/include/std/ranges b/libstdc++-v3/include/std/ranges
+index bc9e4c6ca623..5954aa1b54b5 100644
+--- a/libstdc++-v3/include/std/ranges
++++ b/libstdc++-v3/include/std/ranges
+@@ -4691,18 +4691,18 @@ namespace views::__adaptor
+     constexpr auto
+     size() requires (sized_range<_Vs> && ...)
+     {
+-      return std::apply([](auto... sizes) {
+-	using _CT = __detail::__make_unsigned_like_t<common_type_t<decltype(sizes)...>>;
+-	return ranges::min({_CT(sizes)...});
++      return std::apply([](auto... __sizes) {
++	using _CT = __detail::__make_unsigned_like_t<common_type_t<decltype(__sizes)...>>;
++	return ranges::min({_CT(__sizes)...});
+       }, __detail::__tuple_transform(ranges::size, _M_views));
+     }
+ 
+     constexpr auto
+     size() const requires (sized_range<const _Vs> && ...)
+     {
+-      return std::apply([](auto... sizes) {
+-	using _CT = __detail::__make_unsigned_like_t<common_type_t<decltype(sizes)...>>;
+-	return ranges::min({_CT(sizes)...});
++      return std::apply([](auto... __sizes) {
++	using _CT = __detail::__make_unsigned_like_t<common_type_t<decltype(__sizes)...>>;
++	return ranges::min({_CT(__sizes)...});
+       }, __detail::__tuple_transform(ranges::size, _M_views));
+     }
+   };
+-- 
+2.43.7
+
+

@@ -1,0 +1,226 @@
+From 9d6409608b64158fb0ead70042f124d5f3cdea81 Mon Sep 17 00:00:00 2001
+From: Patrick Palka <ppalka@redhat.com>
+Date: Mon, 2 Mar 2026 22:35:55 -0500
+Subject: [PATCH] c++: targ generic lambda iterated substitution [PR123665]
+
+In the first testcase below, the targ generic lambda
+
+  template<class T, class V = decltype([](auto) { })>
+  ...
+
+has two levels of parameters, the outer level {T} and its own level.
+We iteratively substitute into this targ lambda three times:
+
+  1. The first substitution is during coerce_template_parms with args={T*, }
+     and tf_partial set.  Since tf_partial is set, we defer the substitution.
+
+  2. The next substitution is during regeneration of f<void>()::<lambda>
+     with args={void}.  Here we merge with the deferred arguments to
+     obtain args={void*, } and substitute them into the lambda, returning
+     a regenerated generic lambda with template depth 1 (no more outer
+     template parameters).
+
+  3. The final (non-templated) substitution is during instantiation of
+     f<int>()::<lambda>'s call operator with args={int}.  But at this
+     point, the targ generic lambda has only one set of template
+     parameters, its own, and so this substitution causes us to substitute
+     away all its template parameters (and its deduced return type).
+     We end up ICEing from tsubst_template_decl due to its operator()
+     having now having an empty template parameter set.
+
+The problem ultimately is that the targ lambda leaks into a template
+context that has more template parameters than its lexical context, and
+we end up over-substituting into the lambda.  By the third substitution
+the lambda is effectively non-dependent and we really just want to lower
+it to a non-templated lambda without actually doing any substitution.
+Unfortunately, I wasn't able to get such lowering to work adequately
+(e.g. precise dependence checks don't work, uses_template_parms (TREE_TYPE (t))
+wrongly returns false, false, true respectively during each of the three
+substitutions.)
+
+This patch instead takes a different approach, and makes lambda
+deferred-ness sticky: once we decide to defer substitution into a
+lambda, we keep deferring any subsequent substitution until the
+final substitution, which must be non-templated.  So for this
+particular testcase the substitutions are now:
+
+  1. Return a lambda with deferred args={T*, }.
+
+  2. Merge args={void} with deferred args={T*, }, obtaining args={void*, }
+     and returning a lambda with deferred args={void*, }.
+
+  3. Merge args={int} with deferred args={void*, }, obtaining args={void*, }.
+     Since this substitution is final (processing_template_decl is cleared),
+     we substitute args={void*, } into the lambda once and for all and
+     return a regenerated non-templated generic lambda with template depth 1.
+
+In order for a subsequent add_extra_args to properly merge arguments
+that have been iteratively deferred, it and build_extra_args needs
+to propagate TREE_STATIC appropriately (which effectively signals
+whether the arguments are a full set or not).
+
+While PR123655 is a regression, this patch also fixes the similar
+PR123408 which is not a regression.  Thus, I suspect that the testcase
+from the first PR only worked by accident.
+
+	PR c++/123665
+	PR c++/123408
+
+gcc/cp/ChangeLog:
+
+	* pt.cc (build_extra_args): If TREE_STATIC was set on the
+	arguments, keep it set.
+	(add_extra_args): Set TREE_STATIC on the resulting arguments
+	when substituting templated arguments into a full set of
+	deferred arguments.
+	(tsubst_lambda_expr): Always defer templated substitution if
+	LAMBDA_EXPR_EXTRA_ARGS was set.
+
+gcc/testsuite/ChangeLog:
+
+	* g++.dg/cpp2a/lambda-targ22.C: New test.
+	* g++.dg/cpp2a/lambda-targ22a.C: New test.
+	* g++.dg/cpp2a/lambda-targ23.C: New test.
+
+Reviewed-by: Jason Merrill <jason@redhat.com>
+(cherry picked from commit 77411b4b0d8751ecd680a3f7fed1d0de873c41cd)
+---
+ gcc/cp/pt.cc                                | 27 +++++++++++++++------
+ gcc/testsuite/g++.dg/cpp2a/lambda-targ22.C  | 15 ++++++++++++
+ gcc/testsuite/g++.dg/cpp2a/lambda-targ22a.C | 20 +++++++++++++++
+ gcc/testsuite/g++.dg/cpp2a/lambda-targ23.C  | 14 +++++++++++
+ 4 files changed, 68 insertions(+), 8 deletions(-)
+ create mode 100644 gcc/testsuite/g++.dg/cpp2a/lambda-targ22.C
+ create mode 100644 gcc/testsuite/g++.dg/cpp2a/lambda-targ22a.C
+ create mode 100644 gcc/testsuite/g++.dg/cpp2a/lambda-targ23.C
+
+diff --git a/gcc/cp/pt.cc b/gcc/cp/pt.cc
+index 3fa8d3b27fea..82589e7389e3 100644
+--- a/gcc/cp/pt.cc
++++ b/gcc/cp/pt.cc
+@@ -13738,7 +13738,7 @@ build_extra_args (tree pattern, tree args, tsubst_flags_t complain)
+   /* Make a copy of the extra arguments so that they won't get changed
+      out from under us.  */
+   tree extra = preserve_args (copy_template_args (args), /*cow_p=*/false);
+-  if (complain & tf_partial)
++  if ((complain & tf_partial) || TREE_STATIC (args))
+     /* Remember whether this is a partial substitution.  */
+     TREE_STATIC (extra) = true;
+   if (local_specializations)
+@@ -13777,11 +13777,17 @@ add_extra_args (tree extra, tree args, tsubst_flags_t complain, tree in_decl)
+       extra = TREE_VALUE (extra);
+     }
+   if (TREE_STATIC (extra))
+-    /* This is a partial substitution into e.g. a requires-expr or lambda-expr
+-       inside a default template argument; we expect 'extra' to be a full set
+-       of template arguments for the template context, so it suffices to just
+-       substitute into them.  */
+-    args = tsubst_template_args (extra, args, complain, in_decl);
++    {
++      /* This is a partial substitution into e.g. a requires-expr or lambda-expr
++	 inside a default template argument; we expect 'extra' to be a full set
++	 of template arguments for the template context, so it suffices to just
++	 substitute into them.  */
++      args = tsubst_template_args (extra, args, complain, in_decl);
++      if (processing_template_decl)
++	/* A templated substitution into a partial substitution is still a
++	   partial substitution.  */
++	TREE_STATIC (args) = true;
++    }
+   else
+     args = add_to_template_args (extra, args);
+   return args;
+@@ -20214,7 +20220,8 @@ tsubst_lambda_expr (tree t, tree args, tsubst_flags_t complain, tree in_decl)
+ 
+   args = add_extra_args (LAMBDA_EXPR_EXTRA_ARGS (t), args, complain, in_decl);
+   if (processing_template_decl
+-      && (!in_template_context || (complain & tf_partial)))
++      && (!in_template_context || (complain & tf_partial)
++	  || LAMBDA_EXPR_EXTRA_ARGS (t)))
+     {
+       /* Defer templated substitution into a lambda-expr if we lost the
+ 	 necessary template context.  This may happen for a lambda-expr
+@@ -20222,7 +20229,11 @@ tsubst_lambda_expr (tree t, tree args, tsubst_flags_t complain, tree in_decl)
+ 
+ 	 Defer dependent substitution as well so that we don't prematurely
+ 	 lower the level of a deduced return type or any other auto or
+-	 template parameter belonging to the lambda.  */
++	 template parameter belonging to the lambda.
++
++	 Finally, if a substitution into this lambda was previously
++	 deferred, keep deferring until the final (non-templated)
++	 substitution.  */
+       t = copy_node (t);
+       LAMBDA_EXPR_EXTRA_ARGS (t) = NULL_TREE;
+       LAMBDA_EXPR_EXTRA_ARGS (t) = build_extra_args (t, args, complain);
+diff --git a/gcc/testsuite/g++.dg/cpp2a/lambda-targ22.C b/gcc/testsuite/g++.dg/cpp2a/lambda-targ22.C
+new file mode 100644
+index 000000000000..78d3cd42cd1b
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/cpp2a/lambda-targ22.C
+@@ -0,0 +1,15 @@
++// PR c++/123665
++// { dg-do compile { target c++20 } }
++
++template<class T, class V = decltype([](auto){ return 42; })>
++struct A { using type = V; };
++
++template<class T>
++auto f() {
++  return [](auto) {
++    return typename A<T*>::type{}(true);
++  }(0);
++}
++
++using type = decltype(f<void>());
++using type = int;
+diff --git a/gcc/testsuite/g++.dg/cpp2a/lambda-targ22a.C b/gcc/testsuite/g++.dg/cpp2a/lambda-targ22a.C
+new file mode 100644
+index 000000000000..c14da815ca86
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/cpp2a/lambda-targ22a.C
+@@ -0,0 +1,20 @@
++// PR c++/123665
++// { dg-do compile { target c++20 } }
++// A more elaborate version of lambda-targ22.C.
++
++template<class T, class U, class V>
++struct W { };
++
++template<class T, class U,
++	 class V = decltype([](auto x){ return W<T, U, decltype(x)>{}; })>
++struct A { using type = V; };
++
++template<class T>
++auto f() {
++  return []<typename U>(U) {
++    return typename A<T*, U&>::type{}(true);
++  }(0);
++}
++
++using type = decltype(f<void>());
++using type = W<void*, int&, bool>;
+diff --git a/gcc/testsuite/g++.dg/cpp2a/lambda-targ23.C b/gcc/testsuite/g++.dg/cpp2a/lambda-targ23.C
+new file mode 100644
+index 000000000000..8b8ec3f34599
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/cpp2a/lambda-targ23.C
+@@ -0,0 +1,14 @@
++// PR c++/123408
++// { dg-do compile { target c++20 } }
++
++template <typename> constexpr int zero = 0;
++template <auto> using int_alias = int;
++
++template <typename Arg>
++using inner = int_alias<[](auto) { return 0; }((Arg)0)>;
++
++template <typename Arg>
++constexpr int outer = [](auto) { return zero<inner<Arg>>; }(0);
++
++using type = decltype(outer<int>);
++using type = const int;
+-- 
+2.43.7
+
+

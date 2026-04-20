@@ -1,0 +1,69 @@
+From f3b6bafc12b3022e0251508502912008968a0449 Mon Sep 17 00:00:00 2001
+From: Andrew Pinski <andrew.pinski@oss.qualcomm.com>
+Date: Wed, 7 Jan 2026 20:28:12 -0800
+Subject: [PATCH] aarch64: Fix PCH for sve builtins [PR123457]
+
+The problem here is function_table was not in the GGC memory space and not
+streamed out. So even though the builtins were reloaded, function_table was
+a nullptr as it was not reloaded.
+
+Also noticed initial_indexes should be marked with GTY so it is reloaded correctly
+from PCH.
+
+Built and tested for aarch64-linux-gnu.
+
+	PR target/123457
+gcc/ChangeLog:
+
+	* config/aarch64/aarch64-sve-builtins.cc (struct registered_function_hasher):
+	Change base class to ggc_ptr_hash.
+	(initial_indexes): Mark with GTY.
+	(function_table): Likewise.
+	(handle_arm_sve_h): Allocate function_table from ggc instead of heap.
+
+Signed-off-by: Andrew Pinski <andrew.pinski@oss.qualcomm.com>
+---
+ gcc/config/aarch64/aarch64-sve-builtins.cc | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/gcc/config/aarch64/aarch64-sve-builtins.cc b/gcc/config/aarch64/aarch64-sve-builtins.cc
+index ad0d38934e21..004335deda13 100644
+--- a/gcc/config/aarch64/aarch64-sve-builtins.cc
++++ b/gcc/config/aarch64/aarch64-sve-builtins.cc
+@@ -92,7 +92,7 @@ public:
+ };
+ 
+ /* Hash traits for registered_function.  */
+-struct registered_function_hasher : nofree_ptr_hash <registered_function>
++struct registered_function_hasher : ggc_ptr_hash <registered_function>
+ {
+   typedef function_instance compare_type;
+ 
+@@ -1022,12 +1022,12 @@ tree acle_svprfop;
+ static GTY(()) vec<registered_function *, va_gc> *registered_functions;
+ 
+ /* Stores the starting function index for each pragma handler.  */
+-static unsigned int initial_indexes[NUM_PRAGMA_HANDLERS];
++static  GTY(()) unsigned int initial_indexes[NUM_PRAGMA_HANDLERS];
+ 
+ /* All registered function decls, hashed on the function_instance
+    that they implement.  This is used for looking up implementations of
+    overloaded functions.  */
+-static hash_table<registered_function_hasher> *function_table;
++static GTY(()) hash_table<registered_function_hasher> *function_table;
+ 
+ /* Index 0 maps all overloaded function names that we've registered so far to
+    their associated function_instances.  Index 1 does the same for functions
+@@ -4854,7 +4854,7 @@ handle_arm_sve_h (bool function_nulls_p)
+   register_svprfop ();
+ 
+   /* Define the functions.  */
+-  function_table = new hash_table<registered_function_hasher> (1023);
++  function_table = hash_table<registered_function_hasher>::create_ggc (1023);
+   function_builder builder (arm_sve_handle, function_nulls_p);
+   for (unsigned int i = 0; i < ARRAY_SIZE (function_groups); ++i)
+     builder.register_function_group (function_groups[i]);
+-- 
+2.43.7
+
+

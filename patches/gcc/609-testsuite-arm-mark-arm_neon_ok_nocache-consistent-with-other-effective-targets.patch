@@ -1,0 +1,49 @@
+From 889cd551ea8b574d4488b249474977e6e511d516 Mon Sep 17 00:00:00 2001
+From: Christophe Lyon <christophe.lyon@arm.com>
+Date: Tue, 3 Feb 2026 13:07:10 +0000
+Subject: [PATCH] testsuite: arm: Make arm_neon_ok_nocache consistent with
+ other effective-targets
+
+A recent patch updated arm_neon_ok_nocache with an improved list of
+flags to try, but was not consistent with
+arm_v8_3a_complex_neon_ok,_nocache arm_v8_2a_fp16_neon_ok_nocache,
+arm_v8_3a_fp16_complex_neon_ok_nocache.
+
+This patch inserts "-mcpu=unset -march=armv7-a+simd -mfpu=auto" before
+we try to force -mfloat-abi=softfp and -mfloat-abi=hard.
+
+Tested on aarch64-linux-gnu, arm-linux-gnueabihf and several flavors
+of arm-none-eabi with non-default configurations.
+
+2026-02-03  Christophe Lyon  <christophe.lyon@arm.com>
+
+	gcc/testsuite/
+	* lib/target-supports.exp
+	(check_effective_target_arm_neon_ok_nocache): Add "-mcpu=unset
+	-march=armv7-a+simd -mfpu=auto" to the list.
+
+(cherry picked from commit f7f2b73b9c1e0101b7278893fc28a0769ca760df)
+---
+ gcc/testsuite/lib/target-supports.exp | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/gcc/testsuite/lib/target-supports.exp b/gcc/testsuite/lib/target-supports.exp
+index 468485cf7bdc..a72a78180d5b 100644
+--- a/gcc/testsuite/lib/target-supports.exp
++++ b/gcc/testsuite/lib/target-supports.exp
+@@ -5434,8 +5434,11 @@ proc check_effective_target_arm_neon_ok_nocache { } {
+     set et_arm_neon_flags ""
+     foreach flags {
+ 	""
++	"-mcpu=unset -march=armv7-a+simd -mfpu=auto"
++
+ 	"-mfloat-abi=softfp"
+ 	"-mfloat-abi=softfp -mcpu=unset -march=armv7-a+simd -mfpu=auto"
++
+ 	"-mfloat-abi=hard"
+ 	"-mfloat-abi=hard -mcpu=unset -march=armv7-a+simd -mfpu=auto"
+     } {
+-- 
+2.43.7
+
+

@@ -1,0 +1,328 @@
+From 23621d3ef92366aa01bed7f0f588327f8df1fe93 Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Thu, 5 Feb 2026 13:39:42 +0100
+Subject: [PATCH] ranger: Fix up WIDEN_MULT_EXPR handling in the ranger
+ [PR123978]
+
+In r13-6617 WIDEN_MULT_EXPR support has been added to the ranger, though
+I guess until we started to use ranger during expansion in r16-1398
+it wasn't really used much because vrp2 happens before widen_mul.
+WIDEN_MULT_EXPR is documented to be
+/* Widening multiplication.
+   The two arguments are of type t1 and t2, both integral types that
+   have the same precision, but possibly different signedness.
+   The result is of integral type t3, such that t3 is at least twice
+   the size of t1/t2. WIDEN_MULT_EXPR is equivalent to first widening
+   (promoting) the arguments from type t1 to type t3, and from t2 to
+   type t3 and then multiplying them.  */
+and IMHO ranger should follow that description, so not relying on
+the precisions to be exactly 2x but >= 2x.  More importantly, I don't
+see convert_mult_to_widen actually ever testing TYPE_UNSIGNED on the
+result, why would it when the actual RTL optabs don't care about that,
+in RTL the signs are relevant just whether it is smul_widen, umul_widen
+or usmul_widen.  Though on GIMPLE whether the result is signed or unsigned
+is important, for value rangers it is essential (in addition to whether the
+result type is wrapping or undefined overflow).  Unfortunately the ranger
+doesn't tell wi_fold about the signs of the operands and wide_int can be
+both signed and unsigned, all it knows is the precision of the operands,
+so r13-6617 handled it by introducing two variants (alternate codes for
+WIDEN_MULT_EXPR).  One was assuming first operand is signed, the other
+the first operand is unsigned and both were assuming that the second operand
+has the same sign as the result and that result has exactly 2x precision
+of the arguments.  That is clearly wrong, on the following testcase
+we have u w* u -> s stmt and ranger incorrectly concluded that the result
+has [0, 0] range because the operands were [0, 0xffffffff] and
+[0, -1] (both had actually [0, 0xffffffff] range, but as it used sign
+extension rather than zero extension for the latter given the signed result,
+it got it wrong).  And when we see [0, 0] range for memset length argument,
+we just optimize it away completely at expansion time, which is wrong for
+the testcase where it can be arbitrary long long int [0, 0xffffffff]
+* long long int [0, 0xffffffff], so because of signed overflow I believe
+the right range is long long int [0, 0x7fffffffffffffff], as going above
+that would be UB and both operands are non-negative.
+
+The following patch fixes it by not having 2 magic ops for WIDEN_MULT_EXPR,
+but 3, one roughly corresponding to smul_widen, one to umul_widen and
+one to usmul_widen (though confusingly with sumul order of operands).
+The first one handles s w* s -> {u,s}, the second one u w* u -> {u,s}
+and the last one s w* u -> {u,s} with u w* s -> {u,s} handled by swapping
+the operands as before.  Also, in all cases it uses TYPE_PRECISION (type)
+as the precision to extend to, because that is the precision in which
+the actual multiplication is performed, the operation as described is
+(type) op1 * (type) op2.
+
+Note, r13-6617 also added OP_WIDEN_PLUS_{SIGNED,UNSIGNED} and handlers
+for that, but it doesn't seem to be wired up in any way, so I think it
+is dead code:
+|git grep OP_WIDEN_PLUS_ .
+|ChangeLog-2023: (OP_WIDEN_PLUS_SIGNED): New.
+|ChangeLog-2023: (OP_WIDEN_PLUS_UNSIGNED): New.
+|range-op.cc:  set (OP_WIDEN_PLUS_SIGNED, op_widen_plus_signed);
+|range-op.cc:  set (OP_WIDEN_PLUS_UNSIGNED, op_widen_plus_unsigned);
+|range-op.h:#define OP_WIDEN_PLUS_SIGNED ((unsigned) MAX_TREE_CODES + 2)
+|range-op.h:#define OP_WIDEN_PLUS_UNSIGNED       ((unsigned) MAX_TREE_CODES + 3)
+My understanding is that it is misnamed attempt to implement WIDEN_SUM_EXPR
+handling but one that wasn't hooked up in maybe_non_standard.
+I wonder if we shouldn't keep it as is for GCC 16, rename to OP_WIDEN_SUM_*
+in stage1, hook it up in maybe_non_standard (in this case 2 ops are
+sufficient, the description is
+/* Widening summation.
+   The first argument is of type t1.
+   The second argument is of type t2, such that t2 is at least twice
+   the size of t1. The type of the entire expression is also t2.
+   WIDEN_SUM_EXPR is equivalent to first widening (promoting)
+   the first argument from type t1 to type t2, and then summing it
+   with the second argument.  */
+and so we know second argument has the same type as the result, so all
+we need to encode is the sign of the first argument.
+And the ops should be both renamed and fixed, instead of
+   wi::overflow_type ov_lb, ov_ub;
+   signop s = TYPE_SIGN (type);
+
+   wide_int lh_wlb
+     = wide_int::from (lh_lb, wi::get_precision (lh_lb) * 2, SIGNED);
+   wide_int lh_wub
+     = wide_int::from (lh_ub, wi::get_precision (lh_ub) * 2, SIGNED);
+   wide_int rh_wlb = wide_int::from (rh_lb, wi::get_precision (rh_lb) * 2, s);
+   wide_int rh_wub = wide_int::from (rh_ub, wi::get_precision (rh_ub) * 2, s);
+
+   wide_int new_lb = wi::add (lh_wlb, rh_wlb, s, &ov_lb);
+   wide_int new_ub = wi::add (lh_wub, rh_wub, s, &ov_ub);
+
+   r = int_range<2> (type, new_lb, new_ub);
+I'd go for
+   wide_int lh_wlb = wide_int::from (lh_lb, TYPE_PRECISION (type), SIGNED);
+   wide_int lh_wub = wide_int::from (lh_ub, TYPE_PRECISION (type), SIGNED);
+   return op_plus.wi_fold (r, type, lh_wlb, lh_wub, rh_lb, rh_ub);
+(and similarly for the unsigned case with s/SIGNED/UNSIGNED/g).
+Reasons: the precision again needs to be widen to type's precision, there
+is no point to widen the second operand as it is already supposed to have
+the right precision and operator_plus actually ends with
+  value_range_with_overflow (r, type, new_lb, new_ub, ov_lb, ov_ub);
+to handle the overflows etc., r = int_range<2> (type, new_lb, new_ub);
+won't do it.
+
+2026-02-04  Jakub Jelinek  <jakub@redhat.com>
+
+	PR middle-end/123978
+	* range-op.h (OP_WIDEN_MULT_SIGNED_UNSIGNED): Define.
+	(OP_WIDEN_PLUS_SIGNED, OP_WIDEN_PLUS_UNSIGNED,
+	RANGE_OP_TABLE_SIZE): Renumber.
+	* gimple-range-op.cc (imple_range_op_handler::maybe_non_standard):
+	Use 3 different classes instead of 2 for WIDEN_MULT_EXPR, one
+	for both operands signed, one for both operands unsigned and
+	one for operands with different signedness.  In the last case
+	canonicalize to first operand signed second unsigned.
+	* range-op.cc (operator_widen_mult_signed::wi_fold): Use
+	TYPE_PRECISION (type) rather than wi::get_precision (whatever) * 2,
+	use SIGNED for all wide_int::from calls.
+	(operator_widen_mult_unsigned::wi_fold): Similarly but use UNSIGNED
+	for all wide_int::from calls.
+	(class operator_widen_mult_signed_unsigned): New type.
+	(operator_widen_mult_signed_unsigned::wi_fold): Define.
+
+	* gcc.c-torture/execute/pr123978.c: New test.
+
+(cherry picked from commit a985742fc083a2be20519d902bf41dd5ee2585ca)
+---
+ gcc/gimple-range-op.cc                        | 32 +++++-------
+ gcc/range-op.cc                               | 49 ++++++++++++++-----
+ gcc/range-op.h                                | 11 +++--
+ .../gcc.c-torture/execute/pr123978.c          | 25 ++++++++++
+ 4 files changed, 81 insertions(+), 36 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.c-torture/execute/pr123978.c
+
+diff --git a/gcc/gimple-range-op.cc b/gcc/gimple-range-op.cc
+index d3d9bff1efc5..76c5951e9452 100644
+--- a/gcc/gimple-range-op.cc
++++ b/gcc/gimple-range-op.cc
+@@ -1347,37 +1347,31 @@ gimple_range_op_handler::maybe_non_standard ()
+   gcc_checking_assert (signed_op);
+   range_op_handler unsigned_op (OP_WIDEN_MULT_UNSIGNED);
+   gcc_checking_assert (unsigned_op);
++  range_op_handler signed_unsigned_op (OP_WIDEN_MULT_SIGNED_UNSIGNED);
++  gcc_checking_assert (signed_unsigned_op);
++  bool signed1, signed2;
+ 
+   if (gimple_code (m_stmt) == GIMPLE_ASSIGN)
+     switch (gimple_assign_rhs_code (m_stmt))
+       {
+ 	case WIDEN_MULT_EXPR:
+-	{
+ 	  m_op1 = gimple_assign_rhs1 (m_stmt);
+ 	  m_op2 = gimple_assign_rhs2 (m_stmt);
+-	  tree ret = gimple_assign_lhs (m_stmt);
+-	  bool signed1 = TYPE_SIGN (TREE_TYPE (m_op1)) == SIGNED;
+-	  bool signed2 = TYPE_SIGN (TREE_TYPE (m_op2)) == SIGNED;
+-	  bool signed_ret = TYPE_SIGN (TREE_TYPE (ret)) == SIGNED;
+-
+-	  /* Normally these operands should all have the same sign, but
+-	     some passes and violate this by taking mismatched sign args.  At
+-	     the moment the only one that's possible is mismatch inputs and
+-	     unsigned output.  Once ranger supports signs for the operands we
+-	     can properly fix it,  for now only accept the case we can do
+-	     correctly.  */
+-	  if ((signed1 ^ signed2) && signed_ret)
+-	    return;
++	  signed1 = TYPE_SIGN (TREE_TYPE (m_op1)) == SIGNED;
++	  signed2 = TYPE_SIGN (TREE_TYPE (m_op2)) == SIGNED;
+ 
+-	  if (signed2 && !signed1)
+-	    std::swap (m_op1, m_op2);
+-
+-	  if (signed1 || signed2)
++	  if (signed1 != signed2)
++	    {
++	      if (signed2 && !signed1)
++		std::swap (m_op1, m_op2);
++	      m_operator = signed_unsigned_op.range_op ();
++	    }
++	  else if (signed1)
+ 	    m_operator = signed_op.range_op ();
+ 	  else
+ 	    m_operator = unsigned_op.range_op ();
+ 	  break;
+-	}
++
+ 	default:
+ 	  break;
+       }
+diff --git a/gcc/range-op.cc b/gcc/range-op.cc
+index f72b4ae92cfd..5f383a0ba33a 100644
+--- a/gcc/range-op.cc
++++ b/gcc/range-op.cc
+@@ -2367,12 +2367,10 @@ operator_widen_mult_signed::wi_fold (irange &r, tree type,
+ 				     const wide_int &rh_lb,
+ 				     const wide_int &rh_ub) const
+ {
+-  signop s = TYPE_SIGN (type);
+-
+-  wide_int lh_wlb = wide_int::from (lh_lb, wi::get_precision (lh_lb) * 2, SIGNED);
+-  wide_int lh_wub = wide_int::from (lh_ub, wi::get_precision (lh_ub) * 2, SIGNED);
+-  wide_int rh_wlb = wide_int::from (rh_lb, wi::get_precision (rh_lb) * 2, s);
+-  wide_int rh_wub = wide_int::from (rh_ub, wi::get_precision (rh_ub) * 2, s);
++  wide_int lh_wlb = wide_int::from (lh_lb, TYPE_PRECISION (type), SIGNED);
++  wide_int lh_wub = wide_int::from (lh_ub, TYPE_PRECISION (type), SIGNED);
++  wide_int rh_wlb = wide_int::from (rh_lb, TYPE_PRECISION (type), SIGNED);
++  wide_int rh_wub = wide_int::from (rh_ub, TYPE_PRECISION (type), SIGNED);
+ 
+   /* We don't expect a widening multiplication to be able to overflow but range
+      calculations for multiplications are complicated.  After widening the
+@@ -2380,7 +2378,6 @@ operator_widen_mult_signed::wi_fold (irange &r, tree type,
+   return op_mult.wi_fold (r, type, lh_wlb, lh_wub, rh_wlb, rh_wub);
+ }
+ 
+-
+ class operator_widen_mult_unsigned : public range_operator
+ {
+ public:
+@@ -2399,12 +2396,39 @@ operator_widen_mult_unsigned::wi_fold (irange &r, tree type,
+ 				       const wide_int &rh_lb,
+ 				       const wide_int &rh_ub) const
+ {
+-  signop s = TYPE_SIGN (type);
++  wide_int lh_wlb = wide_int::from (lh_lb, TYPE_PRECISION (type), UNSIGNED);
++  wide_int lh_wub = wide_int::from (lh_ub, TYPE_PRECISION (type), UNSIGNED);
++  wide_int rh_wlb = wide_int::from (rh_lb, TYPE_PRECISION (type), UNSIGNED);
++  wide_int rh_wub = wide_int::from (rh_ub, TYPE_PRECISION (type), UNSIGNED);
+ 
+-  wide_int lh_wlb = wide_int::from (lh_lb, wi::get_precision (lh_lb) * 2, UNSIGNED);
+-  wide_int lh_wub = wide_int::from (lh_ub, wi::get_precision (lh_ub) * 2, UNSIGNED);
+-  wide_int rh_wlb = wide_int::from (rh_lb, wi::get_precision (rh_lb) * 2, s);
+-  wide_int rh_wub = wide_int::from (rh_ub, wi::get_precision (rh_ub) * 2, s);
++  /* We don't expect a widening multiplication to be able to overflow but range
++     calculations for multiplications are complicated.  After widening the
++     operands lets call the base class.  */
++  return op_mult.wi_fold (r, type, lh_wlb, lh_wub, rh_wlb, rh_wub);
++}
++
++class operator_widen_mult_signed_unsigned : public range_operator
++{
++public:
++  virtual void wi_fold (irange &r, tree type,
++			const wide_int &lh_lb,
++			const wide_int &lh_ub,
++			const wide_int &rh_lb,
++			const wide_int &rh_ub)
++    const;
++} op_widen_mult_signed_unsigned;
++
++void
++operator_widen_mult_signed_unsigned::wi_fold (irange &r, tree type,
++					      const wide_int &lh_lb,
++					      const wide_int &lh_ub,
++					      const wide_int &rh_lb,
++					      const wide_int &rh_ub) const
++{
++  wide_int lh_wlb = wide_int::from (lh_lb, TYPE_PRECISION (type), SIGNED);
++  wide_int lh_wub = wide_int::from (lh_ub, TYPE_PRECISION (type), SIGNED);
++  wide_int rh_wlb = wide_int::from (rh_lb, TYPE_PRECISION (type), UNSIGNED);
++  wide_int rh_wub = wide_int::from (rh_ub, TYPE_PRECISION (type), UNSIGNED);
+ 
+   /* We don't expect a widening multiplication to be able to overflow but range
+      calculations for multiplications are complicated.  After widening the
+@@ -4545,6 +4569,7 @@ range_op_table::initialize_integral_ops ()
+   set (ABSU_EXPR, op_absu);
+   set (OP_WIDEN_MULT_SIGNED, op_widen_mult_signed);
+   set (OP_WIDEN_MULT_UNSIGNED, op_widen_mult_unsigned);
++  set (OP_WIDEN_MULT_SIGNED_UNSIGNED, op_widen_mult_signed_unsigned);
+   set (OP_WIDEN_PLUS_SIGNED, op_widen_plus_signed);
+   set (OP_WIDEN_PLUS_UNSIGNED, op_widen_plus_unsigned);
+ 
+diff --git a/gcc/range-op.h b/gcc/range-op.h
+index 5dcb3fbae61c..e4e4b9436a33 100644
+--- a/gcc/range-op.h
++++ b/gcc/range-op.h
+@@ -380,11 +380,12 @@ extern void wi_set_zero_nonzero_bits (tree type,
+ // Add them to the end of the tree-code vector, and provide a name for
+ // each allowing for easy access when required.
+ 
+-#define OP_WIDEN_MULT_SIGNED	((unsigned) MAX_TREE_CODES)
+-#define OP_WIDEN_MULT_UNSIGNED	((unsigned) MAX_TREE_CODES + 1)
+-#define OP_WIDEN_PLUS_SIGNED	((unsigned) MAX_TREE_CODES + 2)
+-#define OP_WIDEN_PLUS_UNSIGNED	((unsigned) MAX_TREE_CODES + 3)
+-#define RANGE_OP_TABLE_SIZE	((unsigned) MAX_TREE_CODES + 4)
++#define OP_WIDEN_MULT_SIGNED		((unsigned) MAX_TREE_CODES)
++#define OP_WIDEN_MULT_UNSIGNED		((unsigned) MAX_TREE_CODES + 1)
++#define OP_WIDEN_MULT_SIGNED_UNSIGNED	((unsigned) MAX_TREE_CODES + 2)
++#define OP_WIDEN_PLUS_SIGNED		((unsigned) MAX_TREE_CODES + 3)
++#define OP_WIDEN_PLUS_UNSIGNED		((unsigned) MAX_TREE_CODES + 4)
++#define RANGE_OP_TABLE_SIZE		((unsigned) MAX_TREE_CODES + 5)
+ 
+ // This implements the range operator tables as local objects.
+ 
+diff --git a/gcc/testsuite/gcc.c-torture/execute/pr123978.c b/gcc/testsuite/gcc.c-torture/execute/pr123978.c
+new file mode 100644
+index 000000000000..fd9535049ef5
+--- /dev/null
++++ b/gcc/testsuite/gcc.c-torture/execute/pr123978.c
+@@ -0,0 +1,25 @@
++/* PR middle-end/123978 */
++
++struct A { unsigned b, c, *d; };
++
++[[gnu::noipa]] int
++foo (struct A *a)
++{
++  __builtin_memset (a->d, 0, ((long long) sizeof (unsigned)) * a->b * a->c);
++  return 0;
++}
++
++int
++main ()
++{
++  struct A a;
++  unsigned b[256];
++  __builtin_memset (b, 0x55, sizeof (b));
++  a.b = 15;
++  a.c = 15;
++  a.d = b;
++  foo (&a);
++  for (int i = 0; i < 225; ++i)
++    if (b[i] != 0)
++      __builtin_abort ();
++}
+-- 
+2.43.7
+
+

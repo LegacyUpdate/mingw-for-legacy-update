@@ -1,0 +1,39 @@
+From 4d097fca5c9566740bd967d31b0cb748352c73cc Mon Sep 17 00:00:00 2001
+From: =?utf8?q?Torbj=C3=B6rn=20SVENSSON?= <torbjorn.svensson@foss.st.com>
+Date: Mon, 23 Feb 2026 09:30:34 +0100
+Subject: [PATCH] testsuite: arm: drop additional option -march=armv7-a
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf8
+Content-Transfer-Encoding: 8bit
+
+Since r16-7155-g74907f407db641, the -march option is part of the
+arm_neon effective target, thus, the extra -march is pointless.
+Using -march=armv7-a also prevents testing using softfp or hard float
+ABI.
+
+gcc/testsuite/ChangeLog:
+
+	* gcc.target/arm/addr-modes-int.c: Drop additional option
+	-march=armv7-a.
+
+Signed-off-by: TorbjÃ¶rn SVENSSON <torbjorn.svensson@foss.st.com>
+(cherry picked from commit b5cf867002893644685c1eeed8f2c888caebd1dd)
+---
+ gcc/testsuite/gcc.target/arm/addr-modes-int.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/gcc/testsuite/gcc.target/arm/addr-modes-int.c b/gcc/testsuite/gcc.target/arm/addr-modes-int.c
+index faedca052417..fe8d6123a13e 100644
+--- a/gcc/testsuite/gcc.target/arm/addr-modes-int.c
++++ b/gcc/testsuite/gcc.target/arm/addr-modes-int.c
+@@ -1,5 +1,5 @@
+ /* { dg-do compile } */
+-/* { dg-options "-O2 -march=armv7-a" } */
++/* { dg-options "-O2" } */
+ /* { dg-require-effective-target arm_neon_ok } */
+ /* { dg-add-options arm_neon } */
+ 
+-- 
+2.43.7
+
+

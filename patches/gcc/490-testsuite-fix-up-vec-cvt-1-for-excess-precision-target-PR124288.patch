@@ -1,0 +1,66 @@
+From e8af0cc876147408fcfed982047025b4271d48f1 Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Mon, 2 Mar 2026 15:44:40 +0100
+Subject: [PATCH] testsuite: Fix up vec-cvt-1.c for excess precision target
+ [PR124288]
+
+The intent of the code is to find the largest (or smallest) representable
+float (or double) smaller (or greater than) or equal to the given integral
+maximum (or minimum).
+The code uses volatile vars to avoid excess precision, but was relying on
+(volatile_var1 = something1 - something2) == volatile_var2
+to actually store the subtraction into volatile var and read it from there,
+making it an optimization barrier.  That is not the case, we compare directly
+the rhs of the assignment expression with volatile_var2, so on excess precision
+targets it can result in unwanted optimizations.
+
+Fixed by using a comma expression to make sure comparison doesn't know the
+value to compare.
+
+2026-03-02  Jakub Jelinek  <jakub@redhat.com>
+
+	PR tree-optimization/124288
+	* gcc.dg/torture/vec-cvt-1.c (FLTTEST): Use comma expression
+	to store into {flt,dbl}m{in,ax} and read from it again for
+	comparison.
+
+(cherry picked from commit fd0f08443955410179d1b06c80bc5a3331d2916d)
+---
+ gcc/testsuite/gcc.dg/torture/vec-cvt-1.c | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/gcc/testsuite/gcc.dg/torture/vec-cvt-1.c b/gcc/testsuite/gcc.dg/torture/vec-cvt-1.c
+index 78a900956052..0f98c14b6831 100644
+--- a/gcc/testsuite/gcc.dg/torture/vec-cvt-1.c
++++ b/gcc/testsuite/gcc.dg/torture/vec-cvt-1.c
+@@ -55,22 +55,22 @@ flttointtest##intt (void)						\
+   else									\
+     {									\
+       vf2 = fltmin = min - 1.0f;					\
+-      for (vf = 1.0f; (fltmin = vf2 + vf) == vf2; vf = vf * 2.0f)	\
++      for (vf = 1.0f; fltmin = vf2 + vf, fltmin == vf2; vf = vf * 2.0f)	\
+ 	;								\
+     }									\
+   vf2 = fltmax = max + 1.0f;						\
+-  for (vf = 1.0f; (fltmax = vf2 - vf) == vf2; vf = vf * 2.0f)		\
++  for (vf = 1.0f; fltmax = vf2 - vf, fltmax == vf2; vf = vf * 2.0f)	\
+     ;									\
+   if (min == 0)								\
+     dblmin = 0.0;							\
+   else									\
+     {									\
+       vd2 = dblmin = min - 1.0;						\
+-      for (vd = 1.0; (dblmin = vd2 + vd) == vd2; vd = vd * 2.0)		\
++      for (vd = 1.0; dblmin = vd2 + vd, dblmin == vd2; vd = vd * 2.0)	\
+ 	;								\
+     }									\
+   vd2 = dblmax = max + 1.0;						\
+-  for (vd = 1.0; (dblmax = vd2 - vd) == vd2; vd = vd * 2.0)		\
++  for (vd = 1.0; dblmax = vd2 - vd, dblmax == vd2; vd = vd * 2.0)	\
+     ;									\
+   for (i = 0; i < N; i++)						\
+     {									\
+-- 
+2.43.7
+
+

@@ -1,0 +1,77 @@
+From cd86ebc8d27fb53ae6f8187aba8a4b19f6e3f20a Mon Sep 17 00:00:00 2001
+From: Jason Merrill <jason@redhat.com>
+Date: Tue, 14 Apr 2026 13:49:52 -0400
+Subject: [PATCH] c++: mangling of extern "C" in anon ns [PR117133]
+
+r15-3910 updated decl_linkage to return 'internal' for extern "C"
+declarations in an anonymous namespace, as specified by C++11. This
+unintentionally changed the result of unmangled_name_p for such variables,
+though functions were unaffected.
+
+The standard says that only variables with external linkage have language
+linkage, but it doesn't say anything about name mangling for declarations
+with internal linkage, so I think we might as well retain the old mangling
+behavior.
+
+I also notice that such variables still get global symbols, as
+constrain_visibility still thinks that extern "C" takes priority, but let's
+save fixing that for GCC 17.
+
+	PR c++/117133
+	PR c++/124768
+	PR c++/124773
+
+gcc/cp/ChangeLog:
+
+	* mangle.cc (unmangled_name_p): Don't mangle internal extern "C"
+	variables.
+
+gcc/testsuite/ChangeLog:
+
+	* g++.dg/abi/mangle84.C: New test.
+
+(cherry picked from commit 8b7d44991202e6d62e0dec66dbf98ddda649390c)
+---
+ gcc/cp/mangle.cc                    | 8 ++++----
+ gcc/testsuite/g++.dg/abi/mangle84.C | 5 +++++
+ 2 files changed, 9 insertions(+), 4 deletions(-)
+ create mode 100644 gcc/testsuite/g++.dg/abi/mangle84.C
+
+diff --git a/gcc/cp/mangle.cc b/gcc/cp/mangle.cc
+index 59c2ca6dabba..18167f731a0a 100644
+--- a/gcc/cp/mangle.cc
++++ b/gcc/cp/mangle.cc
+@@ -753,14 +753,14 @@ unmangled_name_p (const tree decl)
+     }
+   else if (VAR_P (decl))
+     {
++      /* extern "C" declarations aren't mangled.  */
++      if (DECL_NAMESPACE_SCOPE_P (decl) && DECL_EXTERN_C_P (decl))
++	return true;
++
+       /* static variables are mangled.  */
+       if (!DECL_EXTERNAL_LINKAGE_P (decl))
+ 	return false;
+ 
+-      /* extern "C" declarations aren't mangled.  */
+-      if (DECL_EXTERN_C_P (decl))
+-	return true;
+-
+       /* Other variables at non-global scope are mangled.  */
+       if (CP_DECL_CONTEXT (decl) != global_namespace)
+ 	return false;
+diff --git a/gcc/testsuite/g++.dg/abi/mangle84.C b/gcc/testsuite/g++.dg/abi/mangle84.C
+new file mode 100644
+index 000000000000..2116f1ab2cb6
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/abi/mangle84.C
+@@ -0,0 +1,5 @@
++// PR c++/124768
++// { dg-final { scan-assembler "two:" } }
++// { dg-final { scan-assembler-not "_ZN12_GLOBAL__N_13twoE:" } }
++namespace { extern "C" { int two = 2; } }
++int main() { return two; }
+-- 
+2.43.7
+
+

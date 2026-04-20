@@ -1,0 +1,206 @@
+From c68beaef7a1760bfebf43d358f2315cccd99faae Mon Sep 17 00:00:00 2001
+From: Eric Botcazou <ebotcazou@adacore.com>
+Date: Sun, 5 Apr 2026 10:21:46 +0200
+Subject: [PATCH] Ada: Fix too large secondary stack allocation for aggregate
+ return
+
+This is a regression present on the mainline and 15 branch.  The problematic
+allocation may occur when the result type of the function is a discriminated
+record type with defaulted discriminants.  Although it had been present for
+a long time when the type is limited, the problem was recently propagated
+to nonlimited types because of an optimization.
+
+While the fix is a one-liner, the change also makes it so that SS_Allocate
+raises a Storage_Error when the size overflows, like the other allocators.
+
+gcc/ada/
+	* exp_ch6.adb (Expand_Simple_Function_Return): Use a constant return
+	object when the simple return is rewritten as an extended one.
+	* libgnat/s-secsta.adb (SS_Allocate): Raise Storage_Error if the
+	requested size is negative.
+	* libgnat/s-secsta__cheri.adb (SS_Allocate): Likewise.
+
+gcc/testsuite/
+	* gnat.dg/aggr35.adb: New test.
+	* gnat.dg/aggr35_pkg.ads, gnat.dg/aggr35_pkg.adb: New helper.
+---
+ gcc/ada/exp_ch6.adb                  |  3 ++-
+ gcc/ada/libgnat/s-secsta.adb         | 10 ++++++----
+ gcc/ada/libgnat/s-secsta__cheri.adb  |  7 ++++---
+ gcc/testsuite/gnat.dg/aggr35.adb     | 30 ++++++++++++++++++++++++++++
+ gcc/testsuite/gnat.dg/aggr35_pkg.adb | 30 ++++++++++++++++++++++++++++
+ gcc/testsuite/gnat.dg/aggr35_pkg.ads | 21 +++++++++++++++++++
+ 6 files changed, 93 insertions(+), 8 deletions(-)
+ create mode 100644 gcc/testsuite/gnat.dg/aggr35.adb
+ create mode 100644 gcc/testsuite/gnat.dg/aggr35_pkg.adb
+ create mode 100644 gcc/testsuite/gnat.dg/aggr35_pkg.ads
+
+diff --git a/gcc/ada/exp_ch6.adb b/gcc/ada/exp_ch6.adb
+index 131f64178bbe..7edcddca06ae 100644
+--- a/gcc/ada/exp_ch6.adb
++++ b/gcc/ada/exp_ch6.adb
+@@ -6704,7 +6704,7 @@ package body Exp_Ch6 is
+       --
+       --  into
+       --
+-      --    return _anonymous_ : <return_subtype> := <expression>
++      --    return _anonymous_ : constant <return_subtype> := <expression>
+ 
+       --  The expansion produced by Expand_N_Extended_Return_Statement will
+       --  contain simple return statements (for example, a block containing
+@@ -6736,6 +6736,7 @@ package body Exp_Ch6 is
+             Obj_Decl : constant Node_Id :=
+                          Make_Object_Declaration (Loc,
+                            Defining_Identifier => Make_Temporary (Loc, 'R'),
++                           Constant_Present    => True,
+                            Object_Definition   => Subtype_Ind,
+                            Expression          => Relocate_Node (Exp));
+ 
+diff --git a/gcc/ada/libgnat/s-secsta.adb b/gcc/ada/libgnat/s-secsta.adb
+index 2749658114af..b8ffd9782cc3 100644
+--- a/gcc/ada/libgnat/s-secsta.adb
++++ b/gcc/ada/libgnat/s-secsta.adb
+@@ -635,15 +635,17 @@ package body System.Secondary_Stack is
+          Padding := Alignment;
+       end if;
+ 
++      --  Raise Storage_Error if the size has overflowed
++
++      if Storage_Size < 0 then
++         raise Storage_Error with "object too large";
++      end if;
++
+       --  Round the requested size (plus the needed padding in case of
+       --  over-alignment) up to the nearest multiple of the default
+       --  alignment to ensure efficient access and that the next available
+       --  Byte is always aligned on the default alignement value.
+ 
+-      --  It should not be possible to request an allocation of negative
+-      --  size.
+-
+-      pragma Assert (Storage_Size >= 0);
+       Mem_Size := Round_Up (Storage_Size + Padding);
+ 
+       if Sec_Stack_Dynamic then
+diff --git a/gcc/ada/libgnat/s-secsta__cheri.adb b/gcc/ada/libgnat/s-secsta__cheri.adb
+index a24b50e2f744..05620e2b10fc 100644
+--- a/gcc/ada/libgnat/s-secsta__cheri.adb
++++ b/gcc/ada/libgnat/s-secsta__cheri.adb
+@@ -664,10 +664,11 @@ package body System.Secondary_Stack is
+          Over_Align_Padding := Alignment;
+       end if;
+ 
+-      --  It should not be possible to request an allocation of negative
+-      --  size.
++      --  Raise Storage_Error if the size has overflowed
+ 
+-      pragma Assert (Storage_Size >= 0);
++      if Storage_Size < 0 then
++         raise Storage_Error with "object too large";
++      end if;
+ 
+       --  Round the requested size (plus the needed padding in case of
+       --  over-alignment) to ensure that the CHERI bounds length will be
+diff --git a/gcc/testsuite/gnat.dg/aggr35.adb b/gcc/testsuite/gnat.dg/aggr35.adb
+new file mode 100644
+index 000000000000..e6b107394b40
+--- /dev/null
++++ b/gcc/testsuite/gnat.dg/aggr35.adb
+@@ -0,0 +1,30 @@
++-- { dg-do run }
++-- { dg-options "-gnatws" }
++
++with Aggr35_Pkg; use Aggr35_Pkg;
++
++procedure Aggr35 is
++begin
++
++  declare
++  begin
++    Proc1;
++    raise Program_Error with "unreachable code";
++  exception
++    when Storage_Error =>null;
++  end;
++
++  Proc2;
++
++  declare
++  begin
++    Proc3 (Func1 (32));
++    raise Program_Error with "unreachable code";
++  exception
++    when Storage_Error =>null;
++  end;
++
++  Proc3 (Func2 (32));
++
++  Proc3 (Func3 (32));
++end;
+diff --git a/gcc/testsuite/gnat.dg/aggr35_pkg.adb b/gcc/testsuite/gnat.dg/aggr35_pkg.adb
+new file mode 100644
+index 000000000000..2f3c4bf14390
+--- /dev/null
++++ b/gcc/testsuite/gnat.dg/aggr35_pkg.adb
+@@ -0,0 +1,30 @@
++package body Aggr35_Pkg is
++
++  procedure Proc1 is
++    R : Rec := (D => 32, Data => (others => 0)); -- mutable => too large
++  begin
++    null;
++  end;
++
++  procedure Proc2 is
++    R : constant Rec := (D => 32, Data => (others => 0)); -- immutable
++  begin
++    null;
++  end;
++
++  function Func1 (D : Storage_Offset) return Rec is
++  begin
++    return R : Rec := (D => D, Data => (others => 0)); -- mutable => too large
++  end;
++
++  function Func2 (D : Storage_Offset) return Rec is
++  begin
++    return R : constant Rec := (D => D, Data => (others => 0)); -- immutable
++  end;
++
++  function Func3 (D : Storage_Offset) return Rec is
++  begin
++    return (D => D, Data => (others => 0)); -- immutable
++  end;
++
++end Aggr35_Pkg;
+diff --git a/gcc/testsuite/gnat.dg/aggr35_pkg.ads b/gcc/testsuite/gnat.dg/aggr35_pkg.ads
+new file mode 100644
+index 000000000000..3873eea048a2
+--- /dev/null
++++ b/gcc/testsuite/gnat.dg/aggr35_pkg.ads
+@@ -0,0 +1,21 @@
++with System.Storage_Elements; use System.Storage_Elements;
++
++package Aggr35_Pkg is
++
++  type Rec (D : Storage_Offset := 64) is record
++    Data : Storage_Array (0 .. D);
++  end record;
++
++  procedure Proc1;
++
++  procedure Proc2;
++
++  procedure Proc3 (R : Rec) is null;
++
++  function Func1 (D : Storage_Offset) return Rec;
++
++  function Func2 (D : Storage_Offset) return Rec;
++
++  function Func3 (D : Storage_Offset) return Rec;
++
++end Aggr35_Pkg;
+-- 
+2.43.7
+
+

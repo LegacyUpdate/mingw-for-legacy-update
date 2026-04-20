@@ -1,0 +1,50 @@
+From c7913a6a827315d7357ea343c2c940ed50f66b9a Mon Sep 17 00:00:00 2001
+From: Xi Ruoyao <xry111@xry111.site>
+Date: Thu, 26 Feb 2026 22:54:18 +0800
+Subject: [PATCH] Partially revert "LoongArch: Fix bug123807."
+
+This reverts the loongarch.cc change of the commit
+4df77a254263e96af1ab4d1288a35cff10c515a4.
+
+PR 123807 turns out to be a special case of the middle-end PR 124250.
+The previous ad-hoc fix is unneeded now since the underlying middle-end
+issue is fixed, so revert it but keep the test case.
+
+gcc/
+
+	PR target/123807
+	PR middle-end/124250
+	* config/loongarch/loongarch.cc
+	(loongarch_expand_vector_init_same): Revert r16-7163 change.
+
+(cherry picked from commit 4898147482f4496db9fd00a0200636e9efa60bc6)
+---
+ gcc/config/loongarch/loongarch.cc | 11 +----------
+ 1 file changed, 1 insertion(+), 10 deletions(-)
+
+diff --git a/gcc/config/loongarch/loongarch.cc b/gcc/config/loongarch/loongarch.cc
+index 7ecb8761bdc9..47805b553689 100644
+--- a/gcc/config/loongarch/loongarch.cc
++++ b/gcc/config/loongarch/loongarch.cc
+@@ -10149,16 +10149,7 @@ loongarch_expand_vector_init_same (rtx target, rtx vals, unsigned nvar)
+ 	}
+     }
+ 
+-  if (GET_CODE (same) == MEM && GET_MODE (same) != imode)
+-    {
+-      rtx reg_tmp = gen_reg_rtx (GET_MODE (same));
+-      loongarch_emit_move (reg_tmp, same);
+-      temp = lowpart_subreg (imode, reg_tmp, GET_MODE (reg_tmp));
+-    }
+-  else
+-    temp = same;
+-
+-  temp = force_reg (imode, temp);
++  temp = force_reg (imode, same);
+ 
+   switch (vmode)
+     {
+-- 
+2.43.7
+
+

@@ -1,0 +1,152 @@
+From 839e79f55f29649acd1e7325391988530afdb9a8 Mon Sep 17 00:00:00 2001
+From: Nathaniel Shead <nathanieloshead@gmail.com>
+Date: Mon, 9 Mar 2026 01:10:02 +1100
+Subject: [PATCH] c++/modules: Reparent linemaps for partition direct loads
+ [PR124309]
+
+The attached testcase failed because when part-11_d.C sees the import
+of X through Z:part, the module's location is maintained as the indirect
+(imported) location through Y that came first, but it is still promoted
+to a direct import.
+
+When part-11_e.C reads the module then it sees a direct import of X
+through Z, but there is no valid source location for X in Z (because we
+only kept the imported location) and so we report a bad CMI.
+
+This fixes the issue by updating a module seen as direct for the first
+time via a partition to reparent the module's location to where the
+partition imported it from, so we properly process it as a direct
+location that we need to write out, similarly to what we do when we
+reimport an indirect module within the module purview.
+
+	PR c++/124309
+
+gcc/cp/ChangeLog:
+
+	* module.cc (enum module_directness): Fix inconsistent
+	capitalisation.
+	(module_state::read_imports): Reparent module locations newly
+	seen as direct via partition.
+
+gcc/testsuite/ChangeLog:
+
+	* g++.dg/modules/part-11_a.C: New test.
+	* g++.dg/modules/part-11_b.C: New test.
+	* g++.dg/modules/part-11_c.C: New test.
+	* g++.dg/modules/part-11_d.C: New test.
+	* g++.dg/modules/part-11_e.C: New test.
+
+Signed-off-by: Nathaniel Shead <nathanieloshead@gmail.com>
+Reviewed-by: Jason Merrill <jason@redhat.com>
+(cherry picked from commit 5258acb60d81e532814275fccb50cec98ca17fc7)
+---
+ gcc/cp/module.cc                         |  9 ++++++---
+ gcc/testsuite/g++.dg/modules/part-11_a.C |  7 +++++++
+ gcc/testsuite/g++.dg/modules/part-11_b.C |  6 ++++++
+ gcc/testsuite/g++.dg/modules/part-11_c.C |  6 ++++++
+ gcc/testsuite/g++.dg/modules/part-11_d.C |  7 +++++++
+ gcc/testsuite/g++.dg/modules/part-11_e.C | 10 ++++++++++
+ 6 files changed, 42 insertions(+), 3 deletions(-)
+ create mode 100644 gcc/testsuite/g++.dg/modules/part-11_a.C
+ create mode 100644 gcc/testsuite/g++.dg/modules/part-11_b.C
+ create mode 100644 gcc/testsuite/g++.dg/modules/part-11_c.C
+ create mode 100644 gcc/testsuite/g++.dg/modules/part-11_d.C
+ create mode 100644 gcc/testsuite/g++.dg/modules/part-11_e.C
+
+diff --git a/gcc/cp/module.cc b/gcc/cp/module.cc
+index 7d5465e3e595..1371b8005cd3 100644
+--- a/gcc/cp/module.cc
++++ b/gcc/cp/module.cc
+@@ -3666,7 +3666,7 @@ enum module_directness {
+   MD_NONE,  		/* Not direct.  */
+   MD_PARTITION_DIRECT,	/* Direct import of a partition.  */
+   MD_DIRECT,		/* Direct import.  */
+-  MD_PURVIEW_DIRECT,	/* direct import in purview.  */
++  MD_PURVIEW_DIRECT,	/* Direct import in purview.  */
+ };
+ 
+ /* State of a particular module. */
+@@ -16154,8 +16154,11 @@ module_state::read_imports (bytes_in &sec, cpp_reader *reader, line_maps *lmaps)
+ 
+ 	  if (is_partition ())
+ 	    {
+-	      if (!imp->is_direct ())
+-		imp->directness = MD_PARTITION_DIRECT;
++	      if (!imp->is_direct () && !imp->is_partition_direct ())
++		{
++		  imp->directness = MD_PARTITION_DIRECT;
++		  linemap_module_reparent (line_table, imp->loc, floc);
++		}
+ 	      if (exportedness > 0)
+ 		imp->exported_p = true;
+ 	    }
+diff --git a/gcc/testsuite/g++.dg/modules/part-11_a.C b/gcc/testsuite/g++.dg/modules/part-11_a.C
+new file mode 100644
+index 000000000000..d3594e70d784
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/modules/part-11_a.C
+@@ -0,0 +1,7 @@
++// PR c++/124309
++// { dg-additional-options "-fmodules" }
++// { dg-module-cmi X }
++
++export module X;
++
++export void frob(int*);
+diff --git a/gcc/testsuite/g++.dg/modules/part-11_b.C b/gcc/testsuite/g++.dg/modules/part-11_b.C
+new file mode 100644
+index 000000000000..f4b0aefed9fd
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/modules/part-11_b.C
+@@ -0,0 +1,6 @@
++// PR c++/124309
++// { dg-additional-options "-fmodules" }
++// { dg-module-cmi Y }
++
++export module Y;
++export import X;
+diff --git a/gcc/testsuite/g++.dg/modules/part-11_c.C b/gcc/testsuite/g++.dg/modules/part-11_c.C
+new file mode 100644
+index 000000000000..2fb4aad0b120
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/modules/part-11_c.C
+@@ -0,0 +1,6 @@
++// PR c++/124309
++// { dg-additional-options "-fmodules" }
++// { dg-module-cmi Z:part }
++
++export module Z:part;
++export import X;
+diff --git a/gcc/testsuite/g++.dg/modules/part-11_d.C b/gcc/testsuite/g++.dg/modules/part-11_d.C
+new file mode 100644
+index 000000000000..a21b9546a9a7
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/modules/part-11_d.C
+@@ -0,0 +1,7 @@
++// PR c++/124309
++// { dg-additional-options "-fmodules" }
++// { dg-module-cmi Z }
++
++export module Z;
++export import Y;
++export import :part;
+diff --git a/gcc/testsuite/g++.dg/modules/part-11_e.C b/gcc/testsuite/g++.dg/modules/part-11_e.C
+new file mode 100644
+index 000000000000..9a41ae2cb707
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/modules/part-11_e.C
+@@ -0,0 +1,10 @@
++// PR c++/124309
++// { dg-additional-options "-fmodules" }
++
++import Z;
++
++int main() {
++  frob(2);  // { dg-error "invalid conversion" }
++}
++
++// { dg-regexp "In module X, imported at \[^\n]*part-11_c.C:6,\n\\\s*included from \[^\n]*part-11_d.C:7,\nof module Z, imported at \[^\n]*part-11_e.C:4:\n\[^\n]*part-11_a.C:7:18: note:.*" }
+-- 
+2.43.7
+
+

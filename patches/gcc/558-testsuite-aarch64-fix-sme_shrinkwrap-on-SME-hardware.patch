@@ -1,0 +1,49 @@
+From 2c290c5723fb39bb06557a1c89f897d2f7e2407f Mon Sep 17 00:00:00 2001
+From: Alice Carlotti <alice.carlotti@arm.com>
+Date: Mon, 9 Mar 2026 15:18:39 +0000
+Subject: [PATCH] testsuite/aarch64: Fix sme-shrinkwrap.c on SME hardware
+
+The function body checks in sme-shrinkwrap.c were unresolved due to a
+missing assembly output file when building an executable.
+
+The executable test was miscompiled due to a combination of PR 124416
+and a misplaced [[gnu::noipa]].
+
+gcc/testsuite/ChangeLog:
+
+	* gcc.target/aarch64/sme/sme-shrinkwrap.c: Add -save-temp to
+	dg-options, and move [[gnu::noipa]] to callee.
+---
+ gcc/testsuite/gcc.target/aarch64/sme/sme-shrinkwrap.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/gcc/testsuite/gcc.target/aarch64/sme/sme-shrinkwrap.c b/gcc/testsuite/gcc.target/aarch64/sme/sme-shrinkwrap.c
+index b8dfd5f92f62..debce352e98e 100644
+--- a/gcc/testsuite/gcc.target/aarch64/sme/sme-shrinkwrap.c
++++ b/gcc/testsuite/gcc.target/aarch64/sme/sme-shrinkwrap.c
+@@ -1,4 +1,4 @@
+-/* { dg-options "-O3 -fshrink-wrap" } */
++/* { dg-options "-O3 -fshrink-wrap -save-temps" } */
+ /* { dg-do run { target { aarch64_sme_hw && aarch64_sve_hw } } } */
+ /* { dg-do compile { target { ! { aarch64_sme_hw && aarch64_sve_hw } } } } */
+ /* { dg-final { check-function-bodies "**" "" } } */
+@@ -46,6 +46,7 @@ int foo(int x)
+ **	...
+ */
+ 
++[[gnu::noipa]]
+ __arm_locally_streaming
+ int bar(int x)
+ {
+@@ -69,7 +70,6 @@ int baz(int x)
+     return svcntd();
+ }
+ 
+-[[gnu::noipa]]
+ int main()
+ {
+   if (bar(0) != svcntsd())
+-- 
+2.43.7
+
+

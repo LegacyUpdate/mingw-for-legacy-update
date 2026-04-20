@@ -1,0 +1,84 @@
+From 5d5b17d12bbc9840b79d2aea9d7eef8fc9855332 Mon Sep 17 00:00:00 2001
+From: Christopher Albert <albert@tugraz.at>
+Date: Sun, 22 Mar 2026 07:15:44 +0100
+Subject: [PATCH] fortran: Fix free-form mixed OpenACC/OpenMP continuation
+ state
+
+Clear the opposite directive flag only for fresh free-form OpenMP/OpenACC
+sentinel lines so continued directives do not leak OpenACC/OpenMP state into
+the next independent directive.
+
+PR fortran/108382
+gcc/fortran/ChangeLog:
+
+	* scanner.cc (skip_free_oacc_sentinel): Clear openmp_flag only for
+	fresh OpenACC directive lines.
+	(skip_free_omp_sentinel): Clear openacc_flag only for fresh OpenMP
+	directive lines.
+
+gcc/testsuite/ChangeLog:
+
+	* gfortran.dg/goacc/omp-108382.f90: New test.
+
+Signed-off-by: Christopher Albert <albert@tugraz.at>
+(cherry picked from commit 3d4039e95d851b8543884962ecf1a8e9e20669a8)
+---
+ gcc/fortran/scanner.cc                        |  4 ++++
+ .../gfortran.dg/goacc/omp-108382.f90          | 22 +++++++++++++++++++
+ 2 files changed, 26 insertions(+)
+ create mode 100644 gcc/testsuite/gfortran.dg/goacc/omp-108382.f90
+
+diff --git a/gcc/fortran/scanner.cc b/gcc/fortran/scanner.cc
+index cd9c52835156..98ed204afd1a 100644
+--- a/gcc/fortran/scanner.cc
++++ b/gcc/fortran/scanner.cc
+@@ -776,6 +776,8 @@ skip_free_oacc_sentinel (locus start, locus old_loc)
+       if ((c = next_char ()) == ' ' || c == '\t'
+ 	  || continue_flag)
+ 	{
++	  if (!continue_flag && (c == ' ' || c == '\t'))
++	    openmp_flag = 0;
+ 	  while (gfc_is_whitespace (c))
+ 	    c = next_char ();
+ 	  if (c != '\n' && c != '!')
+@@ -816,6 +818,8 @@ skip_free_omp_sentinel (locus start, locus old_loc)
+       if ((c = next_char ()) == ' ' || c == '\t'
+ 	  || continue_flag)
+ 	{
++	  if (!continue_flag && (c == ' ' || c == '\t'))
++	    openacc_flag = 0;
+ 	  while (gfc_is_whitespace (c))
+ 	    c = next_char ();
+ 	  if (c != '\n' && c != '!')
+diff --git a/gcc/testsuite/gfortran.dg/goacc/omp-108382.f90 b/gcc/testsuite/gfortran.dg/goacc/omp-108382.f90
+new file mode 100644
+index 000000000000..6fb7f37fad03
+--- /dev/null
++++ b/gcc/testsuite/gfortran.dg/goacc/omp-108382.f90
+@@ -0,0 +1,22 @@
++! { dg-do compile }
++! { dg-additional-options "-fopenmp" }
++
++module m_108382_a
++  implicit none
++  integer :: x, y
++
++!$acc declare copyin(x, &
++!$acc   y)
++!$omp declare target(x, &
++!$omp   y)
++end module m_108382_a
++
++module m_108382_b
++  implicit none
++  integer :: x, y
++
++!$omp declare target(x, &
++!$omp   y)
++!$acc declare copyin(x, &
++!$acc   y)
++end module m_108382_b
+-- 
+2.43.7
+
+

@@ -1,0 +1,67 @@
+From b6b6ed4d17164e0f0d0301650de539a35d0dbb43 Mon Sep 17 00:00:00 2001
+From: Andrew Pinski <andrew.pinski@oss.qualcomm.com>
+Date: Tue, 10 Mar 2026 22:28:43 -0700
+Subject: [PATCH] riscv/docs: Increment the required binutils to 2.40
+ [PR124409]
+
+GCC has not able to build with binutils 2.30 due to the requirement
+of needing zmull support. This changes the documentation to tbe
+first binutils release that supported zmull.
+
+	PR target/124409
+
+gcc/ChangeLog:
+
+	* doc/install.texi: Increment the required binutils for
+	riscv to 2.40.
+
+Signed-off-by: Andrew Pinski <andrew.pinski@oss.qualcomm.com>
+(cherry picked from commit bad66dc2073c3cab47b774cfde316530136f5895)
+---
+ gcc/doc/install.texi | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/gcc/doc/install.texi b/gcc/doc/install.texi
+index dcb2f3b35005..756f1fbe2280 100644
+--- a/gcc/doc/install.texi
++++ b/gcc/doc/install.texi
+@@ -4821,7 +4821,7 @@ This configuration is intended for embedded systems.
+ @heading riscv32-*-elf
+ The RISC-V RV32 instruction set.
+ This configuration is intended for embedded systems.
+-This (and all other RISC-V) targets require the binutils 2.30 release.
++This (and all other RISC-V) targets require the binutils 2.40 release.
+ 
+ @html
+ <hr />
+@@ -4829,7 +4829,7 @@ This (and all other RISC-V) targets require the binutils 2.30 release.
+ @anchor{riscv32-x-linux}
+ @heading riscv32-*-linux
+ The RISC-V RV32 instruction set running GNU/Linux.
+-This (and all other RISC-V) targets require the binutils 2.30 release.
++This (and all other RISC-V) targets require the binutils 2.40 release.
+ 
+ @html
+ <hr />
+@@ -4838,7 +4838,7 @@ This (and all other RISC-V) targets require the binutils 2.30 release.
+ @heading riscv64-*-elf
+ The RISC-V RV64 instruction set.
+ This configuration is intended for embedded systems.
+-This (and all other RISC-V) targets require the binutils 2.30 release.
++This (and all other RISC-V) targets require the binutils 2.40 release.
+ 
+ @html
+ <hr />
+@@ -4846,7 +4846,7 @@ This (and all other RISC-V) targets require the binutils 2.30 release.
+ @anchor{riscv64-x-linux}
+ @heading riscv64-*-linux
+ The RISC-V RV64 instruction set running GNU/Linux.
+-This (and all other RISC-V) targets require the binutils 2.30 release.
++This (and all other RISC-V) targets require the binutils 2.40 release.
+ 
+ @html
+ <hr />
+-- 
+2.43.7
+
+

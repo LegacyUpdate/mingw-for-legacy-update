@@ -1,0 +1,189 @@
+From bdb7fa18765484c2fe97bb6ba9af63682eddb395 Mon Sep 17 00:00:00 2001
+From: Patrick Palka <ppalka@redhat.com>
+Date: Fri, 30 Jan 2026 15:25:43 -0500
+Subject: [PATCH] c++: non-empty constexpr constructor bodies in C++11
+ [PR123845]
+
+This patch makes us support C++14 non-empty constexpr constructor bodies
+in C++11, as an extension.  This will make it trivial to safely fix the
+C++11 library regression PR114865 that requires us to do
+__builtin_clear_padding after initializing _M_i in std::atomic's
+single-parameter constructor, and that's not really possible with the
+C++11 constexpr restrictions.
+
+Since we lower member initializers to constructor body statements
+internally, and so constructor bodies are already effectively non-empty
+internally even in C++11, supporting non-empty bodies in user code is
+mostly a matter of relaxing the parse-time error.
+
+But constexpr-ex3.C revealed that by accepting the non-empty body of A's
+constructor, build_data_member_initialization goes on to mistake the
+'i = _i' assignment as a member initializer, and we incorrectly accept
+the constructor in C++11 mode (even though omitting mem-inits is only
+valid since C++20).  Turns out this is caused by that function
+recognizing MODIFY_EXPR only in C++11 mode, logic that was last changed
+by r5-5013 (presumably to limit impact of the patch at the time) but I
+reckon could just be removed outright.  This should be safe because the
+result of build_data_member_initialization is only used by
+cx_check_missing_mem_inits for validation; evaluation is in terms of
+the entire lowered constructor body.
+
+	PR c++/123845
+	PR libstdc++/114865
+
+gcc/cp/ChangeLog:
+
+	* constexpr.cc (build_data_member_initialization): Remove
+	C++11-specific recognition of MODIFY_EXPR.
+	(check_constexpr_ctor_body): Relax error diagnostic to a
+	pedwarn and don't clear DECL_DECLARED_CONSTEXPR_P upon
+	error.  Return true if complaining.
+
+gcc/testsuite/ChangeLog:
+
+	* g++.dg/cpp0x/constexpr-ex3.C: Adjust C++11 non-empty
+	constexpr constructor dg-error to a dg-warning.  Expect
+	a follow-up missing member initializer diagnostic in C++11 mode.
+	* g++.dg/cpp2a/constexpr-try1.C: Expect a follow-up
+	compound-statement in constexpr function diagnostic in C++11
+	mode.
+	* g++.dg/cpp2a/constexpr-try2.C: Likewise.  Adjust C++11
+	non-empty constexpr constructor dg-error to a dg-warning.
+	* g++.dg/cpp2a/constexpr-try3.C:  Adjust C++11 non-empty
+	constexpr constructor dg-error to a dg-warning.
+	* g++.dg/cpp0x/constexpr-ctor23.C: New test.
+
+Reviewed-by: Jason Merrill <jason@redhat.com>
+(cherry picked from commit e4c57e146a224d0aaa71ace78f96fca1156add24)
+---
+ gcc/cp/constexpr.cc                           | 14 ++++------
+ gcc/testsuite/g++.dg/cpp0x/constexpr-ctor23.C | 26 +++++++++++++++++++
+ gcc/testsuite/g++.dg/cpp0x/constexpr-ex3.C    |  3 ++-
+ gcc/testsuite/g++.dg/cpp2a/constexpr-try1.C   |  1 +
+ gcc/testsuite/g++.dg/cpp2a/constexpr-try2.C   |  3 ++-
+ gcc/testsuite/g++.dg/cpp2a/constexpr-try3.C   |  2 +-
+ 6 files changed, 37 insertions(+), 12 deletions(-)
+ create mode 100644 gcc/testsuite/g++.dg/cpp0x/constexpr-ctor23.C
+
+diff --git a/gcc/cp/constexpr.cc b/gcc/cp/constexpr.cc
+index 0d30e5c7d9cc..a5078fc2fd67 100644
+--- a/gcc/cp/constexpr.cc
++++ b/gcc/cp/constexpr.cc
+@@ -399,11 +399,7 @@ build_data_member_initialization (tree t, vec<constructor_elt, va_gc> **vec)
+     }
+   if (TREE_CODE (t) == CONVERT_EXPR)
+     t = TREE_OPERAND (t, 0);
+-  if (TREE_CODE (t) == INIT_EXPR
+-      /* vptr initialization shows up as a MODIFY_EXPR.  In C++14 we only
+-	 use what this function builds for cx_check_missing_mem_inits, and
+-	 assignment in the ctor body doesn't count.  */
+-      || (cxx_dialect < cxx14 && TREE_CODE (t) == MODIFY_EXPR))
++  if (TREE_CODE (t) == INIT_EXPR)
+     {
+       member = TREE_OPERAND (t, 0);
+       init = break_out_target_exprs (TREE_OPERAND (t, 1));
+@@ -565,11 +561,11 @@ check_constexpr_ctor_body (tree last, tree list, bool complain)
+   else if (list != last
+ 	   && !check_constexpr_ctor_body_1 (last, list))
+     ok = false;
+-  if (!ok)
++  if (!ok && complain)
+     {
+-      if (complain)
+-	error ("%<constexpr%> constructor does not have empty body");
+-      DECL_DECLARED_CONSTEXPR_P (current_function_decl) = false;
++      pedwarn (input_location, OPT_Wc__14_extensions,
++	       "%<constexpr%> constructor does not have empty body");
++      ok = true;
+     }
+   return ok;
+ }
+diff --git a/gcc/testsuite/g++.dg/cpp0x/constexpr-ctor23.C b/gcc/testsuite/g++.dg/cpp0x/constexpr-ctor23.C
+new file mode 100644
+index 000000000000..4019804ab166
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/cpp0x/constexpr-ctor23.C
+@@ -0,0 +1,26 @@
++// Verify we diagnose and accept, as an extension, a non-empty constexpr
++// constructor body in C++11 mode.
++// PR c++/123845
++// { dg-do compile { target c++11_only } }
++// { dg-options "" }
++
++constexpr int negate(int n) { return -n; }
++
++struct A {
++  int m;
++  constexpr A() : m(42) {
++    ++m;
++    m = negate(m);
++  } // { dg-warning "does not have empty body \[-Wc++14-extensions\]" }
++};
++static_assert(A().m == -43, "");
++
++template<class T>
++struct B {
++  int m;
++  constexpr B() : m(42) {
++    ++m;
++    m = negate(m);
++  } // { dg-warning "does not have empty body \[-Wc++14-extensions\]" }
++};
++static_assert(B<int>().m == -43, "");
+diff --git a/gcc/testsuite/g++.dg/cpp0x/constexpr-ex3.C b/gcc/testsuite/g++.dg/cpp0x/constexpr-ex3.C
+index 9d6d5ff587ca..169976afbaf7 100644
+--- a/gcc/testsuite/g++.dg/cpp0x/constexpr-ex3.C
++++ b/gcc/testsuite/g++.dg/cpp0x/constexpr-ex3.C
+@@ -6,7 +6,8 @@
+ struct A
+ {
+   int i;
+-  constexpr A(int _i) { i = _i; } // { dg-error "empty body|A::i" "" { target c++17_down } }
++  constexpr A(int _i) { i = _i; } // { dg-warning "empty body" "" { target c++11_only } }
++				  // { dg-error "'A::i' must be init" "" { target c++17_down } .-1 }
+ };
+ 
+ template <class T>
+diff --git a/gcc/testsuite/g++.dg/cpp2a/constexpr-try1.C b/gcc/testsuite/g++.dg/cpp2a/constexpr-try1.C
+index 977eb86dd192..e5e70a62b50f 100644
+--- a/gcc/testsuite/g++.dg/cpp2a/constexpr-try1.C
++++ b/gcc/testsuite/g++.dg/cpp2a/constexpr-try1.C
+@@ -32,6 +32,7 @@ struct S {
+     } catch (int) {	// { dg-error "compound-statement in 'constexpr' function" "" { target c++11_only } }
+     }			// { dg-error "compound-statement in 'constexpr' function" "" { target c++11_only } .-2 }
+   } catch (...) {	// { dg-error "'constexpr' constructor does not have empty body" "" { target c++11_only } }
++		        // { dg-error "compound-statement in 'constexpr' function" "" { target c++11_only } .-1 }
+   }
+   int m;
+ };
+diff --git a/gcc/testsuite/g++.dg/cpp2a/constexpr-try2.C b/gcc/testsuite/g++.dg/cpp2a/constexpr-try2.C
+index 7ca7261a9e00..9504fdaa8696 100644
+--- a/gcc/testsuite/g++.dg/cpp2a/constexpr-try2.C
++++ b/gcc/testsuite/g++.dg/cpp2a/constexpr-try2.C
+@@ -32,7 +32,8 @@ struct S {
+     try {		// { dg-warning "'try' in 'constexpr' function only available with" "" { target c++17_down } }
+     } catch (int) {	// { dg-warning "compound-statement in 'constexpr' function" "" { target c++11_only } }
+     }			// { dg-warning "compound-statement in 'constexpr' function" "" { target c++11_only } .-2 }
+-  } catch (...) {	// { dg-error "'constexpr' constructor does not have empty body" "" { target c++11_only } }
++  } catch (...) {	// { dg-warning "'constexpr' constructor does not have empty body" "" { target c++11_only } }
++			// { dg-warning "compound-statement in 'constexpr' function" "" { target c++11_only } .-1 }
+   }
+   int m;
+ };
+diff --git a/gcc/testsuite/g++.dg/cpp2a/constexpr-try3.C b/gcc/testsuite/g++.dg/cpp2a/constexpr-try3.C
+index ab7e8f6d4649..070040c5deef 100644
+--- a/gcc/testsuite/g++.dg/cpp2a/constexpr-try3.C
++++ b/gcc/testsuite/g++.dg/cpp2a/constexpr-try3.C
+@@ -31,7 +31,7 @@ struct S {
+     try {		// { dg-warning "'try' in 'constexpr' function only available with" "" { target c++17_down } }
+     } catch (int) {
+     }
+-  } catch (...) {	// { dg-error "'constexpr' constructor does not have empty body" "" { target c++11_only } }
++  } catch (...) {	// { dg-warning "'constexpr' constructor does not have empty body" "" { target c++11_only } }
+   }
+   int m;
+ };
+-- 
+2.43.7
+
+

@@ -1,0 +1,67 @@
+From e4ef410d8eae46e237bad269ff348b635faa9e32 Mon Sep 17 00:00:00 2001
+From: =?utf8?q?Torbj=C3=B6rn=20SVENSSON?= <torbjorn.svensson@foss.st.com>
+Date: Wed, 1 Apr 2026 14:24:36 +0200
+Subject: [PATCH] config: increase stack reserve to 64MB for the toolchain on
+ Windows [PR69639]
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf8
+Content-Transfer-Encoding: 8bit
+
+This fixes fails like below on Windows.
+
+FAIL: gcc.c-torture/compile/limits-exprparen.c   -O0  (test for excess errors)
+
+On Linux, maybe also other targets, the stack limit is dynamically
+changed when the application launches.
+
+Regtested with arm-none-eabi on Windows on top of
+r16-8253-geb50d28a9353e9.
+
+config/ChangeLog:
+
+	PR target/69639
+	* mh-cygwin: Increase to 64MB stack reserve.
+	* mh-mingw: Likewise.
+
+Signed-off-by: TorbjÃ¶rn SVENSSON <torbjorn.svensson@foss.st.com>
+(cherry picked from commit c84e0635059164c99176774e610425a5c8b9915b)
+---
+ config/mh-cygwin | 9 +++++----
+ config/mh-mingw  | 9 +++++----
+ 2 files changed, 10 insertions(+), 8 deletions(-)
+
+diff --git a/config/mh-cygwin b/config/mh-cygwin
+index 1f746bdea84d..194f70de4d5a 100644
+--- a/config/mh-cygwin
++++ b/config/mh-cygwin
+@@ -1,4 +1,5 @@
+-# Increase stack limit to a figure based on the Linux default, with 4MB added
+-# as GCC turns out to need that much more to pass all the limits-* tests.
+-LDFLAGS += -Wl,--stack,12582912
+-BOOT_LDFLAGS += -Wl,--stack,12582912
++# Increase stack limit, to the same value that GCC tries to change to at
++# startup on Linux, as GCC turns out to need that much more to pass all the
++# limits-* tests.
++LDFLAGS += -Wl,--stack,67108864
++BOOT_LDFLAGS += -Wl,--stack,67108864
+diff --git a/config/mh-mingw b/config/mh-mingw
+index f5fb064813f7..a225b80914d6 100644
+--- a/config/mh-mingw
++++ b/config/mh-mingw
+@@ -8,7 +8,8 @@ STAGE2_CXXFLAGS += -D__USE_MINGW_ACCESS
+ STAGE3_CXXFLAGS += -D__USE_MINGW_ACCESS
+ STAGE4_CXXFLAGS += -D__USE_MINGW_ACCESS
+ 
+-# Increase stack limit to a figure based on the Linux default, with 4MB added
+-# as GCC turns out to need that much more to pass all the limits-* tests.
+-LDFLAGS += -Wl,--stack,12582912
+-BOOT_LDFLAGS += -Wl,--stack,12582912
++# Increase stack limit, to the same value that GCC tries to change to at
++# startup on Linux, as GCC turns out to need that much more to pass all the
++# limits-* tests.
++LDFLAGS += -Wl,--stack,67108864
++BOOT_LDFLAGS += -Wl,--stack,67108864
+-- 
+2.43.7
+
+

@@ -1,0 +1,66 @@
+From e8c6a2bfce170b746400c8b3719d7e41f7f65dc9 Mon Sep 17 00:00:00 2001
+From: Jeff Law <jeffrey.law@oss.qualcomm.com>
+Date: Sun, 29 Mar 2026 17:36:25 -0600
+Subject: [PATCH] [RISC-V][PR target/124674] Define OImode in the usual way
+
+This testcase tries to call build_nonstandard_integer_type for a 192-bit
+precision type.  This eventually faults because we don't have a suitably wide
+mode.
+
+Somewhat surprisingly, the targets are responsible for defining OImode.  So
+this adds it to the RISC-V port as well which trivially fixes the ICE.  The
+test is limited to rv64 as rv32 doesn't support int128.  That could have been
+handled with a target-supports selector just as easily.
+
+Tested on riscv32-elf and riscv64-elf.  Both the BPI and Pioneer are
+experiencing NVME drive failures, so no bootstraps until I figure that out.
+Waiting on the pre-commit tester to do its thing before pushing
+
+	PR target/124674
+gcc/
+	* config/riscv/riscv-modes.def: Create OImode.
+
+gcc/testsuite
+	* gcc.target/riscv/pr124674.c: New test.
+
+(cherry picked from commit 33e4afffc8785640a51c3730f7ff223c8db5d10e)
+---
+ gcc/config/riscv/riscv-modes.def          |  2 ++
+ gcc/testsuite/gcc.target/riscv/pr124674.c | 11 +++++++++++
+ 2 files changed, 13 insertions(+)
+ create mode 100644 gcc/testsuite/gcc.target/riscv/pr124674.c
+
+diff --git a/gcc/config/riscv/riscv-modes.def b/gcc/config/riscv/riscv-modes.def
+index 55f7fd08c4dd..69994cc57664 100644
+--- a/gcc/config/riscv/riscv-modes.def
++++ b/gcc/config/riscv/riscv-modes.def
+@@ -19,6 +19,8 @@ You should have received a copy of the GNU General Public License
+ along with GCC; see the file COPYING3.  If not see
+ <http://www.gnu.org/licenses/>.  */
+ 
++INT_MODE (OI, 32);
++
+ FLOAT_MODE (HF, 2, ieee_half_format);
+ FLOAT_MODE (TF, 16, ieee_quad_format);
+ FLOAT_MODE (BF, 2, 0);
+diff --git a/gcc/testsuite/gcc.target/riscv/pr124674.c b/gcc/testsuite/gcc.target/riscv/pr124674.c
+new file mode 100644
+index 000000000000..8bd6f9a50758
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/riscv/pr124674.c
+@@ -0,0 +1,11 @@
++/* { dg-do compile { target { rv64 } } } */
++/* { dg-additional-options "-Wno-pedantic -march=rv64gc -mabi=lp64d" } */
++
++struct {
++  __int128 a;
++  int c[64];
++} s;
++
++int g;
++
++void foo() { __builtin_mul_overflow(*(_Complex long *)&s.c[1] ? 1 : 0, 1, &g); }
+-- 
+2.43.7
+
+

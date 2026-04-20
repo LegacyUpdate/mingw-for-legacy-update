@@ -1,0 +1,53 @@
+From 627b38e64831b0347dde62ecb889935141a7bbcb Mon Sep 17 00:00:00 2001
+From: Alexandre Oliva <oliva@adacore.com>
+Date: Mon, 30 Mar 2026 22:18:39 -0300
+Subject: [PATCH] testsuite: drop loop optimizations in
+ fstack-protector-strong.c
+
+gcc.dg/fstack-protector-strong.c used to expect one stack_chk_fail per
+function.  When vectorizer improvements caused foo2 to get vectorized
+to the point of enabling the loop and the automatic array-containing
+data structure to be optimized away entirely, it no longer required
+stack protection, and the expected pattern count was decreased.
+
+However, on platforms that don't or can't vectorize the loop, it isn't
+optimized away, and then we find the wrong pattern count.
+
+Reverse the decrease and disable optimizations of the loop that could
+cause it to be optimized out, so that we get the originally-expected
+stack protection everywhere.
+
+
+for  gcc/testsuite/ChangeLog
+
+	* gcc.dg/fstack-protector-strong.c (foo2): Prevent loop
+	optimizations.  Expect stack protection again.
+
+(cherry picked from commit 04ac40d9d992793d9c76be3aceb4ddc8fb3cc353)
+---
+ gcc/testsuite/gcc.dg/fstack-protector-strong.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/gcc/testsuite/gcc.dg/fstack-protector-strong.c b/gcc/testsuite/gcc.dg/fstack-protector-strong.c
+index b9f63966b7cc..52485b5252dd 100644
+--- a/gcc/testsuite/gcc.dg/fstack-protector-strong.c
++++ b/gcc/testsuite/gcc.dg/fstack-protector-strong.c
+@@ -43,6 +43,8 @@ foo2 ()
+ {
+   struct AA aa;
+   int i;
++#pragma GCC novector
++#pragma GCC unroll 0
+   for (i = 0; i < 10; ++i)
+     {
+       aa.as.array[i] = i * (i-1) + i / 2;
+@@ -154,4 +156,4 @@ void foo12 ()
+   global3 ();
+ }
+ 
+-/* { dg-final { scan-assembler-times "stack_chk_fail" 11 } } */
++/* { dg-final { scan-assembler-times "stack_chk_fail" 12 } } */
+-- 
+2.43.7
+
+

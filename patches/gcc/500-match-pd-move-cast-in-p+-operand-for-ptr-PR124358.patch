@@ -1,0 +1,100 @@
+From 0c7fd83e3a5974fe0159b5047b34386389464632 Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Fri, 6 Mar 2026 08:14:09 +0100
+Subject: [PATCH] match.pd: Move cast into p+ operand for (ptr) (x p+ y) p+ z
+ -> (ptr) (x p+ (y + z)) [PR124358]
+
+The following testcase is miscompiled since my r12-6382 change, because
+it doesn't play well with the gimple_fold_indirect_ref function which uses
+STRIP_NOPS and then has
+  /* *(foo *)fooarrptr => (*fooarrptr)[0] */
+  if (TREE_CODE (TREE_TYPE (subtype)) == ARRAY_TYPE
+      && TREE_CODE (TYPE_SIZE (TREE_TYPE (TREE_TYPE (subtype)))) == INTEGER_CST
+      && useless_type_conversion_p (type, TREE_TYPE (TREE_TYPE (subtype))))
+    {
+      tree type_domain;
+      tree min_val = size_zero_node;
+      tree osub = sub;
+      sub = gimple_fold_indirect_ref (sub);
+      if (! sub)
+        sub = build1 (INDIRECT_REF, TREE_TYPE (subtype), osub);
+      type_domain = TYPE_DOMAIN (TREE_TYPE (sub));
+      if (type_domain && TYPE_MIN_VALUE (type_domain))
+        min_val = TYPE_MIN_VALUE (type_domain);
+      if (TREE_CODE (min_val) == INTEGER_CST)
+        return build4 (ARRAY_REF, type, sub, min_val, NULL_TREE, NULL_TREE);
+    }
+Without the GENERIC
+ #if GENERIC
+ (simplify
+   (pointer_plus (convert:s (pointer_plus:s @0 @1)) @3)
+   (convert:type (pointer_plus @0 (plus @1 @3))))
+ #endif
+we have INDIRECT_REF of POINTER_PLUS_EXPR with int * type of NOP_EXPR
+to that type of POINTER_PLUS_EXPR with pointer to int[4] ARRAY_TYPE, so
+gimple_fold_indirect_ref doesn't create the ARRAY_REF.
+But with it, it is simplified to NOP_EXPR to int * type from
+POINTER_PLUS_EXPR with pointer to int[4] ARRAY_TYPE, the NOP_EXPR is
+skipped over by STRIP_NOPS and the above code triggers.
+
+The following patch fixes it by swapping the order, do NOP_EXPR
+inside of POINTER_PLUS_EXPR first argument instead of NOP_EXPR with
+POINTER_PLUS_EXPR.
+
+2026-03-06  Jakub Jelinek  <jakub@redhat.com>
+
+	PR tree-optimization/124358
+	* match.pd ((ptr) (x p+ y) p+ z -> (ptr) (x p+ (y + z))): Simplify
+	into (ptr) x p+ (y + z) instead.
+
+	* gcc.c-torture/execute/pr124358.c: New test.
+
+(cherry picked from commit acf7028b79b72176f8ab2f6ebc4dbb9b5fb11a48)
+---
+ gcc/match.pd                                  |  2 +-
+ .../gcc.c-torture/execute/pr124358.c          | 19 +++++++++++++++++++
+ 2 files changed, 20 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/gcc.c-torture/execute/pr124358.c
+
+diff --git a/gcc/match.pd b/gcc/match.pd
+index 164d5da22165..f5ff9c8ef374 100644
+--- a/gcc/match.pd
++++ b/gcc/match.pd
+@@ -3006,7 +3006,7 @@ DEFINE_INT_AND_FLOAT_ROUND_FN (RINT)
+ #if GENERIC
+ (simplify
+   (pointer_plus (convert:s (pointer_plus:s @0 @1)) @3)
+-  (convert:type (pointer_plus @0 (plus @1 @3))))
++  (pointer_plus (convert:type @0) (plus @1 @3)))
+ #endif
+ 
+ /* Pattern match
+diff --git a/gcc/testsuite/gcc.c-torture/execute/pr124358.c b/gcc/testsuite/gcc.c-torture/execute/pr124358.c
+new file mode 100644
+index 000000000000..81bf6a29d7c9
+--- /dev/null
++++ b/gcc/testsuite/gcc.c-torture/execute/pr124358.c
+@@ -0,0 +1,19 @@
++/* PR tree-optimization/124358 */
++
++[[gnu::noipa]] void
++foo (int d)
++{
++  static int u = 11;
++  if (d != u++)
++    __builtin_abort ();
++}
++
++int
++main ()
++{
++  int a[1][4] = { 11, 12, 13, 14 };
++  int (*p)[4] = a;
++  for (int i = 0; i < 1; i++)
++    for (int j = 0; j < 4; j++)
++      foo (*(*(p + i) + j));
++}
+-- 
+2.43.7
+
+

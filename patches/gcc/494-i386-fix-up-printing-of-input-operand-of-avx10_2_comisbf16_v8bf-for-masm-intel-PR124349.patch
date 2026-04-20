@@ -1,0 +1,65 @@
+From 78de99783649de40d25702cdd1c1e117e1d86660 Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Wed, 4 Mar 2026 09:34:33 +0100
+Subject: [PATCH] i386: Fix up printing of input operand of
+ avx10_2_comisbf16_v8bf for -masm=intel [PR124349]
+
+gas expects the second operand if in memory WORD PTR rather than XMMWORD PTR.
+The following patch fixes it by using %w1 instead of %1, if the operand is
+a register, it is printed as xmm1 in both cases.
+
+2026-03-04  Jakub Jelinek  <jakub@redhat.com>
+
+	PR target/124349
+	* config/i386/sse.md (avx10_2_comisbf16_v8bf): Use %w1 instead of %1
+	for -masm=intel.
+
+	* gcc.target/i386/avx10_2-pr124349.c: New test.
+
+(cherry picked from commit 7fe63e16ae7c32ee59ec21aa6db0b124052f4482)
+---
+ gcc/config/i386/sse.md                          |  2 +-
+ .../gcc.target/i386/avx10_2-pr124349.c          | 17 +++++++++++++++++
+ 2 files changed, 18 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/gcc.target/i386/avx10_2-pr124349.c
+
+diff --git a/gcc/config/i386/sse.md b/gcc/config/i386/sse.md
+index fb2e0997f9d3..707d92d28f6b 100644
+--- a/gcc/config/i386/sse.md
++++ b/gcc/config/i386/sse.md
+@@ -4890,7 +4890,7 @@
+ 	    (match_operand:V8BF 1 "nonimmediate_operand" "vm")
+ 	    (parallel [(const_int 0)]))))]
+   "TARGET_AVX10_2"
+-  "vcomisbf16\t{%1, %0|%0, %1}"
++  "vcomisbf16\t{%1, %0|%0, %w1}"
+   [(set_attr "prefix" "evex")
+    (set_attr "type" "ssecomi")])
+ 
+diff --git a/gcc/testsuite/gcc.target/i386/avx10_2-pr124349.c b/gcc/testsuite/gcc.target/i386/avx10_2-pr124349.c
+new file mode 100644
+index 000000000000..c62644242847
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/i386/avx10_2-pr124349.c
+@@ -0,0 +1,17 @@
++/* PR target/124349 */
++/* { dg-do assemble { target { avx10_2 && masm_intel } } } */
++/* { dg-options "-O2 -mavx10.2 -masm=intel" } */
++
++#include <x86intrin.h>
++
++int
++foo (__m128bh v, __m128bh *p)
++{
++  return _mm_comilt_sbh (*p, v);
++}
++
++int
++bar (__m128bh v, __m128bh w)
++{
++  return _mm_comilt_sbh (w, v);
++}
+-- 
+2.43.7
+
+

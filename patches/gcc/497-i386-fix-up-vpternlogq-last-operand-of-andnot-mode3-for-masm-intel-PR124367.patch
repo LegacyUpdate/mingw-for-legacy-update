@@ -1,0 +1,67 @@
+From ac090f25608cb4261ba1e51323c9a72cae5950ed Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Thu, 5 Mar 2026 09:39:36 +0100
+Subject: [PATCH] i386: Fix up vpternlogq last operand of *andnot<mode>3 for
+ -masm=intel [PR124367]
+
+The immediate operand 0x44 in this insn was incorrectly emitted as
+$0x44 even in -masm=intel syntax.
+
+Fixed thusly, bootstrapped/regtested on x86_64-linux and i686-linux,
+approved by Uros in the PR, committed to trunk.
+
+2026-03-05  Jakub Jelinek  <jakub@redhat.com>
+
+	PR target/124367
+	* config/i386/sse.md (*andnot<mode>3): Use 0x44 rather than $0x44
+	for -masm=intel.
+
+	* gcc.target/i386/avx512vl-pr124367.c: New test.
+
+(cherry picked from commit d828a370db427f53164ca5896097eb947f3a6d8c)
+---
+ gcc/config/i386/sse.md                            |  4 ++--
+ gcc/testsuite/gcc.target/i386/avx512vl-pr124367.c | 14 ++++++++++++++
+ 2 files changed, 16 insertions(+), 2 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.target/i386/avx512vl-pr124367.c
+
+diff --git a/gcc/config/i386/sse.md b/gcc/config/i386/sse.md
+index 5fb249c2c39c..b24726567794 100644
+--- a/gcc/config/i386/sse.md
++++ b/gcc/config/i386/sse.md
+@@ -18544,9 +18544,9 @@
+       tmp = "pternlog";
+       ssesuffix = "<ternlogsuffix>";
+       if (which_alternative != 4 || TARGET_AVX512VL)
+-	ops = "v%s%s\t{$0x44, %%1, %%2, %%0|%%0, %%2, %%1, $0x44}";
++	ops = "v%s%s\t{$0x44, %%1, %%2, %%0|%%0, %%2, %%1, 0x44}";
+       else
+-	ops = "v%s%s\t{$0x44, %%g1, %%g2, %%g0|%%g0, %%g2, %%g1, $0x44}";
++	ops = "v%s%s\t{$0x44, %%g1, %%g2, %%g0|%%g0, %%g2, %%g1, 0x44}";
+       break;
+     default:
+       gcc_unreachable ();
+diff --git a/gcc/testsuite/gcc.target/i386/avx512vl-pr124367.c b/gcc/testsuite/gcc.target/i386/avx512vl-pr124367.c
+new file mode 100644
+index 000000000000..72646103ca12
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/i386/avx512vl-pr124367.c
+@@ -0,0 +1,14 @@
++/* PR target/124367 */
++/* { dg-do assemble { target { { int128 && avx512vl } && masm_intel } } } */
++/* { dg-options "-O -mavx512vl -masm=intel" } */
++
++union {
++  __int128 a;
++  __attribute__((__vector_size__(sizeof (__int128)))) long long b;
++} u;
++
++void
++foo ()
++{
++  u.b ^= 0 > u.a | u.b;
++}
+-- 
+2.43.7
+
+

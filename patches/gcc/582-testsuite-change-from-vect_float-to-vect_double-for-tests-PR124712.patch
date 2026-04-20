@@ -1,0 +1,71 @@
+From 725fb32252d285c6e40380d5be1cfb75e6b843f8 Mon Sep 17 00:00:00 2001
+From: =?utf8?q?Torbj=C3=B6rn=20SVENSSON?= <torbjorn.svensson@foss.st.com>
+Date: Tue, 31 Mar 2026 13:30:16 +0200
+Subject: [PATCH] testsuite: change from vect_float to vect_double for tests
+ [PR124712]
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf8
+Content-Transfer-Encoding: 8bit
+
+gcc/testsuite/ChangeLog:
+
+	PR target/124712
+	* gcc.dg/vect/vect-fmax-2.c: Changed effective target vect_float
+	to vect_double.
+	* gcc.dg/vect/vect-fmax-3.c: Likewise.
+	* gcc.dg/vect/vect-fmin-2.c: Likewise.
+	* gcc.dg/vect/vect-fmin-3.c: Likewise.
+
+Signed-off-by: TorbjÃ¶rn SVENSSON <torbjorn.svensson@foss.st.com>
+(cherry picked from commit 5312b5132ce3177cad5c6eea09ae76b046f4deae)
+---
+ gcc/testsuite/gcc.dg/vect/vect-fmax-2.c | 2 +-
+ gcc/testsuite/gcc.dg/vect/vect-fmax-3.c | 2 +-
+ gcc/testsuite/gcc.dg/vect/vect-fmin-2.c | 2 +-
+ gcc/testsuite/gcc.dg/vect/vect-fmin-3.c | 2 +-
+ 4 files changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/gcc/testsuite/gcc.dg/vect/vect-fmax-2.c b/gcc/testsuite/gcc.dg/vect/vect-fmax-2.c
+index d455dd4f10e2..20266b30049e 100644
+--- a/gcc/testsuite/gcc.dg/vect/vect-fmax-2.c
++++ b/gcc/testsuite/gcc.dg/vect/vect-fmax-2.c
+@@ -1,4 +1,4 @@
+-/* { dg-require-effective-target vect_float } */
++/* { dg-require-effective-target vect_double } */
+ 
+ #define TYPE double
+ #define FN __builtin_fmax
+diff --git a/gcc/testsuite/gcc.dg/vect/vect-fmax-3.c b/gcc/testsuite/gcc.dg/vect/vect-fmax-3.c
+index 58e74e22ac4d..da08ecc2a6f3 100644
+--- a/gcc/testsuite/gcc.dg/vect/vect-fmax-3.c
++++ b/gcc/testsuite/gcc.dg/vect/vect-fmax-3.c
+@@ -1,4 +1,4 @@
+-/* { dg-require-effective-target vect_float } */
++/* { dg-require-effective-target vect_double } */
+ 
+ #include "tree-vect.h"
+ 
+diff --git a/gcc/testsuite/gcc.dg/vect/vect-fmin-2.c b/gcc/testsuite/gcc.dg/vect/vect-fmin-2.c
+index ee9e134af692..1c9df312fe32 100644
+--- a/gcc/testsuite/gcc.dg/vect/vect-fmin-2.c
++++ b/gcc/testsuite/gcc.dg/vect/vect-fmin-2.c
+@@ -1,4 +1,4 @@
+-/* { dg-require-effective-target vect_float } */
++/* { dg-require-effective-target vect_double } */
+ 
+ #ifndef TYPE
+ #define TYPE double
+diff --git a/gcc/testsuite/gcc.dg/vect/vect-fmin-3.c b/gcc/testsuite/gcc.dg/vect/vect-fmin-3.c
+index 2e282ba6878a..caa562ef2b9b 100644
+--- a/gcc/testsuite/gcc.dg/vect/vect-fmin-3.c
++++ b/gcc/testsuite/gcc.dg/vect/vect-fmin-3.c
+@@ -1,4 +1,4 @@
+-/* { dg-require-effective-target vect_float } */
++/* { dg-require-effective-target vect_double } */
+ 
+ #include "tree-vect.h"
+ 
+-- 
+2.43.7
+
+

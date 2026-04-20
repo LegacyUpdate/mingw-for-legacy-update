@@ -1,0 +1,45 @@
+From cfec355d8c1febdeaccf68f918c22b55db94195f Mon Sep 17 00:00:00 2001
+From: Jonathan Wakely <jwakely@redhat.com>
+Date: Wed, 29 Oct 2025 21:37:18 +0000
+Subject: [PATCH] libstdc++: Fix -Wunused-variable from <regex>
+
+In r16-4709-gc55c1de3a9adb2 I meant to use the result of the
+static_cast<char> for the rest of the function following it, but I
+accidentally used the original variable __ch. This causes
+-Wunused-variable warnings for the __c initialized from the cast.
+
+This fixes the rest of the function to use __c instead of __ch.
+
+libstdc++-v3/ChangeLog:
+
+	* include/bits/regex.tcc (regex_traits::value): Use __c instead
+	of __ch.
+
+(cherry picked from commit cc78f8523832d693f9e1dd2f48964e27fb90b947)
+---
+ libstdc++-v3/include/bits/regex.tcc | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/libstdc++-v3/include/bits/regex.tcc b/libstdc++-v3/include/bits/regex.tcc
+index a0edf272717e..48917cdfda91 100644
+--- a/libstdc++-v3/include/bits/regex.tcc
++++ b/libstdc++-v3/include/bits/regex.tcc
+@@ -348,11 +348,11 @@ namespace __detail
+ 	{
+ 	  const char __c = static_cast<char>(__ch);
+ 	  const char __max_digit = __radix == 8 ? '7' : '9';
+-	  if ('0' <= __ch && __ch <= __max_digit)
+-	    return __ch - '0';
++	  if ('0' <= __c && __c <= __max_digit)
++	    return __c - '0';
+ 	  if (__radix < 16)
+ 	    return -1;
+-	  switch (__ch)
++	  switch (__c)
+ 	  {
+ 	    case 'a':
+ 	    case 'A':
+-- 
+2.43.7
+
+

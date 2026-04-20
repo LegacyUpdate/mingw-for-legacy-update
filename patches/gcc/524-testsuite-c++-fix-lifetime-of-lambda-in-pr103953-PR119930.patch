@@ -1,0 +1,54 @@
+From f5adcf34b094458c5e49cd7642360db7b8b9cdbf Mon Sep 17 00:00:00 2001
+From: Andrew Pinski <andrew.pinski@oss.qualcomm.com>
+Date: Sat, 7 Mar 2026 11:24:14 -0800
+Subject: [PATCH] testsuite/c++: Fix lifetime of lambda in pr103953.C
+ [PR119930]
+
+So in the end the problem with pr103953.C is the lifetime
+of a lambda object is not extended past the statement.
+With sane operator new we are able to delete stores using
+that object as it is dead afterwards.
+
+So the fix to the testcase is to make the lambda its own
+object and then call it.
+
+I also went back to check to make sure the original issue was
+reproducible with this version too.
+
+Tested on x86_64-linux-gnu and the testcase failure is gone.
+
+	PR testsuite/119930
+
+gcc/testsuite/ChangeLog:
+
+	* g++.dg/coroutines/torture/pr103953.C: Store the second
+	lambda into its own object to extend its lifeime.
+
+Signed-off-by: Andrew Pinski <andrew.pinski@oss.qualcomm.com>
+(cherry picked from commit c7f44415a2788ec3879c2fcae56297a346852066)
+---
+ gcc/testsuite/g++.dg/coroutines/torture/pr103953.C | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/gcc/testsuite/g++.dg/coroutines/torture/pr103953.C b/gcc/testsuite/g++.dg/coroutines/torture/pr103953.C
+index da559f8fa0d1..877fd92303ad 100644
+--- a/gcc/testsuite/g++.dg/coroutines/torture/pr103953.C
++++ b/gcc/testsuite/g++.dg/coroutines/torture/pr103953.C
+@@ -63,9 +63,11 @@ int main() {
+ 	    co_return;
+ 	}();
+ 
+-	task coroutine_B = [&coroutine_A]() ->task {
++	auto t = [&coroutine_A]() ->task {
+ 	    co_await coroutine_A;
+-	}();
++	};
++
++	task coroutine_B = t();
+ 
+ 	coroutine_B.handle.resume();
+     }
+-- 
+2.43.7
+
+

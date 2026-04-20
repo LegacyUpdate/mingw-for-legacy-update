@@ -1,0 +1,37 @@
+From f65c92a675bccba7bb3359e42d18cd2e7c909294 Mon Sep 17 00:00:00 2001
+From: Richard Biener <rguenther@suse.de>
+Date: Wed, 25 Mar 2026 09:40:56 +0100
+Subject: [PATCH] tree-optimization/124627 - inlining and elided debug stmts
+
+When we fixup a noreturn call during inlining we can end up eliding
+debug stmts, so we have to make sure to not re-instantiate SSA
+operands on those later when processing all debug stmts.
+
+	PR tree-optimization/124627
+	* tree-inline.cc (copy_debug_stmts): Only copy debug
+	stmts that are still in the IL.
+
+(cherry picked from commit 415a00e0aae8b39ca81debfcdf82f9c53af203e7)
+---
+ gcc/tree-inline.cc | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/gcc/tree-inline.cc b/gcc/tree-inline.cc
+index e1b68d492220..fe004ff3b8f6 100644
+--- a/gcc/tree-inline.cc
++++ b/gcc/tree-inline.cc
+@@ -3347,7 +3347,9 @@ copy_debug_stmts (copy_body_data *id)
+     return;
+ 
+   for (gdebug *stmt : id->debug_stmts)
+-    copy_debug_stmt (stmt, id);
++    /* But avoid re-processing debug stmts that have been elided.  */
++    if (gimple_bb (stmt))
++      copy_debug_stmt (stmt, id);
+ 
+   id->debug_stmts.release ();
+ }
+-- 
+2.43.7
+
+

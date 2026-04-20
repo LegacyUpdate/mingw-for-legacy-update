@@ -1,0 +1,65 @@
+From f6aa67e5cffad440c9486f1832a79750f1c89dc0 Mon Sep 17 00:00:00 2001
+From: Marek Polacek <polacek@redhat.com>
+Date: Wed, 15 Apr 2026 14:15:06 -0400
+Subject: [PATCH] c++: ICE with deleted main [PR120338]
+
+Here we ICE with deleted main which is later redefined at
+
+  gcc_assert (DECL_SAVED_TREE (fn));
+
+because for some reason when deleting main I chose NULL_TREE instead of
+error_mark_node as its DECL_INITIAL.  For other deleted functions we
+also use error_mark_node so that
+
+  void foo() = delete;
+  void foo() {}
+
+results in the "redefinition of" error.  Let's do the same for main, then.
+
+	PR c++/120338
+
+gcc/cp/ChangeLog:
+
+	* decl.cc (cp_finish_decl): Set DECL_INITIAL to error_mark_node
+	instead of NULL_TREE for deleted main.
+
+gcc/testsuite/ChangeLog:
+
+	* g++.dg/cpp0x/deleted19.C: New test.
+
+Reviewed-by: Jason Merrill <jason@redhat.com>
+(cherry picked from commit 77d4080e1e5f9d467816e2e2e878edbfbb7ee1c1)
+---
+ gcc/cp/decl.cc                         | 2 +-
+ gcc/testsuite/g++.dg/cpp0x/deleted19.C | 5 +++++
+ 2 files changed, 6 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/g++.dg/cpp0x/deleted19.C
+
+diff --git a/gcc/cp/decl.cc b/gcc/cp/decl.cc
+index 7eb5185f410e..9d67a25ec908 100644
+--- a/gcc/cp/decl.cc
++++ b/gcc/cp/decl.cc
+@@ -8945,7 +8945,7 @@ cp_finish_decl (tree decl, tree init, bool init_const_expr_p,
+ 	      /* [basic.start.main]/3: A program that defines main as deleted
+ 		 is ill-formed.  */
+ 	      error ("%<::main%> cannot be deleted");
+-	      DECL_INITIAL (decl) = NULL_TREE;
++	      DECL_INITIAL (decl) = error_mark_node;
+ 	    }
+ 	  else
+ 	    {
+diff --git a/gcc/testsuite/g++.dg/cpp0x/deleted19.C b/gcc/testsuite/g++.dg/cpp0x/deleted19.C
+new file mode 100644
+index 000000000000..c3f8f067748e
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/cpp0x/deleted19.C
+@@ -0,0 +1,5 @@
++// PR c++/120338
++// { dg-do compile { target c++11 } }
++
++int main() = delete;  // { dg-error "cannot be deleted" }
++int main() {}	      // { dg-error "redefinition" }
+-- 
+2.43.7
+
+

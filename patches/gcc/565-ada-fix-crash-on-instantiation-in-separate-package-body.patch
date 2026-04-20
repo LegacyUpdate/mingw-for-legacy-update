@@ -1,0 +1,86 @@
+From 69d7a5ca6c4020205371759d30df70760d4f7386 Mon Sep 17 00:00:00 2001
+From: Eric Botcazou <ebotcazou@adacore.com>
+Date: Mon, 23 Mar 2026 22:01:52 +0100
+Subject: [PATCH] Ada: Fix crash on instantiation in separate package body
+
+This is an old regression present on all active branches for a quite unusual
+setup where a generic package is declared and instantiated in a subunit, and
+which comes from a thinko in the Has_Body.Find_Body routine of Sem_Elab.
+
+gcc/ada/
+	PR ada/124607
+	* sem_elab.adb (Has_Body.Find_Body): Fix thinko.
+
+gcc/testsuite/
+	* gnat.dg/generic_inst20.ads, gnat.dg/generic_inst20.adb: New test.
+	* gnat.dg/generic_inst20-sub.adb: New helper.
+---
+ gcc/ada/sem_elab.adb                         |  2 +-
+ gcc/testsuite/gnat.dg/generic_inst20-sub.adb | 14 ++++++++++++++
+ gcc/testsuite/gnat.dg/generic_inst20.adb     |  5 +++++
+ gcc/testsuite/gnat.dg/generic_inst20.ads     |  6 ++++++
+ 4 files changed, 26 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/gnat.dg/generic_inst20-sub.adb
+ create mode 100644 gcc/testsuite/gnat.dg/generic_inst20.adb
+ create mode 100644 gcc/testsuite/gnat.dg/generic_inst20.ads
+
+diff --git a/gcc/ada/sem_elab.adb b/gcc/ada/sem_elab.adb
+index 6547813a8e2e..3dc9ee48e095 100644
+--- a/gcc/ada/sem_elab.adb
++++ b/gcc/ada/sem_elab.adb
+@@ -9892,7 +9892,7 @@ package body Sem_Elab is
+                --  The corresponding subunit was previously loaded
+ 
+                if Present (Lib_Unit) then
+-                  return Lib_Unit;
++                  return Proper_Body (Unit (Lib_Unit));
+ 
+                --  Otherwise attempt to load the corresponding subunit
+ 
+diff --git a/gcc/testsuite/gnat.dg/generic_inst20-sub.adb b/gcc/testsuite/gnat.dg/generic_inst20-sub.adb
+new file mode 100644
+index 000000000000..d88ec8cbe1cd
+--- /dev/null
++++ b/gcc/testsuite/gnat.dg/generic_inst20-sub.adb
+@@ -0,0 +1,14 @@
++-- { dg-excess-errors "cannot generate code" }
++
++separate (Generic_Inst20)
++
++package body Sub is
++   function F return Boolean is
++   begin
++      return True;
++   end F;
++   generic
++   package G is
++   end G;
++   package I is new G;
++end Sub;
+diff --git a/gcc/testsuite/gnat.dg/generic_inst20.adb b/gcc/testsuite/gnat.dg/generic_inst20.adb
+new file mode 100644
+index 000000000000..c236e2ca6f96
+--- /dev/null
++++ b/gcc/testsuite/gnat.dg/generic_inst20.adb
+@@ -0,0 +1,5 @@
++-- { dg-do compile }
++
++package body Generic_Inst20 is
++   package body Sub is separate;
++end Generic_Inst20;
+diff --git a/gcc/testsuite/gnat.dg/generic_inst20.ads b/gcc/testsuite/gnat.dg/generic_inst20.ads
+new file mode 100644
+index 000000000000..28f717684a63
+--- /dev/null
++++ b/gcc/testsuite/gnat.dg/generic_inst20.ads
+@@ -0,0 +1,6 @@
++package Generic_Inst20 is
++   pragma Elaborate_Body;
++   package Sub is
++      function F return Boolean;
++   end Sub;
++end Generic_Inst20;
+-- 
+2.43.7
+
+

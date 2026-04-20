@@ -1,0 +1,377 @@
+From 1ac88858e4d47b397698a6db6a860851c8fa76ff Mon Sep 17 00:00:00 2001
+From: Robin Dapp <rdapp@oss.qualcomm.com>
+Date: Thu, 19 Feb 2026 15:44:38 +0100
+Subject: [PATCH] RISC-V: Consider uses for vsetvl LCM transparency. [PR122448]
+
+Until now we didn't consider (pre-existing) uses of vsetvl's destination
+registers when computing transparency for vsetvl LCM.  In rare instances,
+this can lead to hoisting vsetvls beyond blocks that have uses on such
+registers.
+
+We already check transparency when hoisting but here LCM computes edge
+insertion points.
+
+For vsetvl a5,zero,e16,m1 in BB 65 we have the following, not
+particularly uncommon, situation:
+
+                BB 63
+                 |  \
+                 |   \
+		 |    \
+		 v     |
+		BB 64  |
+                 |     |
+		 |    /
+		 |   /
+		 | /
+		 v
+		BB 65
+
+BB 64 uses a5, so is not transparent with respect to the vsetvl.
+BB 63 -> BB 65 is an edge LCM computes as earliest.
+But we're not inserting the vsetvl on just that edge like in regular LCM
+where we could have a new block along that edge but instead insert it at
+the end of BB 63.  At that point, though, the other outgoing edges and
+successor blocks have to be considered as well.
+
+The patch is two-fold.  It adds a new bitmap m_reg_use_loc that keeps
+track of uses of vsetvl destinations, rather than just new definitions
+and adds them to the transparency bitmap.  This correct LCM's
+computations with respect to uses.  Then, as described above, it
+prevents hoisting into the target block (BB 63) if the vsetvl's
+destination register is used outside of vsetvls in any other
+successor (BB 64).
+
+In regular, non-speculating LCM we would be able to just check ANTOUT but
+as we are hoisting speculatively this won't work.  We don't require all
+successors to have a vsetvl in order to hoist it to a block.
+Therefore the patch computes reaching definitions for all vsetvl's
+destination registers up to their AVL uses.  Knowing a block's live-in
+and the reaching definitions we can deduce that a use must be non-vsetvl
+and prone to clobbering.
+
+	PR target/122448
+
+gcc/ChangeLog:
+
+	* config/riscv/riscv-vsetvl.cc (compute_reaching_defintion):
+	Rename...
+	(compute_reaching_definition): ...To this.
+	(pre_vsetvl::compute_vsetvl_def_data):  Compute reaching
+	definitions for vsetvl VL -> vsetvl AVL.
+	(pre_vsetvl::compute_transparent): Include VL uses.
+	(pre_vsetvl::fuse_local_vsetvl_info): Initialize m_reg_use_loc.
+	(pre_vsetvl::earliest_fuse_vsetvl_info): Don't hoist if any
+	successor would use VL.
+
+gcc/testsuite/ChangeLog:
+
+	* g++.target/riscv/rvv/base/pr122448.C: New test.
+
+(cherry picked from commit 0635bfb53a145cc005a15657635abf8ea9e6e9ba)
+---
+ gcc/config/riscv/riscv-vsetvl.cc              | 142 ++++++++++++++++--
+ .../g++.target/riscv/rvv/base/pr122448.C      |  44 ++++++
+ 2 files changed, 173 insertions(+), 13 deletions(-)
+ create mode 100644 gcc/testsuite/g++.target/riscv/rvv/base/pr122448.C
+
+diff --git a/gcc/config/riscv/riscv-vsetvl.cc b/gcc/config/riscv/riscv-vsetvl.cc
+index 9d863903e231..a9ce5decc8ef 100644
+--- a/gcc/config/riscv/riscv-vsetvl.cc
++++ b/gcc/config/riscv/riscv-vsetvl.cc
+@@ -131,7 +131,7 @@ bitmap_union_of_preds_with_entry (sbitmap dst, sbitmap *src, basic_block b)
+    information's in each Base Blocks.
+    This function references the compute_available implementation in lcm.cc  */
+ static void
+-compute_reaching_defintion (sbitmap *gen, sbitmap *kill, sbitmap *in,
++compute_reaching_definition (sbitmap *gen, sbitmap *kill, sbitmap *in,
+ 			    sbitmap *out)
+ {
+   edge e;
+@@ -2263,12 +2263,20 @@ private:
+   /* data for avl reaching definition.  */
+   sbitmap *m_reg_def_loc;
+ 
++  /* Holds register uses per basic block.  Restricted to those registers that
++     are used as vsetvl destinations.  */
++  sbitmap *m_reg_use_loc;
++
+   /* data for vsetvl info reaching definition.  */
+   vsetvl_info m_unknown_info;
+   auto_vec<vsetvl_info *> m_vsetvl_def_exprs;
+   sbitmap *m_vsetvl_def_in;
+   sbitmap *m_vsetvl_def_out;
+ 
++  /* Reaching data for vsetvl AVL operands.  */
++  sbitmap *m_vsetvl_avl_reach_in;
++  sbitmap *m_vsetvl_avl_reach_out;
++
+   /* data for lcm */
+   auto_vec<vsetvl_info *> m_exprs;
+   sbitmap *m_avloc;
+@@ -2506,7 +2514,10 @@ private:
+ 
+ public:
+   pre_vsetvl ()
+-    : m_vsetvl_def_in (nullptr), m_vsetvl_def_out (nullptr), m_avloc (nullptr),
++    : m_reg_def_loc (nullptr), m_reg_use_loc (nullptr),
++      m_vsetvl_def_in (nullptr), m_vsetvl_def_out (nullptr),
++      m_vsetvl_avl_reach_in (nullptr), m_vsetvl_avl_reach_out (nullptr),
++      m_avloc (nullptr),
+       m_avin (nullptr), m_avout (nullptr), m_kill (nullptr), m_antloc (nullptr),
+       m_transp (nullptr), m_insert (nullptr), m_del (nullptr), m_edges (nullptr)
+   {
+@@ -2522,12 +2533,19 @@ public:
+ 
+     if (m_reg_def_loc)
+       sbitmap_vector_free (m_reg_def_loc);
++    if (m_reg_use_loc)
++      sbitmap_vector_free (m_reg_use_loc);
+ 
+     if (m_vsetvl_def_in)
+       sbitmap_vector_free (m_vsetvl_def_in);
+     if (m_vsetvl_def_out)
+       sbitmap_vector_free (m_vsetvl_def_out);
+ 
++    if (m_vsetvl_avl_reach_in)
++      sbitmap_vector_free (m_vsetvl_avl_reach_in);
++    if (m_vsetvl_avl_reach_out)
++      sbitmap_vector_free (m_vsetvl_avl_reach_out);
++
+     if (m_avloc)
+       sbitmap_vector_free (m_avloc);
+     if (m_kill)
+@@ -2608,6 +2626,10 @@ pre_vsetvl::compute_vsetvl_def_data ()
+     sbitmap_vector_free (m_vsetvl_def_in);
+   if (m_vsetvl_def_out)
+     sbitmap_vector_free (m_vsetvl_def_out);
++  if (m_vsetvl_avl_reach_in)
++    sbitmap_vector_free (m_vsetvl_avl_reach_in);
++  if (m_vsetvl_avl_reach_out)
++    sbitmap_vector_free (m_vsetvl_avl_reach_out);
+ 
+   sbitmap *def_loc = sbitmap_vector_alloc (last_basic_block_for_fn (cfun),
+ 					   m_vsetvl_def_exprs.length ());
+@@ -2619,6 +2641,11 @@ pre_vsetvl::compute_vsetvl_def_data ()
+   m_vsetvl_def_out = sbitmap_vector_alloc (last_basic_block_for_fn (cfun),
+ 					   m_vsetvl_def_exprs.length ());
+ 
++  m_vsetvl_avl_reach_in
++    = sbitmap_vector_alloc (last_basic_block_for_fn (cfun), GP_REG_LAST + 1);
++  m_vsetvl_avl_reach_out
++    = sbitmap_vector_alloc (last_basic_block_for_fn (cfun), GP_REG_LAST + 1);
++
+   bitmap_vector_clear (def_loc, last_basic_block_for_fn (cfun));
+   bitmap_vector_clear (m_kill, last_basic_block_for_fn (cfun));
+   bitmap_vector_clear (m_vsetvl_def_out, last_basic_block_for_fn (cfun));
+@@ -2655,8 +2682,8 @@ pre_vsetvl::compute_vsetvl_def_data ()
+   bitmap_set_bit (m_vsetvl_def_out[entry->index],
+ 		  get_expr_index (m_vsetvl_def_exprs, m_unknown_info));
+ 
+-  compute_reaching_defintion (def_loc, m_kill, m_vsetvl_def_in,
+-			      m_vsetvl_def_out);
++  compute_reaching_definition (def_loc, m_kill, m_vsetvl_def_in,
++			       m_vsetvl_def_out);
+ 
+   if (dump_file && (dump_flags & TDF_DETAILS))
+     {
+@@ -2688,6 +2715,27 @@ pre_vsetvl::compute_vsetvl_def_data ()
+ 
+   sbitmap_vector_free (def_loc);
+   sbitmap_vector_free (m_kill);
++
++  /* Now compute the reaching definitions for AVL operands.
++     We can reuse def_loc but index it by regnos now.  */
++  def_loc = sbitmap_vector_alloc (last_basic_block_for_fn (cfun),
++				  GP_REG_LAST + 1);
++
++  bitmap_vector_clear (def_loc, last_basic_block_for_fn (cfun));
++  bitmap_vector_clear (m_vsetvl_avl_reach_out, last_basic_block_for_fn (cfun));
++
++  for (const bb_info *bb : crtl->ssa->bbs ())
++    {
++      vsetvl_block_info &block_info = get_block_info (bb);
++      if (block_info.empty_p ())
++	continue;
++      vsetvl_info &info = block_info.get_exit_info ();
++      if (info.has_vl ())
++	bitmap_set_bit (def_loc[bb->index ()], REGNO (info.get_vl ()));
++    }
++
++  compute_reaching_definition (def_loc, m_reg_def_loc, m_vsetvl_avl_reach_in,
++			       m_vsetvl_avl_reach_out);
+ }
+ 
+ /* Subroutine of compute_lcm_local_properties which Compute local transparent
+@@ -2713,10 +2761,19 @@ pre_vsetvl::compute_transparent (const bb_info *bb)
+       if (info->has_nonvlmax_reg_avl ()
+ 	  && bitmap_bit_p (m_reg_def_loc[bb_index], REGNO (info->get_avl ())))
+ 	bitmap_clear_bit (m_transp[bb_index], i);
+-      else if (info->has_vl ()
+-	       && bitmap_bit_p (m_reg_def_loc[bb_index],
+-				REGNO (info->get_vl ())))
+-	bitmap_clear_bit (m_transp[bb_index], i);
++      else if (info->has_vl ())
++	{
++	  /* If the VL reg is redefined, we cannot move a vsetvl past it.  */
++	  if (bitmap_bit_p (m_reg_def_loc[bb_index],
++			    REGNO (info->get_vl ())))
++	    bitmap_clear_bit (m_transp[bb_index], i);
++	  /* Same if there is a VL reg use that didn't come from a vsetvl.  */
++	  else if (bitmap_bit_p (m_reg_use_loc[bb_index],
++				 REGNO (info->get_vl ()))
++		   && !bitmap_bit_p (m_vsetvl_avl_reach_in[bb_index],
++				     REGNO (info->get_vl ())))
++	    bitmap_clear_bit (m_transp[bb_index], i);
++	}
+     }
+ }
+ 
+@@ -2852,6 +2909,21 @@ pre_vsetvl::fuse_local_vsetvl_info ()
+   bitmap_vector_clear (m_reg_def_loc, last_basic_block_for_fn (cfun));
+   bitmap_ones (m_reg_def_loc[ENTRY_BLOCK_PTR_FOR_FN (cfun)->index]);
+ 
++  m_reg_use_loc
++    = sbitmap_vector_alloc (last_basic_block_for_fn (cfun), GP_REG_LAST + 1);
++  bitmap_vector_clear (m_reg_use_loc, last_basic_block_for_fn (cfun));
++
++  /* No need to track all GPRs, just use those that are VL destinations.
++     Store them in a bitmap for filtering the uses later on.  */
++  auto_bitmap vsetvl_dest_regs;
++  for (bb_info *bb : crtl->ssa->bbs ())
++    for (insn_info *insn : bb->real_nondebug_insns ())
++      {
++	vsetvl_info info = vsetvl_info (insn);
++	if (info.valid_p () && info.has_vl ())
++	  bitmap_set_bit (vsetvl_dest_regs, REGNO (info.get_vl ()));
++      }
++
+   for (bb_info *bb : crtl->ssa->bbs ())
+     {
+       auto &block_info = get_block_info (bb);
+@@ -2867,11 +2939,22 @@ pre_vsetvl::fuse_local_vsetvl_info ()
+ 	  if (curr_info.valid_p () || curr_info.unknown_p ())
+ 	    infos.safe_push (curr_info);
+ 
+-	  /* Collecting GP registers modified by the current bb.  */
+ 	  if (insn->is_real ())
+-	    for (def_info *def : insn->defs ())
+-	      if (def->is_reg () && GP_REG_P (def->regno ()))
+-		bitmap_set_bit (m_reg_def_loc[bb->index ()], def->regno ());
++	    {
++	      /* Collect GPRs modified by the current bb.  */
++	      for (def_info *def : insn->defs ())
++		if (def->is_reg () && GP_REG_P (def->regno ()))
++		  bitmap_set_bit (m_reg_def_loc[bb->index ()], def->regno ());
++	      /* Collect non-vsetvl uses of GPRs.  */
++	      if (!curr_info.valid_p ())
++		{
++		  for (use_info *use : insn->uses ())
++		    if (use->is_reg () && GP_REG_P (use->regno ())
++			&& bitmap_bit_p (vsetvl_dest_regs, use->regno ()))
++		      bitmap_set_bit (m_reg_use_loc[bb->index ()],
++				      use->regno ());
++		}
++	    }
+ 	}
+ 
+       vsetvl_info prev_info = vsetvl_info ();
+@@ -3116,10 +3199,43 @@ pre_vsetvl::earliest_fuse_vsetvl_info (int iter)
+ 	      if (!bitmap_bit_p (m_transp[eg->src->index], expr_index))
+ 		continue;
+ 
++	      /* Transparency tells us if we can move upwards without looking
++		 down.  It is still possible to clobber non-vsetvl uses
++		 that happen to share the vsetvl destination register of the
++		 vsetvl we are about to hoist.
++		 As we have computed the vsetvl VL dest -> vsetvl AVL reach
++		 before, we can check if our VL register is live-in for each
++		 successor and not reached by a vsetvl.  If so, we cannot
++		 hoist, as that would clobber the use.  */
++	      if (curr_info.has_vl ())
++		{
++		  edge succ;
++		  edge_iterator it;
++		  bool clobber = false;
++		  FOR_EACH_EDGE (succ, it, eg->src->succs)
++		    {
++		      if (succ->dest == eg->dest)
++			continue;
++		      if (bitmap_bit_p (df_get_live_in (succ->dest),
++					REGNO (curr_info.get_vl ()))
++			  && !bitmap_bit_p
++			  (m_vsetvl_avl_reach_in[succ->dest->index],
++			   REGNO (curr_info.get_vl ())))
++			{
++			  clobber = true;
++			  break;
++			}
++		    }
++		  if (clobber)
++		    continue;
++		}
++
++
+ 	      if (dump_file && (dump_flags & TDF_DETAILS))
+ 		{
+ 		  fprintf (dump_file,
+-			   "      Set empty bb %u to info:", eg->src->index);
++			   "      Hoisting vsetvl info from bb %u to "
++			   "bb %u: ", eg->dest->index, eg->src->index);
+ 		  curr_info.dump (dump_file, "        ");
+ 		}
+ 	      src_block_info.set_info (curr_info);
+diff --git a/gcc/testsuite/g++.target/riscv/rvv/base/pr122448.C b/gcc/testsuite/g++.target/riscv/rvv/base/pr122448.C
+new file mode 100644
+index 000000000000..c05f14690df1
+--- /dev/null
++++ b/gcc/testsuite/g++.target/riscv/rvv/base/pr122448.C
+@@ -0,0 +1,44 @@
++/* { dg-do run } */
++/* { dg-require-effective-target riscv_v_ok } */
++/* { dg-additional-options "-O3 -march=rv64gcv -mabi=lp64d -fdump-rtl-vsetvl-details" } */
++
++#include <riscv_vector.h>
++int a;
++long b = -2260814313524985651LL;
++short c; char d;
++short e[576];
++unsigned long long f;
++void g(unsigned long long *i, unsigned long long ad) { *i = ad; }
++int8_t j[4];
++int16_t k[4], l[4];
++void m() {
++  for (short n = 1; n < 023; n += 4)
++    for (short o = 0; o < static_cast<short>(1033314678U); o += 4)
++      for (int p = (int)((long long)(b - 859406540) & 0xFFFFFFFF); p < 9; p += 3) {
++        c ^= static_cast<short>(1033314678 % 0x10000);
++        d &= static_cast<char>(a ? 0 : e[p * 24]);
++      }
++  for (bool q = 0; q < (bool)8; q = 1) {
++    size_t r = 4;
++    for (size_t v; r; r -= v) {
++      v = __riscv_vsetvl_e16m1(r);
++      vint8mf2_t w = __riscv_vle8_v_i8mf2(&j[0], v);
++      vbool16_t ac = __riscv_vmseq_vx_i8mf2_b16(w, 1, v);
++      vint16m1_t x = __riscv_vmv_v_x_i16m1(0, __riscv_vsetvlmax_e16m1());
++      vuint16m1_t y = __riscv_vsll_vx_u16m1(__riscv_vid_v_u16m1(v), 1, v);
++      vint16m1_t z = __riscv_vluxei16_v_i16m1_tu(x, &k[0], y, v);
++      vint16m1_t aa = __riscv_vmax_vv_i16m1(z, z, v);
++      vuint8mf2_t ab = __riscv_vsll_vx_u8mf2(__riscv_vid_v_u8mf2(v), 1, v);
++      __riscv_vsoxei8_v_i16m1_m(ac, &l[0], ab, aa, v);
++    }
++  }
++}
++
++int main() {
++  m();
++  g(&f, d);
++  if (f != 0)
++    __builtin_abort ();
++}
++
++/* { dg-final { scan-rtl-dump-not "Hoisting vsetvl" "vsetvl" } } */
+-- 
+2.43.7
+
+

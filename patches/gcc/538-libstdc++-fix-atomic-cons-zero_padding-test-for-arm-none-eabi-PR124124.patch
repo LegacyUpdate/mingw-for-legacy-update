@@ -1,0 +1,70 @@
+From bbf8b6bbbfd46f950bf62f2f36699aa590678916 Mon Sep 17 00:00:00 2001
+From: =?utf8?q?Tomasz=20Kami=C5=84ski?= <tkaminsk@redhat.com>
+Date: Thu, 5 Mar 2026 08:57:24 +0100
+Subject: [PATCH] libstdc++: Fix atomic/cons/zero_padding.cc test for
+ arm-none-eabi [PR124124]
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf8
+Content-Transfer-Encoding: 8bit
+
+The test uses dg-require-atomic-cmpxchg-word that checks if atomic compare
+exchange is available for pointer sized integers, and then test types that
+are eight bytes in size. This causes issue for targets for which pointers
+are four byte and libatomic is not present, like arm-none-eabi.
+
+This patch addresses by using short member in TailPadding and MidPadding,
+instead of int. This reduces the size of types to four bytes, while keeping
+padding bytes present.
+
+	PR libstdc++/124124
+
+libstdc++-v3/ChangeLog:
+
+	* testsuite/29_atomics/atomic/cons/zero_padding.cc: Limit size of
+	test types to four bytes.
+
+Reviewed-by: Jonathan Wakely <jwakely@redhat.com>
+Signed-off-by: Tomasz KamiÅski <tkaminsk@redhat.com>
+(cherry picked from commit 3a41229f92022bfb388911854d597721fce76714)
+---
+ .../testsuite/29_atomics/atomic/cons/zero_padding.cc      | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/libstdc++-v3/testsuite/29_atomics/atomic/cons/zero_padding.cc b/libstdc++-v3/testsuite/29_atomics/atomic/cons/zero_padding.cc
+index f85ac4859ec5..4418b6c07e60 100644
+--- a/libstdc++-v3/testsuite/29_atomics/atomic/cons/zero_padding.cc
++++ b/libstdc++-v3/testsuite/29_atomics/atomic/cons/zero_padding.cc
+@@ -6,12 +6,12 @@
+ #include <cstring>
+ #include <testsuite_hooks.h>
+ 
+-struct TailPadding { int i; char c; };
++struct TailPadding { short i; char c; };
+ TailPadding ztail{1, 2}; // zeroed-padding
+ constexpr std::atomic<TailPadding> ctail(TailPadding{1,2});
+ std::atomic<TailPadding> gtail(TailPadding{1,2});
+ 
+-struct MidPadding { char c; int x; };
++struct MidPadding { char c; short i; };
+ MidPadding zmid{1, 2}; // zeroed-padding
+ constexpr std::atomic<MidPadding> cmid(MidPadding{1,2});
+ std::atomic<MidPadding> gmid(MidPadding{1,2});
+@@ -25,12 +25,12 @@ struct Ctor
+ {
+   Ctor() = default;
+ 
+-  constexpr Ctor(char pc, char pi)
++  constexpr Ctor(char pc, short pi)
+     : c(pc), i(pi)
+   {}
+ 
+   char c;
+-  int i;
++  short i;
+ };
+ 
+ Ctor zctor{1, 2}; // zeroed-padding
+-- 
+2.43.7
+
+

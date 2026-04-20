@@ -1,0 +1,95 @@
+From abd18b4bc2a819dd338887968e62e3bdb11f0a1b Mon Sep 17 00:00:00 2001
+From: Christopher Albert <albert@tugraz.at>
+Date: Tue, 10 Mar 2026 18:46:54 +0100
+Subject: [PATCH] fortran: Fix OpenMP iterator depend lowering for component
+ arrays [PR102459]
+
+When lowering an OpenMP depend clause with an iterator expression such as
+x(j)%a, the front end currently looks only at the first REF_ARRAY to
+decide between scalar-reference lowering and array-descriptor lowering.
+For x(j)%a that first ref is the scalar base element x(j), but the full
+expression is still the rank-1 component array a.
+
+As a result, the code calls gfc_conv_expr_reference on an array-valued
+expression, which later reaches gfc_conv_scalarized_array_ref without a
+scalarizer state and ICEs.
+
+Fix this by choosing the lowering path from the rank of the full
+expression.  Rank-zero expressions still use gfc_conv_expr_reference,
+while array-valued expressions are lowered through gfc_conv_expr_descriptor.
+Apply the same adjustment to the analogous depobj helper and add a
+regression test for task depend clauses covering both x(j)%a and the
+scalar control case x(j)%a(1).
+
+gcc/fortran/ChangeLog:
+
+	PR fortran/102459
+	* trans-openmp.cc (gfc_trans_omp_clauses): Choose the scalar
+	reference path from the full expression rank rather than the first
+	array reference.
+	(gfc_trans_omp_depobj): Likewise.
+
+gcc/testsuite/ChangeLog:
+
+	PR fortran/102459
+	* gfortran.dg/pr102459.f90: New test.
+
+Signed-off-by: Christopher Albert <albert@tugraz.at>
+(cherry picked from commit d2ab04fbba7b97d17e4f9e0885d71a4e1faafc96)
+---
+ gcc/fortran/trans-openmp.cc            |  8 ++++++--
+ gcc/testsuite/gfortran.dg/pr102459.f90 | 15 +++++++++++++++
+ 2 files changed, 21 insertions(+), 2 deletions(-)
+ create mode 100644 gcc/testsuite/gfortran.dg/pr102459.f90
+
+diff --git a/gcc/fortran/trans-openmp.cc b/gcc/fortran/trans-openmp.cc
+index 4aa2503fddc4..59cd57929c9b 100644
+--- a/gcc/fortran/trans-openmp.cc
++++ b/gcc/fortran/trans-openmp.cc
+@@ -4010,7 +4010,11 @@ gfc_trans_omp_clauses (stmtblock_t *block, gfc_omp_clauses *clauses,
+ 		{
+ 		  tree ptr;
+ 		  gfc_init_se (&se, NULL);
+-		  if (n->expr->ref->u.ar.type == AR_ELEMENT)
++		  /* The first ref can be an element selection on the base
++		     object while the full expression still denotes an array,
++		     e.g. x(j)%a.  Pick the lowering path from the overall
++		     expression rank, not from the first REF_ARRAY.  */
++		  if (n->expr->rank == 0)
+ 		    {
+ 		      gfc_conv_expr_reference (&se, n->expr);
+ 		      ptr = se.expr;
+@@ -7338,7 +7342,7 @@ gfc_trans_omp_depobj (gfc_code *code)
+       else if (n->expr && n->expr->ref->u.ar.type != AR_FULL)
+ 	{
+ 	  gfc_init_se (&se, NULL);
+-	  if (n->expr->ref->u.ar.type == AR_ELEMENT)
++	  if (n->expr->rank == 0)
+ 	    {
+ 	      gfc_conv_expr_reference (&se, n->expr);
+ 	      var = se.expr;
+diff --git a/gcc/testsuite/gfortran.dg/pr102459.f90 b/gcc/testsuite/gfortran.dg/pr102459.f90
+new file mode 100644
+index 000000000000..c6b6c5eed634
+--- /dev/null
++++ b/gcc/testsuite/gfortran.dg/pr102459.f90
+@@ -0,0 +1,15 @@
++! { dg-do compile }
++! { dg-additional-options "-fopenmp" }
++
++program p
++  type t
++    integer :: a(2)
++  end type
++  type(t) :: x(8)
++
++  !$omp task depend (iterator(j=1:8), out:x(j)%a)
++  !$omp end task
++
++  !$omp task depend (iterator(j=1:8), out:x(j)%a(1))
++  !$omp end task
++end
+-- 
+2.43.7
+
+

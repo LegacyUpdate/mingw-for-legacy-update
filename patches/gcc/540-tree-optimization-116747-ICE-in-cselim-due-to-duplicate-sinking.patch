@@ -1,0 +1,122 @@
+From 053a6bfc407be8de6099bad82204cef02854aa6b Mon Sep 17 00:00:00 2001
+From: Richard Biener <rguenther@suse.de>
+Date: Thu, 29 Jan 2026 08:47:44 +0100
+Subject: [PATCH] tree-optimization/116747 - ICE in cselim due to duplicate
+ sinking
+
+The following avoids queueing duplicate stmts in the set of sinkings
+to consider as well as pick candidates in an order that ensures
+we don't unnecessarily re-order stores.  While we currently only can
+trigger the ICE with out-of-bound accesses future enhancements
+to how we deal with dependence analysis in this pass could expose
+the issue to a wider range of testcases, so this makes it future-proof.
+
+	PR tree-optimization/116747
+	* tree-ssa-phiopt.cc (cond_if_else_store_replacement): Avoid
+	duplicate stmts in the set of store pairs to process.
+
+	* gcc.dg/tree-ssa/cselim-4.c: New testcase.
+
+(cherry picked from commit 312ba8d740bb4302a038e11c45891addf0c7e9f9)
+---
+ gcc/testsuite/gcc.dg/tree-ssa/cselim-4.c | 32 ++++++++++++++++++++++++
+ gcc/tree-ssa-phiopt.cc                   | 23 ++++++++++++++---
+ 2 files changed, 52 insertions(+), 3 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.dg/tree-ssa/cselim-4.c
+
+diff --git a/gcc/testsuite/gcc.dg/tree-ssa/cselim-4.c b/gcc/testsuite/gcc.dg/tree-ssa/cselim-4.c
+new file mode 100644
+index 000000000000..2e1121a834a1
+--- /dev/null
++++ b/gcc/testsuite/gcc.dg/tree-ssa/cselim-4.c
+@@ -0,0 +1,32 @@
++/* { dg-do compile } */
++/* { dg-options "-O3 -fno-expensive-optimizations -fno-tree-dse -fgimple" } */
++
++/* We're testing the CSELIM pass but we need VRP to compute the range
++   for b_4 to make the array1[] accesses out-of-bound.  */
++
++int array1[1];
++int __GIMPLE (ssa,startwith("vrp"),guessed_local(1073741824))
++f1 (int a, short unsigned int b1, int c)
++{
++  int b;
++
++  __BB(2,guessed_local(1073741824)):
++  b_3 = (int) b1_2(D);
++  b_4 = b_3 + 1;
++  if (a_5(D) != 0)
++    goto __BB3(guessed(67108864));
++  else
++    goto __BB4(guessed(67108864));
++
++  __BB(3,guessed_local(536870912)):
++  array1[b_4] = c_7(D);
++  array1[b_4] = c_7(D);
++  goto __BB5(precise(134217728));
++
++  __BB(4,guessed_local(536870912)):
++  array1[b_4] = c_7(D);
++  goto __BB5(precise(134217728));
++
++  __BB(5,guessed_local(1073741824)):
++  return;
++}
+diff --git a/gcc/tree-ssa-phiopt.cc b/gcc/tree-ssa-phiopt.cc
+index 29c072362602..f3afd302f83a 100644
+--- a/gcc/tree-ssa-phiopt.cc
++++ b/gcc/tree-ssa-phiopt.cc
+@@ -3865,9 +3865,21 @@ cond_if_else_store_replacement (basic_block then_bb, basic_block else_bb,
+       return false;
+     }
+ 
+-  /* Find pairs of stores with equal LHS.  */
++  /* Clear visited on else stores, we want to make sure to pick each store
++     at most once to avoid quadratic behavior.  */
++  for (auto else_dr : else_datarefs)
++    {
++      if (DR_IS_READ (else_dr))
++	continue;
++      gimple_set_visited (DR_STMT (else_dr), false);
++    }
++
++  /* Find pairs of stores with equal LHS.  Work from the end to avoid
++     re-ordering stores unnecessarily.  */
+   auto_vec<std::pair<gimple *, gimple *>, 1> stores_pairs;
+-  for (auto then_dr : then_datarefs)
++  unsigned i;
++  data_reference_p then_dr;
++  FOR_EACH_VEC_ELT_REVERSE (then_datarefs, i, then_dr)
+     {
+       if (DR_IS_READ (then_dr))
+         continue;
+@@ -3878,12 +3890,16 @@ cond_if_else_store_replacement (basic_block then_bb, basic_block else_bb,
+ 	continue;
+       found = false;
+ 
+-      for (auto else_dr : else_datarefs)
++      unsigned j;
++      data_reference_p else_dr;
++      FOR_EACH_VEC_ELT_REVERSE (else_datarefs, j, else_dr)
+         {
+           if (DR_IS_READ (else_dr))
+             continue;
+ 
+           else_store = DR_STMT (else_dr);
++	  if (gimple_visited_p (else_store))
++	    continue;
+           else_lhs = gimple_get_lhs (else_store);
+ 	  if (else_lhs == NULL_TREE)
+ 	    continue;
+@@ -3898,6 +3914,7 @@ cond_if_else_store_replacement (basic_block then_bb, basic_block else_bb,
+       if (!found)
+         continue;
+ 
++      gimple_set_visited (else_store, true);
+       stores_pairs.safe_push (std::make_pair (then_store, else_store));
+     }
+ 
+-- 
+2.43.7
+
+

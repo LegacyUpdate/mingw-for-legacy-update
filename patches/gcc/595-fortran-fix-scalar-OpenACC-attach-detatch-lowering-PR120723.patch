@@ -1,0 +1,94 @@
+From 8a81c67b692caff93ad6cfeba3deecf13b9b31b4 Mon Sep 17 00:00:00 2001
+From: Christopher Albert <albert@tugraz.at>
+Date: Tue, 10 Mar 2026 23:26:13 +0100
+Subject: [PATCH] fortran: Fix scalar OpenACC attach/detach lowering [PR120723]
+
+Lower bare scalar OpenACC attach/detach clauses as direct attach operations instead of emitting standalone pointer-mapping nodes.
+
+	PR fortran/120723
+
+gcc/fortran/ChangeLog:
+
+	* trans-openmp.cc (gfc_trans_omp_clauses): Handle bare scalar
+	OpenACC attach/detach clauses without pointer-mapping nodes.
+
+gcc/testsuite/ChangeLog:
+
+	* gfortran.dg/goacc/pr120723.f90: New test.
+
+Signed-off-by: Christopher Albert <albert@tugraz.at>
+(cherry picked from commit 0af9613810ecdc991633f58f5dd81a574aa2af31)
+---
+ gcc/fortran/trans-openmp.cc                  | 20 ++++++++++++++++++++
+ gcc/testsuite/gfortran.dg/goacc/pr120723.f90 | 20 ++++++++++++++++++++
+ 2 files changed, 40 insertions(+)
+ create mode 100644 gcc/testsuite/gfortran.dg/goacc/pr120723.f90
+
+diff --git a/gcc/fortran/trans-openmp.cc b/gcc/fortran/trans-openmp.cc
+index 59cd57929c9b..08cd74fcaacf 100644
+--- a/gcc/fortran/trans-openmp.cc
++++ b/gcc/fortran/trans-openmp.cc
+@@ -4257,6 +4257,14 @@ gfc_trans_omp_clauses (stmtblock_t *block, gfc_omp_clauses *clauses,
+ 				       != BT_VOID))))
+ 		    {
+ 		      tree orig_decl = decl;
++		      bool bare_attach_detach
++			= (openacc
++			   && (n->u.map.op == OMP_MAP_ATTACH
++			       || n->u.map.op == OMP_MAP_DETACH)
++			   && !GFC_DESCRIPTOR_TYPE_P (TREE_TYPE (decl))
++			   && !(POINTER_TYPE_P (TREE_TYPE (decl))
++				&& GFC_DESCRIPTOR_TYPE_P (TREE_TYPE
++							  (TREE_TYPE (decl)))));
+ 
+ 		      /* For nonallocatable, nonpointer arrays, a temporary
+ 			 variable is generated, but this one is only defined if
+@@ -4281,6 +4289,18 @@ gfc_trans_omp_clauses (stmtblock_t *block, gfc_omp_clauses *clauses,
+ 							     cond, tmp,
+ 							     NULL_TREE));
+ 			}
++		      /* Bare OpenACC attach/detach on scalar pointer-like
++			 variables wants a single attach operation on the
++			 pointer itself, not a standalone pointer-mapping
++			 node.  Component and descriptor cases have dedicated
++			 handling below; this covers the plain scalar path.  */
++		      if (bare_attach_detach)
++			{
++			  decl = build_fold_indirect_ref (decl);
++			  OMP_CLAUSE_DECL (node) = build_fold_addr_expr (decl);
++			  OMP_CLAUSE_SIZE (node) = size_zero_node;
++			  goto finalize_map_clause;
++			}
+ 		      /* For descriptor types, the unmapping happens below.  */
+ 		      if (op != EXEC_OMP_TARGET_EXIT_DATA
+ 			  || !GFC_DESCRIPTOR_TYPE_P (TREE_TYPE (decl)))
+diff --git a/gcc/testsuite/gfortran.dg/goacc/pr120723.f90 b/gcc/testsuite/gfortran.dg/goacc/pr120723.f90
+new file mode 100644
+index 000000000000..606dcbd4f2fe
+--- /dev/null
++++ b/gcc/testsuite/gfortran.dg/goacc/pr120723.f90
+@@ -0,0 +1,20 @@
++! { dg-do compile }
++! { dg-additional-options "-fdump-tree-original" }
++!
++! PR fortran/120723 - scalar OpenACC attach/detach must not lower through a
++! standalone pointer-mapping node.
++
++implicit none (type, external)
++integer, pointer :: a, b(:)
++integer, allocatable :: c, d(:)
++
++! Scalar pointer and allocatable items used to ICE here.
++!$acc enter data attach(a, c)
++!$acc enter data attach(b, d)
++!$acc exit data detach(a, c)
++!$acc exit data detach(b, d)
++
++! { dg-final { scan-tree-dump-times "(?n)#pragma acc enter data map\\(attach:a \\\[bias: 0\\\]\\) map\\(attach:c \\\[bias: 0\\\]\\);$" 1 "original" } }
++! { dg-final { scan-tree-dump-times "(?n)#pragma acc exit data map\\(detach:a \\\[bias: 0\\\]\\) map\\(detach:c \\\[bias: 0\\\]\\);$" 1 "original" } }
++
++end
+-- 
+2.43.7
+
+

@@ -1,0 +1,36 @@
+From a9381c0d1fedb93bcd0843c6883677990a380981 Mon Sep 17 00:00:00 2001
+From: Eric Botcazou <ebotcazou@adacore.com>
+Date: Sun, 12 Apr 2026 10:59:52 +0200
+Subject: [PATCH] Ada: Fix maximum path length regression on Windows
+
+That's a regression present on all active branches, whereby GNAT uses a
+maximum path length of 256 instead of 260 bytes on Windows.
+
+gcc/ada/
+	PR ada/124836
+	* adaint.c [__MINGW32__]: Do not include mingw32.h twice, and also
+	include sys/param.h.
+---
+ gcc/ada/adaint.c | 4 ----
+ 1 file changed, 4 deletions(-)
+
+diff --git a/gcc/ada/adaint.c b/gcc/ada/adaint.c
+index 1fcfae165a7e..a51bee4ded38 100644
+--- a/gcc/ada/adaint.c
++++ b/gcc/ada/adaint.c
+@@ -344,11 +344,7 @@ const char *__gnat_library_template = GNAT_LIBRARY_TEMPLATE;
+ 
+ #else
+ 
+-#if defined (__MINGW32__)
+-#include "mingw32.h"
+-#else
+ #include <sys/param.h>
+-#endif
+ 
+ #ifdef MAXPATHLEN
+ #define GNAT_MAX_PATH_LEN MAXPATHLEN
+-- 
+2.43.7
+
+

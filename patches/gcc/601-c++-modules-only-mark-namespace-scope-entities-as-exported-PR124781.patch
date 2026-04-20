@@ -1,0 +1,98 @@
+From 76605c7b097a46cc221530e19509709a5266393d Mon Sep 17 00:00:00 2001
+From: Nathaniel Shead <nathanieloshead@gmail.com>
+Date: Sun, 5 Apr 2026 23:26:32 +1000
+Subject: [PATCH] c++/modules: Only mark namespace-scope entities as exported
+ [PR124781]
+
+We call 'set_originating_module' before we call pushdecl, which means
+that for function-scope entities we might not have set DECL_CONTEXT yet.
+Usually this doesn't matter, we only look at DECL_MODULE_EXPORT/ATTACH_P
+on namespace-scope entities to begin with, but in the case in the linked
+PR it causes issues because declarations in an unevaluated lambda appear
+to be in an internal context.
+
+Fixed by only considering non-null DECL_CONTEXT as being namespace scope
+within set_originating_module.
+
+As a drive-by improvement, ensured that we only talk about unnamed
+namespaces in the diagnostic within check_module_decl_linkage if we're
+actually within an anonymous namespace; this should be equivalent but
+will lead to a slightly clearer diagnostic if a similar bug crops up
+again later.
+
+	PR c++/124781
+
+gcc/cp/ChangeLog:
+
+	* module.cc (set_originating_module): Add a function comment,
+	only set attachment/exporting for entities with non-NULL
+	DECL_CONTEXT.
+	(check_module_decl_linkage): Use decl_anon_ns_mem_p instead of
+	decl_internal_context_p.
+
+gcc/testsuite/ChangeLog:
+
+	* g++.dg/modules/export-7.C: New test.
+
+Signed-off-by: Nathaniel Shead <nathanieloshead@gmail.com>
+Reviewed-by: Jason Merrill <jason@redhat.com>
+(cherry picked from commit c396fcf5ad4ad022b2b0638d7f1f80324d713458)
+---
+ gcc/cp/module.cc                        | 10 ++++++++--
+ gcc/testsuite/g++.dg/modules/export-7.C | 10 ++++++++++
+ 2 files changed, 18 insertions(+), 2 deletions(-)
+ create mode 100644 gcc/testsuite/g++.dg/modules/export-7.C
+
+diff --git a/gcc/cp/module.cc b/gcc/cp/module.cc
+index fb405281d6e8..515015b0b642 100644
+--- a/gcc/cp/module.cc
++++ b/gcc/cp/module.cc
+@@ -20887,12 +20887,18 @@ set_defining_module_for_partial_spec (tree decl)
+     vec_safe_push (partial_specializations, decl);
+ }
+ 
++/* Record that DECL is declared in this TU, and note attachment and
++   exporting for namespace-scope entities.  FRIEND_P is true if
++   this is a friend declaration.  */
++
+ void
+ set_originating_module (tree decl, bool friend_p ATTRIBUTE_UNUSED)
+ {
+   set_instantiating_module (decl);
+ 
+-  if (!DECL_NAMESPACE_SCOPE_P (decl))
++  /* DECL_CONTEXT may not be set yet when we're called for
++     non-namespace-scope entities.  */
++  if (!DECL_CONTEXT (decl) || !DECL_NAMESPACE_SCOPE_P (decl))
+     return;
+ 
+   gcc_checking_assert (friend_p || decl == get_originating_module_decl (decl));
+@@ -20945,7 +20951,7 @@ check_module_decl_linkage (tree decl)
+ 	 internal namespace as exporting a declaration with internal
+ 	 linkage, as this would also implicitly export the internal
+ 	 linkage namespace.  */
+-      if (decl_internal_context_p (decl))
++      if (decl_anon_ns_mem_p (decl))
+ 	{
+ 	  error_at (DECL_SOURCE_LOCATION (decl),
+ 		    "exporting declaration %qD declared in unnamed namespace",
+diff --git a/gcc/testsuite/g++.dg/modules/export-7.C b/gcc/testsuite/g++.dg/modules/export-7.C
+new file mode 100644
+index 000000000000..11001390d17a
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/modules/export-7.C
+@@ -0,0 +1,10 @@
++// PR c++/124781
++// { dg-do compile { target c++20 } }
++// { dg-additional-options "-fmodules" }
++// { dg-module-cmi foo }
++
++export module foo;
++export using xx = decltype([] {
++  using yy = int;
++  int abc = 123;
++}());
+-- 
+2.43.7
+
+

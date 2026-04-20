@@ -1,0 +1,58 @@
+From 8a3721f43a8f0fa8603d6e13e1db0e09cb175914 Mon Sep 17 00:00:00 2001
+From: Jerry DeLisle <jvdelisle@gcc.gnu.org>
+Date: Thu, 12 Mar 2026 10:23:47 -0700
+Subject: [PATCH] Fortran: [PR121743] ICE in build_function_decl.
+
+	PR fortran/121743
+
+gcc/fortran/ChangeLog:
+
+	* trans-decl.cc (build_function_decl): Adjust the
+	gcc_assert condition to avoid the ICE.
+
+gcc/testsuite/ChangeLog:
+
+	* gfortran.dg/pr121743.f90: New test.
+
+Co-Authored-By: Gilles Gouaillardet <gilles.gouaillardet@gmail.com>
+(cherry picked from commit 89efa006922c80b8e9164cf593e0135df08a56a4)
+---
+ gcc/fortran/trans-decl.cc              |  2 ++
+ gcc/testsuite/gfortran.dg/pr121743.f90 | 11 +++++++++++
+ 2 files changed, 13 insertions(+)
+ create mode 100644 gcc/testsuite/gfortran.dg/pr121743.f90
+
+diff --git a/gcc/fortran/trans-decl.cc b/gcc/fortran/trans-decl.cc
+index 4f2ea7636b77..fd46ffc063de 100644
+--- a/gcc/fortran/trans-decl.cc
++++ b/gcc/fortran/trans-decl.cc
+@@ -2518,6 +2518,8 @@ build_function_decl (gfc_symbol * sym, bool global)
+   /* Allow only one nesting level.  Allow public declarations.  */
+   gcc_assert (current_function_decl == NULL_TREE
+ 	      || DECL_FILE_SCOPE_P (current_function_decl)
++	      || (TREE_CODE (DECL_CONTEXT (current_function_decl))
++		  == FUNCTION_DECL)
+ 	      || (TREE_CODE (DECL_CONTEXT (current_function_decl))
+ 		  == NAMESPACE_DECL));
+ 
+diff --git a/gcc/testsuite/gfortran.dg/pr121743.f90 b/gcc/testsuite/gfortran.dg/pr121743.f90
+new file mode 100644
+index 000000000000..29a1cdec2ac5
+--- /dev/null
++++ b/gcc/testsuite/gfortran.dg/pr121743.f90
+@@ -0,0 +1,11 @@
++! PR fortran/121743
++! { dg-do compile }
++! { dg-options "-fcoarray=lib" }
++
++program pr121743
++end program pr121743
++subroutine foo ()
++  integer, allocatable, dimension(:), codimension[:] :: s
++  integer :: i
++  i = s(1)[1]
++end
+-- 
+2.43.7
+
+

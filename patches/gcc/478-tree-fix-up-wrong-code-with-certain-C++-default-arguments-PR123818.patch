@@ -1,0 +1,126 @@
+From 16950f20f5cb575fc3f2e39438cbdb1b78aefd2c Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Wed, 4 Feb 2026 11:36:08 +0100
+Subject: [PATCH] tree: Fix up wrong-code with certain C++ default arguments
+ [PR123818]
+
+The following testcase is miscompiled since r0-69852-g4038c495f (at least
+if one can somehow arrange in C++98 to have AGGR_INIT_EXPR or any other
+FE specific trees nested in constructor elts for CONSTRUCTOR nested inside
+of default argument, if not, then since C++11 support that allows that has
+been implemented).
+The problem is that we unfortunately store default arguments in TREE_PURPOSE
+of TYPE_ARG_TYPES nodes of the FUNCTION/METHOD_TYPE and those are shared,
+with type_hash_canon used to unify them.  The default arguments aren't
+considered in type_hash_canon_hash at all, but the equality hook considers
+them in type_list_equal by calling simple_cst_equal on those default
+arguments.  That function is a tri-state, returns 0 for surely unequal,
+1 for equal and -1 for "I don't know", usually because there are FE trees
+etc. (though, admittedly it is unclear why such distinction is done, as
+e.g. for VAR_DECLs etc. it sees in there it returns 0 rather than -1).
+Anyway, the r0-69852-g4038c495f change changed CONSTRUCTOR_ELTS from
+I think a tree list of elements to a vector and changed the simple_cst_equal
+implementation of CONSTRUCTOR from just recursing on CONSTRUCTOR_ELTS (which
+I think would just return -1 because I don't see simple_cst_equal having
+TREE_LIST nor TREE_VEC handling) to something that thinks simple_cst_equal
+returns a bool rather than tri-state, plus has a comment whether it should
+handle indexes too.
+So, in particular on the testcase which has in default arguments with
+CONSTRUCTOR inside it with AGGR_INIT_EXPR as the single element (but
+could be as well in multiple elements), the recursive call returns -1
+for "I don't know" on the element and the function considers it the same
+as if it returned 1, they are equal.
+
+The following patch fixes it by calling the recursive non tail-recursive
+simple_cst_equal calls like everywhere else in the function, by returning
+what it returned if it returned <= 0 and otherwise continuing.
+Plus given the comment I've also implemented checking the index.
+The special case for FIELD_DECL is so that if both indexes are FIELD_DECLs
+and they are different, we don't return -1 but 0.
+
+2026-02-04  Jakub Jelinek  <jakub@redhat.com>
+
+	PR c++/123818
+	* tree.cc (simple_cst_equal) <case CONSTRUCTOR>: Return -1 if some
+	recursive call returns -1.  Also compare indexes.
+
+	* g++.dg/cpp0x/pr123818.C: New test.
+
+(cherry picked from commit 71c2e6c2bfcaf33227727181dffda8a3b05e4e9b)
+---
+ gcc/testsuite/g++.dg/cpp0x/pr123818.C | 24 ++++++++++++++++++++++++
+ gcc/tree.cc                           | 24 +++++++++++++++++++-----
+ 2 files changed, 43 insertions(+), 5 deletions(-)
+ create mode 100644 gcc/testsuite/g++.dg/cpp0x/pr123818.C
+
+diff --git a/gcc/testsuite/g++.dg/cpp0x/pr123818.C b/gcc/testsuite/g++.dg/cpp0x/pr123818.C
+new file mode 100644
+index 000000000000..bb0b03c2d1cb
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/cpp0x/pr123818.C
+@@ -0,0 +1,24 @@
++// PR c++/123818
++// { dg-do run { target c++11 } }
++
++struct A { A (int x) : a (x) {} int a; };
++struct B { A b; };
++
++int
++foo (B x = B { 42 })
++{
++    return x.b.a;
++}
++
++int
++bar (B x = B { 43 })
++{
++    return x.b.a;
++}
++
++int
++main ()
++{
++  if (foo () != bar () - 1)
++    __builtin_abort ();
++}
+diff --git a/gcc/tree.cc b/gcc/tree.cc
+index ddae543d78f4..4ff061fd0411 100644
+--- a/gcc/tree.cc
++++ b/gcc/tree.cc
+@@ -6721,13 +6721,27 @@ simple_cst_equal (const_tree t1, const_tree t2)
+ 	vec<constructor_elt, va_gc> *v2 = CONSTRUCTOR_ELTS (t2);
+ 
+ 	if (vec_safe_length (v1) != vec_safe_length (v2))
+-	  return false;
++	  return 0;
+ 
+         for (idx = 0; idx < vec_safe_length (v1); ++idx)
+-	  /* ??? Should we handle also fields here? */
+-	  if (!simple_cst_equal ((*v1)[idx].value, (*v2)[idx].value))
+-	    return false;
+-	return true;
++	  {
++	    if ((*v1)[idx].index
++		&& TREE_CODE ((*v1)[idx].index) == FIELD_DECL)
++	      {
++		if ((*v1)[idx].index != (*v2)[idx].index)
++		  return 0;
++	      }
++	    else
++	      {
++		cmp = simple_cst_equal ((*v1)[idx].index, (*v2)[idx].index);
++		if (cmp <= 0)
++		  return cmp;
++	      }
++	    cmp = simple_cst_equal ((*v1)[idx].value, (*v2)[idx].value);
++	    if (cmp <= 0)
++	      return cmp;
++	  }
++	return 1;
+       }
+ 
+     case SAVE_EXPR:
+-- 
+2.43.7
+
+

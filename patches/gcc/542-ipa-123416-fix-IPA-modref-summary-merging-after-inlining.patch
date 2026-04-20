@@ -1,0 +1,75 @@
+From 1a7275ba373d489ca09206bbf2ffb1c909cf747c Mon Sep 17 00:00:00 2001
+From: Richard Biener <rguenther@suse.de>
+Date: Tue, 3 Feb 2026 09:26:01 +0100
+Subject: [PATCH] ipa/123416 - fix IPA modref summary merging after inlining
+
+There's a typo in the condition skipping load collapsing when
+there's no callee modref summary.  We do have to collapse loads
+for the destination iff the callee performs any loads which includes
+when the callee is ECF_PURE.  The LTO summary part already gets
+this correct.
+
+	PR ipa/123416
+	* ipa-modref.cc (ipa_merge_modref_summary_after_inlining):
+	Fix typo in condtion for load merging when no callee summary.
+
+	* gcc.dg/torture/pr123416.c: New testcase.
+
+(cherry picked from commit 576dd2f7ef0dbc30b460176442e63b08c642676c)
+---
+ gcc/ipa-modref.cc                       |  2 +-
+ gcc/testsuite/gcc.dg/torture/pr123416.c | 28 +++++++++++++++++++++++++
+ 2 files changed, 29 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/gcc.dg/torture/pr123416.c
+
+diff --git a/gcc/ipa-modref.cc b/gcc/ipa-modref.cc
+index d3e510195b53..3f3c9cf21b7b 100644
+--- a/gcc/ipa-modref.cc
++++ b/gcc/ipa-modref.cc
+@@ -5352,7 +5352,7 @@ ipa_merge_modref_summary_after_inlining (cgraph_edge *edge)
+ 
+   if (!callee_info && to_info)
+     {
+-      if (!(flags & (ECF_CONST | ECF_PURE | ECF_NOVOPS)))
++      if (!(flags & (ECF_CONST | ECF_NOVOPS)))
+ 	to_info->loads->collapse ();
+       if (!ignore_stores)
+ 	to_info->stores->collapse ();
+diff --git a/gcc/testsuite/gcc.dg/torture/pr123416.c b/gcc/testsuite/gcc.dg/torture/pr123416.c
+new file mode 100644
+index 000000000000..83a126da4456
+--- /dev/null
++++ b/gcc/testsuite/gcc.dg/torture/pr123416.c
+@@ -0,0 +1,28 @@
++/* { dg-do run } */
++/* { dg-additional-options "-fno-strict-aliasing" } */
++
++struct a {
++  int b;
++} c;
++
++int d;
++
++static struct a
++g()
++{
++  int a[2], b, f = 0;
++  for (; f < 2; f++)
++    a[f] = 1;
++  b = a[0];
++  if (b)
++    return c;
++}
++int main()
++{
++  c.b = 1;
++  struct a e = g();
++  c = g();
++  if (!c.b || !e.b)
++    __builtin_abort();
++  return 0;
++}
+-- 
+2.43.7
+
+

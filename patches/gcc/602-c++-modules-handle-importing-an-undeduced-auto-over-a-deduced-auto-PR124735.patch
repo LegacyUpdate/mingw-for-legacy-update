@@ -1,0 +1,96 @@
+From 16d6b7697bee48bfcc88b0fd235f0fa8be1e5bcf Mon Sep 17 00:00:00 2001
+From: Nathaniel Shead <nathanieloshead@gmail.com>
+Date: Sat, 4 Apr 2026 23:55:16 +1100
+Subject: [PATCH] c++/modules: Handle importing an undeduced auto over a
+ deduced auto [PR124735]
+
+Like with implicit constexpr, we need to handle cases where we import an
+function declaration with undeduced auto, but we already have a
+definition available with deduced auto.  In this case we can just keep
+the existing declaration's type.
+
+	PR c++/124735
+
+gcc/cp/ChangeLog:
+
+	* module.cc (trees_in::is_matching_decl): Handle importing
+	undeduced auto when existing is already deduced.
+
+gcc/testsuite/ChangeLog:
+
+	* g++.dg/modules/auto-8_a.H: New test.
+	* g++.dg/modules/auto-8_b.C: New test.
+
+Signed-off-by: Nathaniel Shead <nathanieloshead@gmail.com>
+Reviewed-by: Jason Merrill <jason@redhat.com>
+(cherry picked from commit ab169d27ea39bf828378d2bf08ebd27712842caf)
+---
+ gcc/cp/module.cc                        |  6 +++++-
+ gcc/testsuite/g++.dg/modules/auto-8_a.H |  7 +++++++
+ gcc/testsuite/g++.dg/modules/auto-8_b.C | 15 +++++++++++++++
+ 3 files changed, 27 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/g++.dg/modules/auto-8_a.H
+ create mode 100644 gcc/testsuite/g++.dg/modules/auto-8_b.C
+
+diff --git a/gcc/cp/module.cc b/gcc/cp/module.cc
+index 515015b0b642..24f7c41139ec 100644
+--- a/gcc/cp/module.cc
++++ b/gcc/cp/module.cc
+@@ -12279,7 +12279,9 @@ trees_in::is_matching_decl (tree existing, tree decl, bool is_typedef)
+ 
+       /* Similarly if EXISTING has an undeduced return type, but DECL's
+ 	 is already deduced.  */
+-      if (undeduced_auto_decl (existing) && !undeduced_auto_decl (decl))
++      bool e_undeduced = undeduced_auto_decl (existing);
++      bool d_undeduced = undeduced_auto_decl (decl);
++      if (e_undeduced && !d_undeduced)
+ 	{
+ 	  dump (dumper::MERGE)
+ 	    && dump ("Propagating deduced return type to %N", existing);
+@@ -12287,6 +12289,8 @@ trees_in::is_matching_decl (tree existing, tree decl, bool is_typedef)
+ 	  DECL_SAVED_AUTO_RETURN_TYPE (existing) = TREE_TYPE (e_type);
+ 	  TREE_TYPE (existing) = change_return_type (TREE_TYPE (d_type), e_type);
+ 	}
++      else if (d_undeduced && !e_undeduced)
++	/* EXISTING was deduced, leave it alone.  */;
+       else if (type_uses_auto (d_ret)
+ 	       && !same_type_p (TREE_TYPE (d_type), TREE_TYPE (e_type)))
+ 	{
+diff --git a/gcc/testsuite/g++.dg/modules/auto-8_a.H b/gcc/testsuite/g++.dg/modules/auto-8_a.H
+new file mode 100644
+index 000000000000..a0a5cacd9955
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/modules/auto-8_a.H
+@@ -0,0 +1,7 @@
++// PR c++/124735
++// { dg-additional-options "-fmodule-header" }
++// { dg-module-cmi {} }
++
++struct S {
++  auto foo();
++};
+diff --git a/gcc/testsuite/g++.dg/modules/auto-8_b.C b/gcc/testsuite/g++.dg/modules/auto-8_b.C
+new file mode 100644
+index 000000000000..bd749228a040
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/modules/auto-8_b.C
+@@ -0,0 +1,15 @@
++// PR c++/124735
++// { dg-additional-options "-fmodules" }
++
++struct S {
++  auto foo();
++};
++
++auto S::foo() { return 123; }
++auto pfn = &S::foo;
++
++import "auto-8_a.H";
++
++int main() {
++  return S{}.foo() != 123;
++}
+-- 
+2.43.7
+
+

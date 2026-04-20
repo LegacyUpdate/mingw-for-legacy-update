@@ -1,0 +1,52 @@
+From 5de2b42cebaa2f1455034a47e25ff7b9eaf0a2be Mon Sep 17 00:00:00 2001
+From: Jonathan Wakely <jwakely@redhat.com>
+Date: Thu, 5 Feb 2026 17:32:23 +0000
+Subject: [PATCH] libstdc++: Fix std::regex_traits::lookup_classname [PR124015]
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf8
+Content-Transfer-Encoding: 8bit
+
+This fixes a bug in regex_traits::lookup_classname(f, l, true) where the
+result was always ctype_base::alpha for any input sequence [f, l) that
+has the ctype_base::lower or ctype_base::upper bits set. For targets
+that define alpha as lower|upper (rather than having a distinct bit for
+alpha) this bug meant that all masks which have lower or upper bits set
+were replaced with alpha when the icase parameter is true. This has the
+effect that trying to do a case insensitive match for [:alnum:],
+[:graph:], or [:print:] was equivalent to matching [:alpha:] instead,
+which is obviously not correct.
+
+Based on inspection of the ctype_base.h files under the config/os
+directory, the bug appears to affect newlib, picolibc, qnx and vxworks.
+
+libstdc++-v3/ChangeLog:
+
+	PR libstdc++/124015
+	* include/bits/regex.tcc (regex_traits::lookup_classname): Fix
+	handling of icase parameter.
+
+Reviewed-by: Tomasz KamiÅski <tkaminsk@redhat.com>
+(cherry picked from commit 49d219a5d7a8ad570992a4065268b58a581b7d9f)
+---
+ libstdc++-v3/include/bits/regex.tcc | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/libstdc++-v3/include/bits/regex.tcc b/libstdc++-v3/include/bits/regex.tcc
+index 48917cdfda91..88ca6059397e 100644
+--- a/libstdc++-v3/include/bits/regex.tcc
++++ b/libstdc++-v3/include/bits/regex.tcc
+@@ -309,8 +309,8 @@ namespace __detail
+ 	if (__s == __it.first)
+ 	  {
+ 	    if (__icase
+-		&& ((__it.second
+-		     & (ctype_base::lower | ctype_base::upper)) != 0))
++		&& (__it.second._M_base == ctype_base::lower
++		      || __it.second._M_base == ctype_base::upper))
+ 	      return ctype_base::alpha;
+ 	    return __it.second;
+ 	  }
+-- 
+2.43.7
+
+

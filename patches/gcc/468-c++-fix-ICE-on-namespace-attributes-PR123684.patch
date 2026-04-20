@@ -1,0 +1,100 @@
+From c7d1a91cf4c15171c3f14e14903575385fe2c742 Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Sat, 24 Jan 2026 09:56:23 +0100
+Subject: [PATCH] c++: Fix ICE on namespace attributes [PR123684]
+
+The following testcase ICEs sionce my r14-650 PR109756 change to
+set TREE_VALUE (attr) to error_mark_node for unsupported attributes
+for which we've just skipped over balanced tokens for arguments in order
+to differentiate that from no arguments.
+
+The problem is that handle_namespace_attrs doesn't go through the normal
+attribute handling and just checked attributes by name.
+So, if user uses [[visibility (whatever)]] or
+[[whatever::visibility (whatever)]] or similarly abi_tag or for deprecated
+(which is valid as both [[deprecated ("foo")]] and
+[[gnu::deprecated ("foo")]] ) [[whatever::deprecated (whatever)]] on
+a namespace, we handle it as if it was a gnu or gnu or standard attribute
+even when it is not and can ICE on error_mark_node attributes.
+
+The following patch makes sure we handle it only in the right namespaces
+and emit a warning on anything else.
+
+Not sure about backports, the patch changes behavior for say
+inline namespace [[foo::abi_tag]] N or
+inline namespace [[abi_tag]] N where previously it would use the name
+of the namespace as abi tag and now it will ignore it and emit a warning.
+One possibility is to just deal with args == error_mark_node and warn
+on that attribute only in that case (that is where it would previously ICE).
+But perhaps I'm worrying too much and no code in the wild is relying on
+non-gnu attributes on namespaces with the same names as the gnu ones
+behaving like the gnu ones.
+
+2026-01-24  Jakub Jelinek  <jakub@redhat.com>
+
+	PR c++/123684
+	* name-lookup.cc (handle_namespace_attrs): Only handle visibility and
+	abi_tag attributes in the gnu namespace and deprecated attribute in
+	the standard or gnu namespaces.
+
+	* g++.dg/cpp0x/gen-attrs-90.C: New test.
+
+(cherry picked from commit 7d30e58e45c7fe0ccd22305567f0100176cc1294)
+---
+ gcc/cp/name-lookup.cc                     | 9 ++++++---
+ gcc/testsuite/g++.dg/cpp0x/gen-attrs-90.C | 8 ++++++++
+ 2 files changed, 14 insertions(+), 3 deletions(-)
+ create mode 100644 gcc/testsuite/g++.dg/cpp0x/gen-attrs-90.C
+
+diff --git a/gcc/cp/name-lookup.cc b/gcc/cp/name-lookup.cc
+index 72d480c56ae4..731ab6ee836a 100644
+--- a/gcc/cp/name-lookup.cc
++++ b/gcc/cp/name-lookup.cc
+@@ -6514,7 +6514,8 @@ handle_namespace_attrs (tree ns, tree attributes)
+       tree name = get_attribute_name (d);
+       tree args = TREE_VALUE (d);
+ 
+-      if (is_attribute_p ("visibility", name))
++      if (is_attribute_p ("visibility", name)
++	  && args != error_mark_node)
+ 	{
+ 	  /* attribute visibility is a property of the syntactic block
+ 	     rather than the namespace as a whole, so we don't touch the
+@@ -6536,7 +6537,8 @@ handle_namespace_attrs (tree ns, tree attributes)
+ 	  push_visibility (TREE_STRING_POINTER (x), 1);
+ 	  saw_vis = true;
+ 	}
+-      else if (is_attribute_p ("abi_tag", name))
++      else if (is_attribute_p ("abi_tag", name)
++	       && args != error_mark_node)
+ 	{
+ 	  if (!DECL_NAME (ns))
+ 	    {
+@@ -6563,7 +6565,8 @@ handle_namespace_attrs (tree ns, tree attributes)
+ 	    DECL_ATTRIBUTES (ns) = tree_cons (name, args,
+ 					      DECL_ATTRIBUTES (ns));
+ 	}
+-      else if (is_attribute_p ("deprecated", name))
++      else if (is_attribute_p ("deprecated", name)
++	       && args != error_mark_node)
+ 	{
+ 	  if (!DECL_NAME (ns))
+ 	    {
+diff --git a/gcc/testsuite/g++.dg/cpp0x/gen-attrs-90.C b/gcc/testsuite/g++.dg/cpp0x/gen-attrs-90.C
+new file mode 100644
+index 000000000000..28e4885623af
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/cpp0x/gen-attrs-90.C
+@@ -0,0 +1,8 @@
++// PR c++/123684
++// { dg-do compile { target c++11 } }
++
++inline namespace [[foo::abi_tag (1, 2, 3)]] A {}	// { dg-warning "'abi_tag' attribute directive ignored" }
++inline namespace [[foo::visibility (1, 2, 3)]] B {}	// { dg-warning "'visibility' attribute directive ignored" }
++inline namespace [[foo::deprecated (1, 2, 3)]] C {}	// { dg-warning "'deprecated' attribute directive ignored" }
++inline namespace [[abi_tag (1, 2, 3)]] D {}		// { dg-warning "'abi_tag' attribute directive ignored" }
++inline namespace [[visibility (1, 2, 3)]] E {}		// { dg-warning "'visibility' attribute directive ignored" }
+-- 
+2.43.7
+
+

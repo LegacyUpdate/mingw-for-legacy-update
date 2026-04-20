@@ -1,0 +1,204 @@
+From d4d997bdd0d99c1c930dab9ee7aa993b22b38ca8 Mon Sep 17 00:00:00 2001
+From: Richard Earnshaw <rearnsha@arm.com>
+Date: Wed, 11 Mar 2026 11:14:47 +0000
+Subject: [PATCH] arm: Fix trapping arithmetic [PR123271]
+
+Patch r10-3995 accidentally defined insn patterns that overrode the
+default behaviour of overflow-trapping arithmetic; this broke the
+implementation of -ftrapv.  Fixed by renaming the internal patterns.
+For consistency I've renamed more than is strictly necessary.
+
+gcc/ChangeLog:
+
+	PR target/123271
+	* config/arm/arm.md (subvsi3_intmin): Renamed to ...
+	(sub_cmpVsi3_intmin): ... this.
+	(subvsi3): Renamed to ...
+	(sub_cmpVsi3): ... this.
+	(subvsi3_imm1): Renamed to ...
+	(sub_cmpVsi3_imm1): ... this.
+	(usubvsi3_borrow): Renamed to ...
+	(usub_cmpVsi3_borrow): ... this.
+	(usubvsi3_borrow_imm): Renamed to ...
+	(usub_cmpVsi3_borrow_imm): ... this.
+	(subvsi3_borrow): Renamed to ...
+	(sub_cmpVsi3_borrow): ... this.
+	(subvsi3_borrow_imm): Renamed to ...
+	(sub_cmpVsi3_borrow_imm): ... this.
+
+gcc/testsuite/ChangeLog:
+
+	PR target/123271
+	* gcc.target/arm/pr123271.c: New test.
+
+(cherry picked from commit f1065aba22dbf8cdf218cf60ccac310d758651e1)
+---
+ gcc/config/arm/arm.md                   | 49 ++++++++++++++-----------
+ gcc/testsuite/gcc.target/arm/pr123271.c | 20 ++++++++++
+ 2 files changed, 47 insertions(+), 22 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.target/arm/pr123271.c
+
+diff --git a/gcc/config/arm/arm.md b/gcc/config/arm/arm.md
+index 092fa15d0771..a2818ce7e0ff 100644
+--- a/gcc/config/arm/arm.md
++++ b/gcc/config/arm/arm.md
+@@ -1012,7 +1012,7 @@
+    (set_attr "type" "alus_sreg")]
+ )
+ 
+-(define_insn "subvsi3_intmin"
++(define_insn "sub_cmpVsi3_intmin"
+   [(set (reg:CC_V CC_REGNUM)
+ 	(compare:CC_V
+ 	  (plus:DI
+@@ -1432,15 +1432,15 @@
+       operands[2] = GEN_INT (-INTVAL (operands[2]));
+       /* Special case for INT_MIN.  */
+       if (INTVAL (operands[2]) == 0x80000000)
+-	emit_insn (gen_subvsi3_intmin (operands[0], operands[1]));
++	emit_insn (gen_sub_cmpVsi3_intmin (operands[0], operands[1]));
+       else
+ 	emit_insn (gen_addsi3_compareV_imm (operands[0], operands[1],
+-					  operands[2]));
++					    operands[2]));
+     }
+   else if (CONST_INT_P (operands[1]))
+-    emit_insn (gen_subvsi3_imm1 (operands[0], operands[1], operands[2]));
++    emit_insn (gen_sub_cmpVsi3_imm1 (operands[0], operands[1], operands[2]));
+   else
+-    emit_insn (gen_subvsi3 (operands[0], operands[1], operands[2]));
++    emit_insn (gen_sub_cmpVsi3 (operands[0], operands[1], operands[2]));
+ 
+   arm_gen_unlikely_cbranch (NE, CC_Vmode, operands[3]);
+   DONE;
+@@ -1513,14 +1513,16 @@
+     hi_op2 = force_reg (SImode, hi_op2);
+   rtx ccreg = gen_rtx_REG (mode, CC_REGNUM);
+   if (CONST_INT_P (hi_op2))
+-    emit_insn (gen_subvsi3_borrow_imm (hi_result, hi_op1, hi_op2,
++    emit_insn (gen_sub_cmpVsi3_borrow_imm (hi_result, hi_op1, hi_op2,
++					   gen_rtx_LTU (SImode, ccreg,
++							const0_rtx),
++					   gen_rtx_LTU (DImode, ccreg,
++							const0_rtx)));
++  else
++    emit_insn (gen_sub_cmpVsi3_borrow (hi_result, hi_op1, hi_op2,
+ 				       gen_rtx_LTU (SImode, ccreg, const0_rtx),
+ 				       gen_rtx_LTU (DImode, ccreg,
+ 						    const0_rtx)));
+-  else
+-    emit_insn (gen_subvsi3_borrow (hi_result, hi_op1, hi_op2,
+-				   gen_rtx_LTU (SImode, ccreg, const0_rtx),
+-				   gen_rtx_LTU (DImode, ccreg, const0_rtx)));
+   arm_gen_unlikely_cbranch (NE, CC_Vmode, operands[3]);
+ 
+   DONE;
+@@ -1630,15 +1632,18 @@
+     hi_op2 = force_reg (SImode, hi_op2);
+   rtx ccreg = gen_rtx_REG (mode, CC_REGNUM);
+   if (CONST_INT_P (hi_op2))
+-    emit_insn (gen_usubvsi3_borrow_imm (hi_result, hi_op1, hi_op2,
+-					GEN_INT (UINTVAL (hi_op2) & 0xffffffff),
++    emit_insn (gen_usub_cmpVsi3_borrow_imm (hi_result, hi_op1, hi_op2,
++					    GEN_INT (UINTVAL (hi_op2)
++						     & 0xffffffff),
++					    gen_rtx_LTU (SImode, ccreg,
++							 const0_rtx),
++					    gen_rtx_LTU (DImode, ccreg,
++							 const0_rtx)));
++  else
++    emit_insn (gen_usub_cmpVsi3_borrow (hi_result, hi_op1, hi_op2,
+ 					gen_rtx_LTU (SImode, ccreg, const0_rtx),
+ 					gen_rtx_LTU (DImode, ccreg,
+ 						     const0_rtx)));
+-  else
+-    emit_insn (gen_usubvsi3_borrow (hi_result, hi_op1, hi_op2,
+-				    gen_rtx_LTU (SImode, ccreg, const0_rtx),
+-				    gen_rtx_LTU (DImode, ccreg, const0_rtx)));
+   arm_gen_unlikely_cbranch (LTU, CC_Bmode, operands[3]);
+ 
+   DONE;
+@@ -1657,7 +1662,7 @@
+    (set_attr "type" "alus_sreg")]
+ )
+ 
+-(define_insn "subvsi3"
++(define_insn "sub_cmpVsi3"
+   [(set (reg:CC_V CC_REGNUM)
+ 	(compare:CC_V
+ 	 (minus:DI
+@@ -1674,7 +1679,7 @@
+    (set_attr "type" "alus_sreg")]
+ )
+ 
+-(define_insn "subvsi3_imm1"
++(define_insn "sub_cmpVsi3_imm1"
+   [(set (reg:CC_V CC_REGNUM)
+ 	(compare:CC_V
+ 	 (minus:DI
+@@ -2131,7 +2136,7 @@
+    (set_attr "type" "alus_imm")]
+ )
+ 
+-(define_insn "usubvsi3_borrow"
++(define_insn "usub_cmpVsi3_borrow"
+   [(set (reg:CC_B CC_REGNUM)
+ 	(compare:CC_B
+ 	 (zero_extend:DI (match_operand:SI 1 "s_register_operand" "0,r"))
+@@ -2149,7 +2154,7 @@
+    (set_attr "length" "2,4")]
+ )
+ 
+-(define_insn "usubvsi3_borrow_imm"
++(define_insn "usub_cmpVsi3_borrow_imm"
+   [(set (reg:CC_B CC_REGNUM)
+ 	(compare:CC_B
+ 	 (zero_extend:DI (match_operand:SI 1 "s_register_operand" "r,r"))
+@@ -2168,7 +2173,7 @@
+    (set_attr "type" "alus_imm")]
+ )
+ 
+-(define_insn "subvsi3_borrow"
++(define_insn "sub_cmpVsi3_borrow"
+   [(set (reg:CC_V CC_REGNUM)
+ 	(compare:CC_V
+ 	 (minus:DI
+@@ -2189,7 +2194,7 @@
+    (set_attr "length" "2,4")]
+ )
+ 
+-(define_insn "subvsi3_borrow_imm"
++(define_insn "sub_cmpVsi3_borrow_imm"
+   [(set (reg:CC_V CC_REGNUM)
+ 	(compare:CC_V
+ 	 (minus:DI
+diff --git a/gcc/testsuite/gcc.target/arm/pr123271.c b/gcc/testsuite/gcc.target/arm/pr123271.c
+new file mode 100644
+index 000000000000..a1c3becceed3
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/arm/pr123271.c
+@@ -0,0 +1,20 @@
++/* { dg-options "-O2 -ftrapv" } */
++/* { dg-final { check-function-bodies "**" "" "" } } */
++
++int sub(int a, int b)
++{
++  return a - b;
++}
++
++/*
++** sub:
++** ...
++** (
++**	bl	__subvsi3
++** |
++   Not generated yet, but would be equally acceptable.
++**	subs	r0, r0, r1
++**	bv[sc]	.*
++** )
++** ...
++*/
+-- 
+2.43.7
+
+

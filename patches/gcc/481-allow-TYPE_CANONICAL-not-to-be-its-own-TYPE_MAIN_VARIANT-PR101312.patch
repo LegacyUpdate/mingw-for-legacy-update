@@ -1,0 +1,173 @@
+From edeb14d47a7abf65f15de21c689dd9a6a9a3000d Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Fri, 6 Feb 2026 20:26:01 +0100
+Subject: [PATCH] Allow TYPE_CANONICAL (TYPE_MAIN_VARIANT (t)) not to be its
+ own TYPE_MAIN_VARIANT [PR101312]
+
+I had to revert my r16-7102 patch
+https://gcc.gnu.org/pipermail/gcc-patches/2026-January/706424.html
+(first patch in
+https://gcc.gnu.org/pipermail/gcc-patches/2025-December/704097.html )
+in r16-7328 because it regressed the testcase added in r16-7331 for PR123882.
+typedef int T;
+void foo (unsigned long, T[]);
+void foo (unsigned long x, T[restrict x]);
+The ICE was on the array_as_string hack which used qualifiers on
+ARRAY_TYPE for printing and then FE called get_aka_type and errored
+that restrict is not allowed on ARRAY_TYPEs.
+Anyway, guess that would be fixable with further hacks, but when looking
+into that, I've noticed my approach was completely broken, my assumption
+that TYPE_CANONICAL (volatile int) is int is not true, TYPE_CANONICAL
+(volatile int) is itself.  For volatile int[2], C/C++ pushes the cv quals
+to the element type, so it is ARRAY_TYPE of volatile int, and this
+modified ARRAY_TYPE is made a type variant of int[2], but its TYPE_CANONICAL
+is again volatile int[2].
+Furthermore, a lot of places including build_type_attribute_variant call
+build_type_attribute_qual_variant like:
+  return build_type_attribute_qual_variant (ttype, attribute,
+                                            TYPE_QUALS (ttype));
+so pass the quals of the type to it.  If build_type_attribute_qual_variant
+for ARRAY_TYPEs behaves differently between C/C++ (in that case it
+pushes quals to the element type) and other languages, then this will
+do unexpected changes, namely because the ARRAY_TYPE usually (except for
+array_as_string hack) don't contain cv quals,
+build_type_attribute_variant (volatile int[2], may_alias,
+                              TYPE_QUALS (volatile int[2]))
+would create int [2] with may_alias attribute for C/C++.
+
+Now, the ICE on the testcases was in 2 spots, in get_alias_check
+gcc_checking_assert and in verify_type -fchecking stuff, the assumption
+was that
+TYPE_MAIN_VARIANT (TYPE_CANONICAL (TYPE_MAIN_VARIANT (type)))
+== TYPE_CANONICAL (TYPE_MAIN_VARIANT (type))
+for any type where TYPE_CANONICAL is non-NULL.  The reason why
+this works e.g. for the C/C++ volatile int[2] is that the ARRAY_TYPE
+is variant type of int[2], so the first TYPE_MAIN_VARIANT gets us
+int[2] and its TYPE_CANONICAL is int[2] which is the main variant.
+Now, if TYPE_CANONICAL (volatile int) needs to be itself (but sure with
+typedef volatile int V; TYPE_CANONICAL (V) is volatile int) and I Richi
+tried to change that and it broke everything, my change was wrong and
+we really need
+TYPE_CANONICAL (volatile int[2] __attribute__((may_alias))) to be
+volatile int[2] and we create the attribute variants as distinct types,
+using build_distinct_type_copy, so
+TYPE_MAIN_VARIANT (volatile int[2] __attribute__((may_alias)))
+is itself, then the alias/tree assumption that the
+TYPE_MAIN_VARIANT (TYPE_CANONICAL (TYPE_MAIN_VARIANT (type)))
+== TYPE_CANONICAL (TYPE_MAIN_VARIANT (type))
+can't hold.  We need one further hop, so just guarantee that
+TYPE_CANONICAL (TYPE_MAIN_VARIANT (TYPE_CANONICAL (TYPE_MAIN_VARIANT (type))))
+== TYPE_MAIN_VARIANT (TYPE_CANONICAL (TYPE_MAIN_VARIANT (type))).
+
+The following patch changes get_alias_set and tree.cc to verify that
+instead.  For get_alias_set the checking checks more than before,
+in particular that for both steps TYPE_CANONICAL is its own TYPE_CANONICAL
+rather than just that !TYPE_STRUCTURAL_EQUALITY_P (i.e. TYPE_CANONICAL
+is non-NULL).  verify_type already checks that though.
+
+I've tried even
+typedef volatile int A[1] __attribute__((may_alias));
+typedef A __attribute__((btf_type_tag ("foo"))) B;
+B c;
+i.e. cascading more than one type attribute on the ARRAY_TYPE and it
+still works, TYPE_CANONICAL (A) will be volatile int A[1] without
+attribute and TYPE_CANONICAL (B) the same.
+
+2026-02-06  Jakub Jelinek  <jakub@redhat.com>
+
+	PR c/101312
+	* alias.cc (get_alias_set): Allow TYPE_CANONICAL (mv) to be
+	not its own TYPE_MAIN_VARIANT, as long as its TYPE_MAIN_VARIANT
+	has TYPE_CANONICAL equal to itself.
+	* tree.cc (verify_type): Likewise.
+
+	* gcc.dg/pr101312-1.c: New test.
+	* gcc.dg/pr101312-2.c: New test.
+
+(cherry picked from commit f210e0bb90970a7fda6cf94e2694ea209eb61a16)
+---
+ gcc/alias.cc                      |  7 ++++++-
+ gcc/testsuite/gcc.dg/pr101312-1.c |  4 ++++
+ gcc/testsuite/gcc.dg/pr101312-2.c |  5 +++++
+ gcc/tree.cc                       | 23 +++++++++++++++++++----
+ 4 files changed, 34 insertions(+), 5 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.dg/pr101312-1.c
+ create mode 100644 gcc/testsuite/gcc.dg/pr101312-2.c
+
+diff --git a/gcc/alias.cc b/gcc/alias.cc
+index 4f17664c15b3..b685a8bb26b6 100644
+--- a/gcc/alias.cc
++++ b/gcc/alias.cc
+@@ -948,7 +948,12 @@ get_alias_set (tree t)
+   else
+     {
+       t = TYPE_CANONICAL (t);
+-      gcc_checking_assert (!TYPE_STRUCTURAL_EQUALITY_P (t));
++      gcc_checking_assert (TYPE_CANONICAL (t) == t);
++      if (t != TYPE_MAIN_VARIANT (t))
++	{
++	  t = TYPE_MAIN_VARIANT (t);
++	  gcc_checking_assert (TYPE_CANONICAL (t) == t);
++	}
+     }
+ 
+   /* If this is a type with a known alias set, return it.  */
+diff --git a/gcc/testsuite/gcc.dg/pr101312-1.c b/gcc/testsuite/gcc.dg/pr101312-1.c
+new file mode 100644
+index 000000000000..8d312db140ae
+--- /dev/null
++++ b/gcc/testsuite/gcc.dg/pr101312-1.c
+@@ -0,0 +1,4 @@
++/* PR c/101312 */
++/* { dg-do compile } */
++
++volatile int a[1] __attribute__((may_alias));
+diff --git a/gcc/testsuite/gcc.dg/pr101312-2.c b/gcc/testsuite/gcc.dg/pr101312-2.c
+new file mode 100644
+index 000000000000..16d77941eafe
+--- /dev/null
++++ b/gcc/testsuite/gcc.dg/pr101312-2.c
+@@ -0,0 +1,5 @@
++/* PR c/101312 */
++/* { dg-do compile } */
++/* { dg-options "-g" } */
++
++volatile int a[1] __attribute__((may_alias));
+diff --git a/gcc/tree.cc b/gcc/tree.cc
+index 4ff061fd0411..7fa5960f8a84 100644
+--- a/gcc/tree.cc
++++ b/gcc/tree.cc
+@@ -14349,10 +14349,25 @@ verify_type (const_tree t)
+     }
+   if (TYPE_MAIN_VARIANT (t) == t && ct && TYPE_MAIN_VARIANT (ct) != ct)
+    {
+-      error ("%<TYPE_CANONICAL%> of main variant is not main variant");
+-      debug_tree (ct);
+-      debug_tree (TYPE_MAIN_VARIANT (ct));
+-      error_found = true;
++     /* This can happen when build_type_attribute_variant is called on
++	C/C++ arrays of qualified types.  volatile int[2] is unqualified
++	ARRAY_TYPE with volatile int element type.
++	TYPE_CANONICAL (volatile int) is itself and so is
++	TYPE_CANONICAL (volatile int[2]).  build_type_attribute_qual_variant
++	creates a distinct type copy (so TYPE_MAIN_VARIANT is itself) and sets
++	its TYPE_CANONICAL to the unqualified ARRAY_TYPE (so volatile int[2]).
++	But this is not the TYPE_MAIN_VARIANT, which is int[2].  So, just
++	verify that TYPE_MAIN_VARIANT (ct) is already the final type we
++	need.  */
++      tree mvc = TYPE_MAIN_VARIANT (ct);
++      if (TYPE_CANONICAL (mvc) != mvc)
++	{
++	  error ("main variant of %<TYPE_CANONICAL%> of main variant is not"
++		 " its own %<TYPE_CANONICAL%>");
++	  debug_tree (ct);
++	  debug_tree (TYPE_MAIN_VARIANT (ct));
++	  error_found = true;
++	}
+    }
+ 
+ 
+-- 
+2.43.7
+
+

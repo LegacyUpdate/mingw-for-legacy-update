@@ -1,0 +1,81 @@
+From 44a80ebd003da07273f3fddcc2845437f3609fd2 Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Mon, 2 Mar 2026 10:46:00 +0100
+Subject: [PATCH] i386: Fix up avx512fp16_mov<mode> AVX10.2 operand order for
+ -masm=intel [PR124294]
+
+This insn uses incorrect operand order for -masm=intel in the AVX10.2
+variant.
+I've checked for similar mistakes and haven't found any in all the i386/*.md
+files.
+
+Note, I also wonder why the insn doesn't use * in front of the define_insn
+name, I can't find anything that would need gen_avx512fp16_movv8{hi,hf,bf}.
+
+2026-03-02  Jakub Jelinek  <jakub@redhat.com>
+
+	PR target/124294
+	* config/i386/sse.md (avx512fp16_mov<mode>): Fix ordering of operands
+	for -masm=intel for the avx10_2 alternative.  Fix up indentation in
+	the insn condition.
+	(vec_set<mode>_0): Fix comment typo, higer -> higher.
+
+	* gcc.target/i386/avx10_2-pr124294.c: New test.
+
+(cherry picked from commit 7a3c4f7efe8d11d1dd19ba96b5b7e553c46d2102)
+---
+ gcc/config/i386/sse.md                           |  6 +++---
+ gcc/testsuite/gcc.target/i386/avx10_2-pr124294.c | 14 ++++++++++++++
+ 2 files changed, 17 insertions(+), 3 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.target/i386/avx10_2-pr124294.c
+
+diff --git a/gcc/config/i386/sse.md b/gcc/config/i386/sse.md
+index c811a0a7c88e..79d7e82730ec 100644
+--- a/gcc/config/i386/sse.md
++++ b/gcc/config/i386/sse.md
+@@ -12034,7 +12034,7 @@
+   operands[2] = gen_lowpart (<ssescalarmode>mode, operands[2]);
+ })
+ 
+-;; vmovw clears also the higer bits
++;; vmovw clears also the higher bits
+ (define_insn "vec_set<mode>_0"
+   [(set (match_operand:VI2F_256_512 0 "register_operand" "=v,v,v")
+ 	(vec_merge:VI2F_256_512
+@@ -12099,10 +12099,10 @@
+ 	  (match_operand:V8_128 1 "reg_or_0_operand" "v,C")
+ 	  (const_int 1)))]
+   "TARGET_AVX512FP16
+-  || (TARGET_AVX10_2 && const0_operand (operands[1], <MODE>mode))"
++   || (TARGET_AVX10_2 && const0_operand (operands[1], <MODE>mode))"
+   "@
+     vmovsh\t{%2, %1, %0|%0, %1, %2}
+-    vmovw\t{%2, %0|%2, %0}"
++    vmovw\t{%2, %0|%0, %2}"
+   [(set_attr "isa" "*,avx10_2")
+    (set_attr "type" "ssemov")
+    (set_attr "prefix" "evex")
+diff --git a/gcc/testsuite/gcc.target/i386/avx10_2-pr124294.c b/gcc/testsuite/gcc.target/i386/avx10_2-pr124294.c
+new file mode 100644
+index 000000000000..31e4679c19f0
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/i386/avx10_2-pr124294.c
+@@ -0,0 +1,14 @@
++/* PR target/124294 */
++/* { dg-do compile } */
++/* { dg-options "-O2 -mavx10.2 -masm=intel" } */
++/* { dg-require-effective-target masm_intel } */
++/* { dg-final { scan-assembler "\tvmovw\txmm0, xmm1" } } */
++
++typedef unsigned char V __attribute__((vector_size (16)));
++
++V
++foo (V x, V y)
++{
++  (void) x;
++  return __builtin_shuffle (y, (V) {}, (V) { 0, 1, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31 });
++}
+-- 
+2.43.7
+
+

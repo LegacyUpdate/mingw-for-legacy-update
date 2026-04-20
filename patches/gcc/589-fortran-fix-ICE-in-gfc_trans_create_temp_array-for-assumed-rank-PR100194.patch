@@ -1,0 +1,100 @@
+From e7ebf493558310a1bbbe1fdcf28a5929a7063ded Mon Sep 17 00:00:00 2001
+From: Christopher Albert <albert@tugraz.at>
+Date: Tue, 31 Mar 2026 08:26:57 +0200
+Subject: [PATCH] fortran: Fix ICE in gfc_trans_create_temp_array for
+ assumed-rank [PR100194]
+
+When a non-contiguous assumed-rank actual argument is passed to a
+contiguous assumed-rank dummy, the compiler routes it through
+gfc_conv_subref_array_arg which uses the scalarizer.  The scalarizer
+requires known rank at compile time, but assumed-rank arrays have
+rank = -1, hitting gcc_assert (ss->dimen > 0).
+
+Skip the scalarizer path for assumed-rank expressions and let them
+fall through to gfc_conv_array_parameter, which handles assumed-rank
+via the runtime pack/unpack functions.
+
+gcc/fortran/ChangeLog:
+
+	PR fortran/100194
+	* trans-expr.cc (gfc_conv_procedure_call): Skip
+	gfc_conv_subref_array_arg for assumed-rank actual arguments
+	(e->rank == -1) when the dummy is contiguous.
+
+gcc/testsuite/ChangeLog:
+
+	PR fortran/100194
+	* gfortran.dg/pr100194.f90: New test.
+
+Signed-off-by: Christopher Albert <albert@tugraz.at>
+(cherry picked from commit 89293f0c2c091db384a7519e4ed56e8f37ef403f)
+---
+ gcc/fortran/trans-expr.cc              |  3 +-
+ gcc/testsuite/gfortran.dg/pr100194.f90 | 40 ++++++++++++++++++++++++++
+ 2 files changed, 42 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/gfortran.dg/pr100194.f90
+
+diff --git a/gcc/fortran/trans-expr.cc b/gcc/fortran/trans-expr.cc
+index ffe86539a0fd..851423d55391 100644
+--- a/gcc/fortran/trans-expr.cc
++++ b/gcc/fortran/trans-expr.cc
+@@ -7743,7 +7743,8 @@ gfc_conv_procedure_call (gfc_se * se, gfc_symbol * sym,
+ 		       && (fsym->attr.target
+ 			   ? gfc_is_not_contiguous (e)
+ 			   : !gfc_is_simply_contiguous (e, false, true))
+-		       && gfc_expr_is_variable (e))
++		       && gfc_expr_is_variable (e)
++		       && e->rank != -1)
+ 		{
+ 		  gfc_conv_subref_array_arg (&parmse, e, nodesc_arg,
+ 					     fsym->attr.intent,
+diff --git a/gcc/testsuite/gfortran.dg/pr100194.f90 b/gcc/testsuite/gfortran.dg/pr100194.f90
+new file mode 100644
+index 000000000000..a8066e1a1bbf
+--- /dev/null
++++ b/gcc/testsuite/gfortran.dg/pr100194.f90
+@@ -0,0 +1,40 @@
++! { dg-do compile }
++!
++! PR fortran/100194
++! ICE in gfc_trans_create_temp_array when passing a non-contiguous
++! assumed-rank array to a contiguous assumed-rank dummy argument.
++!
++! Contributed by Martin Diehl <m.diehl@kit.edu>
++
++subroutine s(x)
++   real :: x(..)
++   call t(x)
++contains
++   subroutine t(y)
++      real, contiguous :: y(..)
++   end
++end
++
++! The following from the PR, these compiled OK before the patch.
++!
++! Contributed by G. Steinmetz <gscfq@t-online.de>
++
++subroutine z3(x)
++   real, contiguous :: x(..)
++   call t(x)
++contains
++   subroutine t(y)
++      real, contiguous :: y(..)
++   end
++end
++
++subroutine z2(x)
++   real, contiguous :: x(..)
++   call t(x)
++contains
++   subroutine t(y)
++      real :: y(..)
++   end
++end
++
++
+-- 
+2.43.7
+
+

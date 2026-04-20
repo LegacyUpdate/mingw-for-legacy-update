@@ -1,0 +1,54 @@
+From d72344eae51b275b04de4d2c4b01601d83aa9321 Mon Sep 17 00:00:00 2001
+From: liuhongt <hongtao.liu@intel.com>
+Date: Tue, 3 Mar 2026 18:49:37 -0800
+Subject: [PATCH] Refine the testcase.
+
+> This testcase fails with binutils 2.35:
+vmovw is supported in binutils 2.38 and later, need
+/* { dg-require-effective-target avx512fp16 } */ to avoid errors.
+
+> ```
+> /tmp/ccf20y5C.s:20: Error: no such instruction: `vmovw xmm0,WORD PTR .LC0[rip]'
+> /tmp/ccf20y5C.s:21: Error: no such instruction: `vmovw WORD PTR [rbp-18],xmm0'
+> /tmp/ccf20y5C.s:22: Error: no such instruction: `vmovw xmm0,WORD PTR [rbp-18]'
+> /tmp/ccf20y5C.s:23: Error: no such instruction: `vmovw WORD PTR [rbp-20],xmm0'
+> /tmp/ccf20y5C.s:24: Error: no such instruction: `vmovw xmm0,WORD PTR [rbp-18]'
+> /tmp/ccf20y5C.s:25: Error: no such instruction: `vmovw WORD PTR [rbp-22],xmm0'
+> /tmp/ccf20y5C.s:26: Error: no such instruction: `vmovw xmm0,WORD PTR [rbp-18]'
+> /tmp/ccf20y5C.s:27: Error: no such instruction: `vmovw WORD PTR [rbp-24],xmm0'
+> /tmp/ccf20y5C.s:28: Error: no such instruction: `vmovw xmm0,WORD PTR [rbp-18]'
+> /tmp/ccf20y5C.s:29: Error: no such instruction: `vmovw WORD PTR [rbp-26],xmm0'
+> /tmp/ccf20y5C.s:30: Error: no such instruction: `vmovw xmm0,WORD PTR [rbp-18]'
+> ```
+>
+> Thanks,
+> Andrew Pinski
+
+gcc/testsuite/ChangeLog:
+
+	PR target/124335
+	* gcc.target/i386/avx512fp16-pr124335.c: Require target
+	avx512fp16 instead of avx512bw.
+
+(cherry picked from commit ec3d2c9ab854565ccde34e372b96faa712c516f1)
+---
+ gcc/testsuite/gcc.target/i386/avx512fp16-pr124335.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/gcc/testsuite/gcc.target/i386/avx512fp16-pr124335.c b/gcc/testsuite/gcc.target/i386/avx512fp16-pr124335.c
+index 21dc1282b9ad..9b576374ff67 100644
+--- a/gcc/testsuite/gcc.target/i386/avx512fp16-pr124335.c
++++ b/gcc/testsuite/gcc.target/i386/avx512fp16-pr124335.c
+@@ -2,7 +2,7 @@
+ /* { dg-do assemble } */
+ /* { dg-require-effective-target masm_intel } */
+ /* { dg-options "-mavx512fp16 -masm=intel" } */
+-/* { dg-require-effective-target avx512bw } */
++/* { dg-require-effective-target avx512fp16 } */
+ 
+ #include <x86intrin.h>
+ 
+-- 
+2.43.7
+
+

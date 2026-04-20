@@ -1,0 +1,129 @@
+From 23aa964d116a90c4f7f46f7cacead049b4df8ac7 Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Fri, 13 Mar 2026 21:58:46 +0100
+Subject: [PATCH] libcpp: Fix up -MP for - input [PR105412]
+
+For -MP we used to emit something like below in GCC 9 and earlier:
+touch a.h; echo '#include "a.h"' | ./cc1 -quiet -E -M -MP -
+-: /usr/include/stdc-predef.h a.h
+/usr/include/stdc-predef.h:
+a.h:
+but since r10-205 we emit instead just
+touch a.h; echo '#include "a.h"' | ./cc1 -quiet -E -M -MP -
+-: /usr/include/stdc-predef.h a.h
+a.h:
+i.e. the rule for /usr/include/stdc-predef.h is removed.  Similarly
+with -nostdinc:
+touch a.h; echo '#include "a.h"' | ./cc1 -quiet -E -nostdinc -M -MP -
+-: a.h
+a.h:
+r10-205 changed that to:
+touch a.h; echo '#include "a.h"' | ./cc1 -quiet -E -nostdinc -M -MP -
+-: a.h
+a.h:
+The rationale for the change was
+https://gcc.gnu.org/legacy-ml/gcc-patches/2019-05/msg00323.html
+where after the mkdeps.cc reimplementation it started ICEing on
+- input (file->path[0] is "" in that case).
+The problem is that by leaving out the "" dependency (which we then
+in some cases indeed ignore) the -MP printing
+      if (CPP_OPTION (pfile, deps.phony_targets))
+       for (unsigned i = 1; i < d->deps.size (); i++)
+         fprintf (fp, "%s:\n", munge (d->deps[i]));
+starts at d->deps[1] unconditionally and so ignores the first dependency
+even when it is not the main file.
+So, either we could just revert the r10-205 change and ensure we don't
+ICE on it and keep ignoring it when it should be ignored, or the
+following patch fixes it by not adding the "" dep, but remembering that
+in that case we should start iterating from i = 0; and not from i = 1;
+
+2026-03-13  Jakub Jelinek  <jakub@redhat.com>
+
+	PR preprocessor/105412
+	* files.cc (_cpp_stack_file): Call deps_add_dep even on
+	empty file path.
+	* mkdeps.cc (class mkdeps): Add first_phony_dep member.
+	(mkdeps::mkdeps ()): Initialize it to 1.
+	(deps_add_dep): When called first with "" argument, decrease
+	d->first_phony_dep to 0.
+	(make_write): For -MP iterate from d->first_phony_dep
+	rather than 1.
+
+Reviewed-by: Joseph Myers <josmyers@redhat.com>
+(cherry picked from commit f25788bfb856a83f7d12d850d62a940536b70688)
+---
+ libcpp/files.cc  |  1 -
+ libcpp/mkdeps.cc | 22 +++++++++++++++-------
+ 2 files changed, 15 insertions(+), 8 deletions(-)
+
+diff --git a/libcpp/files.cc b/libcpp/files.cc
+index 615ddba55cec..4d15c03442de 100644
+--- a/libcpp/files.cc
++++ b/libcpp/files.cc
+@@ -1013,7 +1013,6 @@ _cpp_stack_file (cpp_reader *pfile, _cpp_file *file, include_type type,
+       /* Add the file to the dependencies on its first inclusion.  */
+       if (CPP_OPTION (pfile, deps.style) > (sysp != 0)
+ 	  && !file->stack_count
+-	  && file->path[0]
+ 	  && !(pfile->main_file == file
+ 	       && CPP_OPTION (pfile, deps.ignore_main_file)))
+ 	deps_add_dep (pfile->deps, file->path);
+diff --git a/libcpp/mkdeps.cc b/libcpp/mkdeps.cc
+index a4bea6e47d45..fa8282f5c033 100644
+--- a/libcpp/mkdeps.cc
++++ b/libcpp/mkdeps.cc
+@@ -81,8 +81,9 @@ public:
+   };
+ 
+   mkdeps ()
+-    : primary_output (NULL), module_name (NULL), cmi_name (NULL)
+-    , is_header_unit (false), is_exported (false), quote_lwm (0)
++    : primary_output (NULL), module_name (NULL), cmi_name (NULL),
++      is_header_unit (false), is_exported (false), quote_lwm (0),
++      first_phony_dep (1)
+   {
+   }
+   ~mkdeps ()
+@@ -118,6 +119,7 @@ public:
+   bool is_header_unit;
+   bool is_exported;
+   unsigned short quote_lwm;
++  unsigned int first_phony_dep;
+ };
+ 
+ /* Apply Make quoting to STR, TRAIL.  Note that it's not possible to
+@@ -318,11 +320,17 @@ fdeps_add_target (struct mkdeps *d, const char *o, bool is_primary)
+ void
+ deps_add_dep (class mkdeps *d, const char *t)
+ {
+-  gcc_assert (*t);
+-
+-  t = apply_vpath (d, t);
++  if (*t)
++    {
++      t = apply_vpath (d, t);
+ 
+-  d->deps.push (xstrdup (t));
++      d->deps.push (xstrdup (t));
++    }
++  /* When called first with "", remember we should
++     emit for -MP all dependencies rather than just
++     second and following dependency.  See PR105412.  */
++  else if (d->deps.size () == 0)
++    d->first_phony_dep = 0;
+ }
+ 
+ void
+@@ -438,7 +446,7 @@ make_write (const cpp_reader *pfile, FILE *fp, unsigned int colmax)
+       make_write_vec (d->deps, fp, column, colmax);
+       fputs ("\n", fp);
+       if (CPP_OPTION (pfile, deps.phony_targets))
+-	for (unsigned i = 1; i < d->deps.size (); i++)
++	for (unsigned i = d->first_phony_dep; i < d->deps.size (); i++)
+ 	  fprintf (fp, "%s:\n", munge (d->deps[i]));
+     }
+ 
+-- 
+2.43.7
+
+

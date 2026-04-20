@@ -1,0 +1,74 @@
+From 27c593c2e91c1f6f343c9017523fbf1f0d387103 Mon Sep 17 00:00:00 2001
+From: Andrew Pinski <andrew.pinski@oss.qualcomm.com>
+Date: Tue, 17 Feb 2026 14:03:44 -0800
+Subject: [PATCH] aarch64: Fix uint64_t[8] usage after including "arm_neon.h"
+ [PR124126]
+
+aarch64_init_ls64_builtins_types currently creates an array with type uint64_t[8]
+and then sets the mode to V8DI. The problem here is if you used that array
+type before, you would get a mode of BLK.
+This causes an ICE in some cases, with the C++ front-end with -g, you would
+get "type variant differs by TYPE_MODE" and in some cases even without -g,
+"canonical types differ for identical types".
+
+The fix is to do build_distinct_type_copy of the array in aarch64_init_ls64_builtins_types
+before assigning the mode to that copy. We keep the same ls64 structures correct and
+user provided arrays are not influenced when "arm_neon.h" is included.
+
+Build and tested on aarch64-linux-gnu.
+
+	PR target/124126
+
+gcc/ChangeLog:
+
+	* config/aarch64/aarch64-builtins.cc (aarch64_init_ls64_builtins_types): Copy
+	the array type before setting the mode.
+
+gcc/testsuite/ChangeLog:
+
+	* g++.target/aarch64/pr124126-1.C: New test.
+
+Signed-off-by: Andrew Pinski <andrew.pinski@oss.qualcomm.com>
+---
+ gcc/config/aarch64/aarch64-builtins.cc        |  1 +
+ gcc/testsuite/g++.target/aarch64/pr124126-1.C | 15 +++++++++++++++
+ 2 files changed, 16 insertions(+)
+ create mode 100644 gcc/testsuite/g++.target/aarch64/pr124126-1.C
+
+diff --git a/gcc/config/aarch64/aarch64-builtins.cc b/gcc/config/aarch64/aarch64-builtins.cc
+index 01f9b8bfdee2..4e7a83e059c8 100644
+--- a/gcc/config/aarch64/aarch64-builtins.cc
++++ b/gcc/config/aarch64/aarch64-builtins.cc
+@@ -2294,6 +2294,7 @@ aarch64_init_ls64_builtins_types (void)
+   const char *tuple_type_name = "__arm_data512_t";
+   tree node_type = get_typenode_from_name (UINT64_TYPE);
+   tree array_type = build_array_type_nelts (node_type, 8);
++  array_type = build_distinct_type_copy (array_type);
+   SET_TYPE_MODE (array_type, V8DImode);
+ 
+   gcc_assert (TYPE_MODE_RAW (array_type) == TYPE_MODE (array_type));
+diff --git a/gcc/testsuite/g++.target/aarch64/pr124126-1.C b/gcc/testsuite/g++.target/aarch64/pr124126-1.C
+new file mode 100644
+index 000000000000..ffe4fb6690bd
+--- /dev/null
++++ b/gcc/testsuite/g++.target/aarch64/pr124126-1.C
+@@ -0,0 +1,15 @@
++/* { dg-do compile } */
++/* { dg-additional-options "-g" } */
++/* PR target/124126 */
++/* Make sure an array of uint64_t[8] works when
++   used before the inlcude of arm_acle.h.  */
++
++typedef unsigned long uint64_t;
++void executeSuperscalar(uint64_t (*r)[8]);
++
++#include "arm_acle.h"
++
++void initDatasetItem() {
++  uint64_t rl[8];
++  executeSuperscalar(&rl);
++}
+-- 
+2.43.7
+
+

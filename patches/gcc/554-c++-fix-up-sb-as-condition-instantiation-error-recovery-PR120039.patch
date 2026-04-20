@@ -1,0 +1,110 @@
+From e66c207e111e77c2c67d564ef2a7fdf95c958e8a Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Mon, 16 Mar 2026 08:06:52 +0100
+Subject: [PATCH] c++: Fix up sb as condition instantiation error-recovery
+ [PR120039]
+
+The following two testcases ICE during instantation.
+Normally for the artificial var used for structured binding as condition
+(which has NULL DECL_NAME) there is a DECL_EXPR which registers local
+specialization and so tsubst_expr works fine.
+But if there are errors while parsing the initializer, the VAR_DECL
+has still NULL_TREE DECL_NAME, but error_mark_node TREE_TYPE and
+when tsubst_expr is called on it, it falls back to calling lookup_name
+(NULL_TREE) and ICEs on that.
+
+The following patch fixes it by not calling lookup_name if DECL_NAME is
+NULL.
+
+2026-03-16  Jakub Jelinek  <jakub@redhat.com>
+
+	PR c++/120039
+	PR c++/122559
+	* pt.cc (tsubst_expr) <case VAR_DECL>: Don't call lookup_name on
+	DECL_NAME (t) if it is NULL_TREE.
+
+	* g++.dg/cpp26/decomp28.C: New test.
+	* g++.dg/cpp26/decomp29.C: New test.
+
+Reviewed-by: Jason Merrill <jason@redhat.com>
+(cherry picked from commit caae42b31118f754fbd1f9566373f589d7e1568f)
+---
+ gcc/cp/pt.cc                          |  3 ++-
+ gcc/testsuite/g++.dg/cpp26/decomp28.C | 23 +++++++++++++++++++++++
+ gcc/testsuite/g++.dg/cpp26/decomp29.C | 19 +++++++++++++++++++
+ 3 files changed, 44 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/g++.dg/cpp26/decomp28.C
+ create mode 100644 gcc/testsuite/g++.dg/cpp26/decomp29.C
+
+diff --git a/gcc/cp/pt.cc b/gcc/cp/pt.cc
+index dbb7e170e50b..7b8c887ac38a 100644
+--- a/gcc/cp/pt.cc
++++ b/gcc/cp/pt.cc
+@@ -22046,7 +22046,8 @@ tsubst_expr (tree t, tree args, tsubst_flags_t complain, tree in_decl)
+ 	  else if (r == NULL_TREE)
+ 	    {
+ 	      /* First try name lookup to find the instantiation.  */
+-	      r = lookup_name (DECL_NAME (t));
++	      if (DECL_NAME (t))
++		r = lookup_name (DECL_NAME (t));
+ 	      if (r)
+ 		{
+ 		  if (!VAR_P (r))
+diff --git a/gcc/testsuite/g++.dg/cpp26/decomp28.C b/gcc/testsuite/g++.dg/cpp26/decomp28.C
+new file mode 100644
+index 000000000000..015d3bf60374
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/cpp26/decomp28.C
+@@ -0,0 +1,23 @@
++// PR c++/120039
++// { dg-do compile { target c++11 } }
++// { dg-options "" }
++
++struct S {
++  int a; long long b; short c;
++  explicit operator bool () const noexcept { return true; }
++};
++
++template <int N>
++void
++foo ()
++{
++  S s = S { 1, 2, 3 };
++  if (auto [sx, sy, sz] : s)	// { dg-warning "structured bindings in conditions only available with" "" { target c++23_down } }
++    ;				// { dg-error "expected initializer before ':' token" "" { target *-*-* } .-1 }
++}				// { dg-error "expected '\\\)' before ':' token" "" { target *-*-* } .-2 }
++
++int
++main ()
++{
++  foo <0> ();
++}
+diff --git a/gcc/testsuite/g++.dg/cpp26/decomp29.C b/gcc/testsuite/g++.dg/cpp26/decomp29.C
+new file mode 100644
+index 000000000000..aafb08b043b1
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/cpp26/decomp29.C
+@@ -0,0 +1,19 @@
++// PR c++/122559
++// { dg-do compile { target c++11 } }
++// { dg-options "" }
++
++enum class A : bool { B, C };
++
++template <typename T>
++A type (T &&x)
++{
++  if (auto [value = x ()])	// { dg-warning "structured bindings in conditions only available with" "" { target c++23_down } }
++    return A::C;		// { dg-error "expected '\\\]' before '=' token" "" { target *-*-* } .-1 }
++  return A::B;			// { dg-error "expected initializer before '\\\)' token" "" { target *-*-* } .-2 }
++}
++
++int
++main ()
++{
++  auto _ = type (A::B);
++}
+-- 
+2.43.7
+
+

@@ -1,0 +1,25 @@
+From 8245929a567e7b4de1ce49dc9ae22b3490988905 Mon Sep 17 00:00:00 2001
+From: Eric Botcazou <ebotcazou@adacore.com>
+Date: Sun, 5 Apr 2026 12:48:47 +0200
+Subject: [PATCH] Ada: Silence couple of warnings
+
+gcc/testsuite/
+	* gnat.dg/aggr35_pkg.adb: Pass -gnatws.
+---
+ gcc/testsuite/gnat.dg/aggr35_pkg.adb | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/gcc/testsuite/gnat.dg/aggr35_pkg.adb b/gcc/testsuite/gnat.dg/aggr35_pkg.adb
+index 2f3c4bf14390..df571bcc75d5 100644
+--- a/gcc/testsuite/gnat.dg/aggr35_pkg.adb
++++ b/gcc/testsuite/gnat.dg/aggr35_pkg.adb
+@@ -1,3 +1,5 @@
++-- { dg-options "-gnatws" }
++
+ package body Aggr35_Pkg is
+ 
+   procedure Proc1 is
+-- 
+2.43.7
+
+

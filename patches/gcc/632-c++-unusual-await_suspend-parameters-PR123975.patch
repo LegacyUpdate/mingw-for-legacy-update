@@ -1,0 +1,163 @@
+From 95fb3cdf169b49393e386a2b9042803d944dfe8e Mon Sep 17 00:00:00 2001
+From: Jason Merrill <jason@redhat.com>
+Date: Tue, 14 Apr 2026 19:19:37 -0400
+Subject: [PATCH] c++: unusual await_suspend parameters [PR123975]
+
+expand_one_await_expression was assuming we could replace the last argument
+of await_suspend with a call to handle::from_address.  This is wrong if
+either the handle parameter has a different type (123975) or await_suspend
+has additional parameters (121643).
+
+	PR c++/121643
+	PR c++/123975
+
+gcc/cp/ChangeLog:
+
+	* coroutines.cc (build_co_await): Pass rvalue to await_suspend.
+	(expand_one_await_expression): Fix await_suspend surgery.
+
+gcc/testsuite/ChangeLog:
+
+	* g++.dg/coroutines/pr121643.C: New test.
+	* g++.dg/coroutines/pr123975.C: New test.
+
+(cherry picked from commit 3bf1ba4c723b8fd6274fb134890c83031d00d408)
+---
+ gcc/cp/coroutines.cc                       | 16 ++++++-
+ gcc/testsuite/g++.dg/coroutines/pr121643.C | 29 ++++++++++++
+ gcc/testsuite/g++.dg/coroutines/pr123975.C | 52 ++++++++++++++++++++++
+ 3 files changed, 96 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/g++.dg/coroutines/pr121643.C
+ create mode 100644 gcc/testsuite/g++.dg/coroutines/pr123975.C
+
+diff --git a/gcc/cp/coroutines.cc b/gcc/cp/coroutines.cc
+index 7cc123f397e8..29f30164db39 100644
+--- a/gcc/cp/coroutines.cc
++++ b/gcc/cp/coroutines.cc
+@@ -1431,6 +1431,9 @@ build_co_await (location_t loc, tree a, suspend_point_kind suspend_kind,
+       3. a coroutine handle, we execute the handle.resume() call.  */
+   tree awsp_func = NULL_TREE;
+   tree h_proxy = get_coroutine_self_handle_proxy (current_function_decl);
++  /* expand_one_await_expression will replace the argument with a prvalue call
++     to from_address, so pass an rvalue now as well.  */
++  h_proxy = move (h_proxy);
+   vec<tree, va_gc> *args = make_tree_vector_single (h_proxy);
+   tree awsp_call
+     = build_new_method_call (e_proxy, awsp_meth, &args, NULL_TREE,
+@@ -2212,7 +2215,18 @@ expand_one_await_expression (tree *expr, tree *await_expr, void *d)
+     build_new_method_call (dummy_ch, data->hfa_m, &args, NULL_TREE,
+ 			   LOOKUP_NORMAL, NULL, tf_warning_or_error));
+   release_tree_vector (args);
+-  CALL_EXPR_ARG (susp_call, call_expr_nargs (susp_call) - 1) = hfa;
++  {
++    tree fn = get_callee_fndecl (susp_call);
++    int argno = 0 + DECL_OBJECT_MEMBER_FUNCTION_P (fn);
++    tree &arg = CALL_EXPR_ARG (susp_call, argno);
++    /* Handle await_suspend taking an unusual type (c++/123975).  */
++    tree type = TYPE_ARG_TYPES (TREE_TYPE (fn));
++    type = TREE_VALUE (chain_index (argno, type));
++    hfa = perform_implicit_conversion (type, hfa, tf_warning_or_error);
++    hfa = convert_for_arg_passing (type, hfa, tf_warning_or_error);
++    gcc_checking_assert (same_type_p (TREE_TYPE (arg), TREE_TYPE (hfa)));
++    arg = hfa;
++  }
+ 
+   bool is_cont = false;
+   /* NOTE: final suspend can't resume; the "resume" label in that case
+diff --git a/gcc/testsuite/g++.dg/coroutines/pr121643.C b/gcc/testsuite/g++.dg/coroutines/pr121643.C
+new file mode 100644
+index 000000000000..e03afdcb35f5
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/coroutines/pr121643.C
+@@ -0,0 +1,29 @@
++// PR c++/121643
++
++#include <coroutine>
++
++struct Detached {
++  struct promise_type {
++    Detached get_return_object() const noexcept { return {}; }
++    std::suspend_never initial_suspend() const noexcept { return {}; }
++    void return_void() const noexcept {}
++    void unhandled_exception() const noexcept { }
++    std::suspend_never final_suspend() const noexcept { return {}; }
++  };
++};
++
++struct Awaiter {
++  bool await_ready() noexcept { return true; }
++  void
++  await_suspend(std::coroutine_handle<> h,
++                int sloc = 1)
++    noexcept
++  {}
++  void await_resume() noexcept {}
++};
++
++Detached
++coroutine()
++{
++  co_await Awaiter{};
++}
+diff --git a/gcc/testsuite/g++.dg/coroutines/pr123975.C b/gcc/testsuite/g++.dg/coroutines/pr123975.C
+new file mode 100644
+index 000000000000..c7cad15cf88e
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/coroutines/pr123975.C
+@@ -0,0 +1,52 @@
++// PR c++/123975
++// { dg-do run { target c++20 } }
++#include <coroutine>
++
++#if DEBUG
++#define PRINTF(...) __builtin_printf (__VA_ARGS__)
++#else
++#define PRINTF(...)
++#endif
++
++struct task {
++  bool await_ready() const { return false; }
++  void await_suspend(auto &&h);
++  void await_resume() {}
++
++  struct promise_type {
++    task get_return_object() { return task{}; }
++    void return_void() {}
++    void unhandled_exception() {}
++    auto initial_suspend() noexcept { return std::suspend_never{}; }
++    auto final_suspend() noexcept { return std::suspend_never{}; }
++
++    promise_type();
++    promise_type(const promise_type& p)
++    { PRINTF ("%p: promise copied from %p\n", this, &p); }
++    ~promise_type() { PRINTF ("%p: promise destroyed\n", this); }
++  };
++};
++
++const task::promise_type *first;
++task::promise_type::promise_type()
++{
++  if (!first) first = this;
++  PRINTF ("%p: promise constructed\n", this);
++}
++void task::await_suspend (auto &&h)
++{
++  auto &p = h.promise();
++  PRINTF ("suspend %p\n", &h.promise());
++  if (&p != first) __builtin_abort ();
++}
++
++task f() { co_return; }
++
++task g() {
++  co_await f();
++}
++
++int main()
++{
++  g();
++}
+-- 
+2.43.7
+
+

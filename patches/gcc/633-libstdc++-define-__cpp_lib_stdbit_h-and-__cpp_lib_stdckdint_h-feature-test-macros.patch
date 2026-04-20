@@ -1,0 +1,143 @@
+From 9072036de9228c043d7c5cd34820118f30c809ce Mon Sep 17 00:00:00 2001
+From: =?utf8?q?Tomasz=20Kami=C5=84ski?= <tkaminsk@redhat.com>
+Date: Tue, 14 Apr 2026 16:30:36 +0200
+Subject: [PATCH] libstdc++: Define __cpp_lib_stdbit_h and
+ __cpp_lib_stdckdint_h feature test macros.
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf8
+Content-Transfer-Encoding: 8bit
+
+This implements LWG4550: Need new feature test macros for <stdckdint.h>
+and <stdbit.h>.
+
+libstdc++-v3/ChangeLog:
+
+	* include/bits/version.def (stdbit_h, stdckdint_h): Define.
+	* include/bits/version.h: Regenerate.
+	* include/c_compatibility/stdbit.h (__cpp_lib_stdbit_h): Define
+	and use it in guards.
+	* include/c_compatibility/stdckdint.h (__cpp_lib_stdckdint_h):
+	Define and use it in guards.
+
+Reviewed-by: Jonathan Wakely <jwakely@redhat.com>
+Signed-off-by: Tomasz KamiÅski <tkaminsk@redhat.com>
+(cherry picked from commit 62d243c91c05b13490aac10b4faad81e86ea6bbf)
+---
+ libstdc++-v3/include/bits/version.def         | 16 +++++++++++++++
+ libstdc++-v3/include/bits/version.h           | 20 +++++++++++++++++++
+ libstdc++-v3/include/c_compatibility/stdbit.h |  8 ++++++--
+ .../include/c_compatibility/stdckdint.h       |  8 ++++++--
+ 4 files changed, 48 insertions(+), 4 deletions(-)
+
+diff --git a/libstdc++-v3/include/bits/version.def b/libstdc++-v3/include/bits/version.def
+index d8adeed576a2..fc26fc46bc9b 100644
+--- a/libstdc++-v3/include/bits/version.def
++++ b/libstdc++-v3/include/bits/version.def
+@@ -1668,6 +1668,22 @@ ftms = {
+   };
+ };
+ 
++ftms = {
++  name = stdbit_h;
++  values = {
++    v = 202603;
++    cxxmin = 26;
++  };
++};
++
++ftms = {
++  name = stdckdint_h;
++  values = {
++    v = 202603;
++    cxxmin = 26;
++  };
++};
++
+ ftms = {
+   name = adaptor_iterator_pair_constructor;
+   values = {
+diff --git a/libstdc++-v3/include/bits/version.h b/libstdc++-v3/include/bits/version.h
+index 000bde9f9757..02bc4e48624b 100644
+--- a/libstdc++-v3/include/bits/version.h
++++ b/libstdc++-v3/include/bits/version.h
+@@ -1860,6 +1860,26 @@
+ #endif /* !defined(__cpp_lib_stdatomic_h) && defined(__glibcxx_want_stdatomic_h) */
+ #undef __glibcxx_want_stdatomic_h
+ 
++#if !defined(__cpp_lib_stdbit_h)
++# if (__cplusplus >  202302L)
++#  define __glibcxx_stdbit_h 202603L
++#  if defined(__glibcxx_want_all) || defined(__glibcxx_want_stdbit_h)
++#   define __cpp_lib_stdbit_h 202603L
++#  endif
++# endif
++#endif /* !defined(__cpp_lib_stdbit_h) */
++#undef __glibcxx_want_stdbit_h
++
++#if !defined(__cpp_lib_stdckdint_h)
++# if (__cplusplus >  202302L)
++#  define __glibcxx_stdckdint_h 202603L
++#  if defined(__glibcxx_want_all) || defined(__glibcxx_want_stdckdint_h)
++#   define __cpp_lib_stdckdint_h 202603L
++#  endif
++# endif
++#endif /* !defined(__cpp_lib_stdckdint_h) */
++#undef __glibcxx_want_stdckdint_h
++
+ #if !defined(__cpp_lib_adaptor_iterator_pair_constructor)
+ # if (__cplusplus >= 202100L) && _GLIBCXX_HOSTED
+ #  define __glibcxx_adaptor_iterator_pair_constructor 202106L
+diff --git a/libstdc++-v3/include/c_compatibility/stdbit.h b/libstdc++-v3/include/c_compatibility/stdbit.h
+index 1fb691e36c18..fa4ec0414c6e 100644
+--- a/libstdc++-v3/include/c_compatibility/stdbit.h
++++ b/libstdc++-v3/include/c_compatibility/stdbit.h
+@@ -29,7 +29,11 @@
+ #ifndef _GLIBCXX_STDBIT_H
+ #define _GLIBCXX_STDBIT_H
+ 
+-#if __cplusplus > 202302L
++#define __glibcxx_want_stdbit_h
++#include <bits/version.h>
++
++#ifdef __cpp_lib_stdbit_h // C++ >= 26
++
+ #include <bit>
+ 
+ #define __STDC_VERSION_STDBIT_H__ 202311L
+@@ -577,6 +581,6 @@ _GLIBCXX_STDBIT_FUNC(stdc_bit_floor);
+ _GLIBCXX_STDBIT_FUNC(stdc_bit_ceil);
+ #undef _GLIBCXX_STDBIT_FUNC
+ #endif // !DOXYGEN
+-#endif // C++26
++#endif // __cpp_lib_stdbit_h
+ 
+ #endif // _GLIBCXX_STDBIT_H
+diff --git a/libstdc++-v3/include/c_compatibility/stdckdint.h b/libstdc++-v3/include/c_compatibility/stdckdint.h
+index 1de2d18dc1aa..33dfcc8442d6 100644
+--- a/libstdc++-v3/include/c_compatibility/stdckdint.h
++++ b/libstdc++-v3/include/c_compatibility/stdckdint.h
+@@ -29,7 +29,11 @@
+ #ifndef _GLIBCXX_STDCKDINT_H
+ #define _GLIBCXX_STDCKDINT_H
+ 
+-#if __cplusplus > 202302L
++#define __glibcxx_want_stdckdint_h
++#include <bits/version.h>
++
++#ifdef __cpp_lib_stdckdint_h // C++ >= 26
++
+ #include <type_traits>
+ #include <concepts>
+ 
+@@ -108,6 +112,6 @@ using __gnu_cxx::ckd_sub;
+ using __gnu_cxx::ckd_mul;
+ #endif
+ 
+-#endif // C++26
++#endif // __cpp_lib_stdckdint_h
+ 
+ #endif // _GLIBCXX_STDCKDINT_H
+-- 
+2.43.7
+
+

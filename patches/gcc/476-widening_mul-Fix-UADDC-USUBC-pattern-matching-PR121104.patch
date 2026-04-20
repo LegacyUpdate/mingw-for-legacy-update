@@ -1,0 +1,103 @@
+From 79995188168cefe2d2be07cfa3fdde97f28edc54 Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Mon, 2 Feb 2026 10:07:15 +0100
+Subject: [PATCH] widening_mul: Fix UADDC/USUBC pattern matching [PR121104]
+
+As the following testcase shows, I've missed a check that element type
+of lhs type of ovf1/ovf2 (.ADD_OVERFLOW/.SUB_OVERFLOW) matches type (there
+are some casts accepted on the way for the case of values in [0-1] range),
+so the following testcase got also matched as .SUBC and we get an ICE on
+type mismatch in there.  The other .{ADD,SUB}_OVERFLOW cases already check
+even the result type, both
+                    if (gimple_call_internal_p (ovf, code == PLUS_EXPR
+                                                     ? IFN_ADD_OVERFLOW
+                                                     : IFN_SUB_OVERFLOW))
+...
+                        ovf_lhs = gimple_call_lhs (ovf);
+                        tree ovf_lhs_type = TREE_TYPE (TREE_TYPE (ovf_lhs));
+                        ovf_arg1 = gimple_call_arg (ovf, 0);
+                        ovf_arg2 = gimple_call_arg (ovf, 1);
+                        /* In that case we need to punt if the types don't
+                           mismatch.  */
+                        if (!types_compatible_p (type, ovf_lhs_type)
+                            || !types_compatible_p (type, TREE_TYPE (ovf_arg1))
+                            || !types_compatible_p (type,
+                                                    TREE_TYPE (ovf_arg2)))
+                          ovf_lhs = NULL_TREE;
+and
+          gimple *ovf3
+            = SSA_NAME_DEF_STMT (TREE_OPERAND (gimple_assign_rhs1 (im3), 0));
+          if (gimple_call_internal_p (ovf3, ifn))
+            {
+              lhs = gimple_call_lhs (ovf3);
+              arg1 = gimple_call_arg (ovf3, 0);
+              arg2 = gimple_call_arg (ovf3, 1);
+              if (types_compatible_p (type, TREE_TYPE (TREE_TYPE (lhs)))
+                  && types_compatible_p (type, TREE_TYPE (arg1))
+                  && types_compatible_p (type, TREE_TYPE (arg2)))
+
+2026-02-02  Jakub Jelinek  <jakub@redhat.com>
+
+	PR tree-optimization/121104
+	* tree-ssa-math-opts.cc (match_uaddc_usubc): Punt if
+	lhs of ovf1 or ovf2 doesn't have element type compatible with type.
+
+	* gcc.dg/pr121104.c: New test.
+
+(cherry picked from commit 49c7fc2d534cb7e16f0e95fd89f47eb0b0d34762)
+---
+ gcc/testsuite/gcc.dg/pr121104.c | 23 +++++++++++++++++++++++
+ gcc/tree-ssa-math-opts.cc       |  6 +++++-
+ 2 files changed, 28 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/gcc.dg/pr121104.c
+
+diff --git a/gcc/testsuite/gcc.dg/pr121104.c b/gcc/testsuite/gcc.dg/pr121104.c
+new file mode 100644
+index 000000000000..a972faac037a
+--- /dev/null
++++ b/gcc/testsuite/gcc.dg/pr121104.c
+@@ -0,0 +1,23 @@
++/* PR tree-optimization/121104 */
++/* { dg-do compile } */
++/* { dg-options "-O2" } */
++
++static unsigned long
++foo (unsigned long x, unsigned long y,
++     unsigned long z, unsigned long *w)
++{
++  int r;
++  unsigned long a = __builtin_sub_overflow (x, y, &r);
++  unsigned long b = __builtin_sub_overflow (r, z, &r);
++  *w = a + b;
++  return r;
++}
++
++unsigned long
++bar (unsigned long *p, unsigned long *q)
++{
++  unsigned long c;
++  p[0] = foo (p[0], q[0], 0, &c);
++  p[1] = foo (p[1], q[1], c, &c);
++  return c;
++}
+diff --git a/gcc/tree-ssa-math-opts.cc b/gcc/tree-ssa-math-opts.cc
+index 8a7da7546f21..d80f97ef6a87 100644
+--- a/gcc/tree-ssa-math-opts.cc
++++ b/gcc/tree-ssa-math-opts.cc
+@@ -5290,7 +5290,11 @@ match_uaddc_usubc (gimple_stmt_iterator *gsi, gimple *stmt, tree_code code)
+ 			TYPE_MODE (type)) == CODE_FOR_nothing
+       || (rhs[2]
+ 	  && optab_handler (code == PLUS_EXPR ? uaddc5_optab : usubc5_optab,
+-			    TYPE_MODE (type)) == CODE_FOR_nothing))
++			    TYPE_MODE (type)) == CODE_FOR_nothing)
++      || !types_compatible_p (type,
++			      TREE_TYPE (TREE_TYPE (gimple_call_lhs (ovf1))))
++      || !types_compatible_p (type,
++			      TREE_TYPE (TREE_TYPE (gimple_call_lhs (ovf2)))))
+     return false;
+   tree arg1, arg2, arg3 = NULL_TREE;
+   gimple *re1 = NULL, *re2 = NULL;
+-- 
+2.43.7
+
+

@@ -1,0 +1,45 @@
+From 2e96b8cc1842da38cf1f0456c7d265af20e1af70 Mon Sep 17 00:00:00 2001
+From: Christopher Albert <albert@tugraz.at>
+Date: Wed, 11 Mar 2026 00:21:27 +0100
+Subject: [PATCH] fortran: Add testcase [PR95163]
+
+The reproducer from the bug report now gives a proper error on current
+trunk instead of an ICE.  Add a testcase to prevent future regressions.
+
+	PR fortran/95163
+
+gcc/testsuite/ChangeLog:
+
+	PR fortran/95163
+	* gfortran.dg/gomp/pr95163.f90: New test.
+
+Signed-off-by: Christopher Albert <albert@tugraz.at>
+(cherry picked from commit 67431721378391be7cb774c789a8da10c0f827ee)
+---
+ gcc/testsuite/gfortran.dg/gomp/pr95163.f90 | 13 +++++++++++++
+ 1 file changed, 13 insertions(+)
+ create mode 100644 gcc/testsuite/gfortran.dg/gomp/pr95163.f90
+
+diff --git a/gcc/testsuite/gfortran.dg/gomp/pr95163.f90 b/gcc/testsuite/gfortran.dg/gomp/pr95163.f90
+new file mode 100644
+index 000000000000..e64e9437b0ba
+--- /dev/null
++++ b/gcc/testsuite/gfortran.dg/gomp/pr95163.f90
+@@ -0,0 +1,13 @@
++! { dg-do compile }
++! PR fortran/95163
++! Contributed by John Donners <john.donners@eviden.com>
++!
++! ICE in gimplify_adjust_omp_clauses with map and firstprivate on same
++! variable.
++
++  integer :: i
++  i = 1
++!$omp target map(tofrom: i) firstprivate (i)  ! { dg-error "present on both data and map clauses" }
++  i = i + 1
++!$omp end target
++end
+-- 
+2.43.7
+
+

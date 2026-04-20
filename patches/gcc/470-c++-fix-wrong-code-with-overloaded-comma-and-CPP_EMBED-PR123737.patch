@@ -1,0 +1,131 @@
+From c8637cd2eea50953208a12a5c7a638b92357612a Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Sat, 24 Jan 2026 10:38:17 +0100
+Subject: [PATCH] c++: Fix wrong-code with overloaded comma and CPP_EMBED
+ [PR123737]
+
+In cp_parser_expression for comma operator I've used a short path
+where instead of calling build_x_compound_expr #embed number times
+it is called just 3 times, for the CPP_NUMBER added by the preprocessor
+at the start, last byte from CPP_EMBED and then CPP_NUMBER added by
+libcpp at the end, enough to make sure -Wunused-value reports something,
+but not bothering users with millions of -Wunused-value warnings
+and spending too much compile time on it when they use a very large #embed.
+
+As the following testcases show, that is ok for C or for C++ if the
+expression before it is known not to have OVERLOAD_TYPE_P (common case
+is INTEGER_TYPE I guess), but doesn't work well in case one uses overloaded
+comma operator.  In that case we just have to call build_x_compound_expr
+the right number of times, even if it is a lot.
+
+I think I don't need to test for !expression, because the preprocessor
+should guarantee that CPP_EMBED is preceded by CPP_NUMBER CPP_COMMA
+tokens.
+
+2026-01-24  Jakub Jelinek  <jakub@redhat.com>
+
+	PR c++/123737
+	* parser.cc (cp_parser_expression): Don't handle CPP_EMBED just
+	as the last byte in it if expression has or might have overloaded
+	type.  In that case call build_x_compound_expr for each byte
+	in CPP_EMBED separately.
+
+	* g++.dg/cpp/embed-28.C: New test.
+	* g++.dg/parse/comma3.C: New test.
+
+(cherry picked from commit e2f626b37ef62fcab8667b2a67318c27a8f2a6ca)
+---
+ gcc/cp/parser.cc                    | 16 +++++++++++++++-
+ gcc/testsuite/g++.dg/cpp/embed-28.C | 19 +++++++++++++++++++
+ gcc/testsuite/g++.dg/parse/comma3.C | 22 ++++++++++++++++++++++
+ 3 files changed, 56 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/g++.dg/cpp/embed-28.C
+ create mode 100644 gcc/testsuite/g++.dg/parse/comma3.C
+
+diff --git a/gcc/cp/parser.cc b/gcc/cp/parser.cc
+index 317901bb1691..b777cad0ec3c 100644
+--- a/gcc/cp/parser.cc
++++ b/gcc/cp/parser.cc
+@@ -11268,10 +11268,24 @@ cp_parser_expression (cp_parser* parser, cp_id_kind * pidk,
+ 	     and one CPP_NUMBER plus CPP_COMMA before it and one
+ 	     CPP_COMMA plus CPP_NUMBER after it is guaranteed by
+ 	     the preprocessor.  Thus, parse the whole CPP_EMBED just
+-	     as a single INTEGER_CST, the last byte in it.  */
++	     as a single INTEGER_CST, the last byte in it.  Though,
++	     don't use that shortcut if the comma operator could be
++	     overloaded.  */
+ 	  tree raw_data = cp_lexer_peek_token (parser->lexer)->u.value;
+ 	  location_t loc = cp_lexer_peek_token (parser->lexer)->location;
+ 	  cp_lexer_consume_token (parser->lexer);
++	  if (OVERLOAD_TYPE_P (TREE_TYPE (expression))
++	      || type_dependent_expression_p (expression))
++	    for (unsigned i = 0; i < RAW_DATA_LENGTH (raw_data) - 1U; ++i)
++	      {
++		assignment_expression
++		  = *raw_data_iterator (raw_data, i);
++		assignment_expression.set_location (loc);
++		expression
++		  = build_x_compound_expr (loc, expression,
++					   assignment_expression, NULL_TREE,
++					   complain_flags (decltype_p));
++	      }
+ 	  assignment_expression
+ 	    = *raw_data_iterator (raw_data, RAW_DATA_LENGTH (raw_data) - 1);
+ 	  assignment_expression.set_location (loc);
+diff --git a/gcc/testsuite/g++.dg/cpp/embed-28.C b/gcc/testsuite/g++.dg/cpp/embed-28.C
+new file mode 100644
+index 000000000000..0d8d1adf6377
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/cpp/embed-28.C
+@@ -0,0 +1,19 @@
++// PR c++/123737
++// { dg-do run }
++// { dg-options "--embed-dir=${srcdir}/c-c++-common/cpp/embed-dir" }
++
++struct A {
++  A (int x) : a (0), e (x) {}
++  unsigned long a, e;
++  A &operator, (int) { ++a; return *this; }
++  ~A () { if (a != e) __builtin_abort (); }
++};
++
++int
++main ()
++{
++  A a = 231;
++  a,
++#embed <magna-carta.txt> limit (231)
++    ;
++}
+diff --git a/gcc/testsuite/g++.dg/parse/comma3.C b/gcc/testsuite/g++.dg/parse/comma3.C
+new file mode 100644
+index 000000000000..71603d3315a7
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/parse/comma3.C
+@@ -0,0 +1,22 @@
++// PR c++/123737
++// { dg-do run }
++
++struct A {
++  A (int x) : a (0), e (x) {}
++  unsigned long a, e;
++  A &operator, (int) { ++a; return *this; }
++  ~A () { if (a != e) __builtin_abort (); }
++};
++
++int
++main ()
++{
++  A a = 131;
++  a, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
++     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
++     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
++     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
++     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
++     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
++     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0;
++}
+-- 
+2.43.7
+
+

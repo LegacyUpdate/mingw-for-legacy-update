@@ -1,0 +1,64 @@
+From 8e0e441b96bac253b0c2b405796a2997667afb75 Mon Sep 17 00:00:00 2001
+From: Richard Biener <rguenther@suse.de>
+Date: Thu, 29 Jan 2026 13:56:11 +0100
+Subject: [PATCH] tree-optimization/122537 - do not elide maybe_zero condition
+ for wrapping IV
+
+The following removes the optimization eliding the maybe_zero condition
+from number_of_iterations_lt_to_ne when the IV can overflow since the
+IV delta input is not accurately reflecting this.
+
+	PR tree-optimization/122537
+	* tree-ssa-loop-niter.cc (number_of_iterations_lt_to_ne): Register
+	may_be_zero condition when the IV may overflow.
+
+	* gcc.dg/torture/pr122537.c: New testcase.
+
+(cherry picked from commit 06320fa8b37593f00ebc13b37d6411eb29ff8a4c)
+---
+ gcc/testsuite/gcc.dg/torture/pr122537.c | 18 ++++++++++++++++++
+ gcc/tree-ssa-loop-niter.cc              |  2 +-
+ 2 files changed, 19 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/gcc.dg/torture/pr122537.c
+
+diff --git a/gcc/testsuite/gcc.dg/torture/pr122537.c b/gcc/testsuite/gcc.dg/torture/pr122537.c
+new file mode 100644
+index 000000000000..8fc64abcffdd
+--- /dev/null
++++ b/gcc/testsuite/gcc.dg/torture/pr122537.c
+@@ -0,0 +1,18 @@
++/* { dg-do run } */
++/* { dg-additional-options "-fwrapv" } */
++
++void abort ();
++int a, b;
++int main()
++{
++  int c = 61;
++  int d = 61;
++  c += 8;
++  while (c + a - 80 >= d + a - 80) {
++    c -= d;
++    b++;
++  }
++  if (b != 1)
++    abort ();
++  return 0;
++}
+diff --git a/gcc/tree-ssa-loop-niter.cc b/gcc/tree-ssa-loop-niter.cc
+index 9ce881344142..65cf979956b9 100644
+--- a/gcc/tree-ssa-loop-niter.cc
++++ b/gcc/tree-ssa-loop-niter.cc
+@@ -1218,7 +1218,7 @@ number_of_iterations_lt_to_ne (tree type, affine_iv *iv0, affine_iv *iv1,
+     }
+ 
+   /* IV0 < IV1 does not loop if IV0->base >= IV1->base.  */
+-  if (mpz_cmp (mmod, bnds->below) < 0)
++  if (fv_comp_no_overflow && mpz_cmp (mmod, bnds->below) < 0)
+     noloop = boolean_false_node;
+   else
+     noloop = fold_build2 (GE_EXPR, boolean_type_node,
+-- 
+2.43.7
+
+

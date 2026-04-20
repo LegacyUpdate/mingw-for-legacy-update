@@ -1,0 +1,332 @@
+From cadef7a5838c3809d9ea379595393484f3ab0506 Mon Sep 17 00:00:00 2001
+From: Mikael Morin <morin-mikael@orange.fr>
+Date: Wed, 30 Jul 2025 11:02:27 +0200
+Subject: [PATCH] fortran: Evaluate class function bounds in the scalarizer
+ [PR121342]
+
+There is code in gfc_conv_procedure_call that, for polymorphic
+functions, initializes the scalarization array descriptor
+information and forcedfully sets loop bounds.  This code is changing
+the decisions made by the scalarizer behind his back, and the test shows
+an example where the consequences are (badly) visible.  In the test, for
+one of the actual arguments to an elemental subroutine, an offset to the
+loop variable is missing to access the array, as it was the one
+originally chosen to set the loop bounds from.
+
+This could theoretically be fixed by just clearing the array of choice
+for the loop bounds.  This change takes instead the harder path of
+adding the missing information to the scalarizer's knowledge so that its
+decision doesn't need to be forced to something else after the fact.
+The array descriptor information initialisation for polymorphic
+functions is moved to gfc_add_loop_ss_code (after the function call
+generation), and the loop bounds initialization to a new function called
+after that.
+
+As the array chosen to set the loop bounds from is no longer forced
+to be the polymorphic function result, we have to let the scalarizer set
+a delta for polymorphic function results.  For regular non-polymorphic
+function result arrays, they are zero-based and the temporary creation
+makes the loop zero-based as well, so we can continue to skip the delta
+calculation.
+
+In the cases where a temporary is created to store the result of the
+array function, the creation of the temporary shifts the loop bounds
+to be zero-based.  As there was no delta for polymorphic result arrays,
+the function result descriptor offset was set to zero in that case for
+a zero-based array reference to be correct.  Now that the scalarizer
+sets a delta, those forced offset updates have to go because they can
+make the descriptor invalid and cause erroneous array references.
+
+	PR fortran/121342
+
+gcc/fortran/ChangeLog:
+
+	* trans-expr.cc (gfc_conv_subref_array_arg): Remove offset
+	update.
+	(gfc_conv_procedure_call): For polymorphic functions, move the
+	scalarizer descriptor information...
+	* trans-array.cc (gfc_add_loop_ss_code): ... here, and evaluate
+	the bounds to fresh variables.
+	(get_class_info_from_ss): Remove offset update.
+	(gfc_conv_ss_startstride): Don't set a zero value for function
+	result upper bounds.
+	(late_set_loop_bounds): New.
+	(gfc_conv_loop_setup): If the bounds of a function result have
+	been set, and no other array provided loop bounds for a
+	dimension, use the function result bounds as loop bounds for
+	that dimension.
+	(gfc_set_delta): Don't skip delta setting for polymorphic
+	function results.
+
+gcc/testsuite/ChangeLog:
+
+	* gfortran.dg/class_elemental_1.f90: New test.
+
+(cherry picked from commit 04a1259ffea29718256beeb2aca3f473c1f259e4)
+---
+ gcc/fortran/trans-array.cc                    | 116 ++++++++++++++----
+ gcc/fortran/trans-expr.cc                     |  35 +-----
+ .../gfortran.dg/class_elemental_1.f90         |  35 ++++++
+ 3 files changed, 132 insertions(+), 54 deletions(-)
+ create mode 100644 gcc/testsuite/gfortran.dg/class_elemental_1.f90
+
+diff --git a/gcc/fortran/trans-array.cc b/gcc/fortran/trans-array.cc
+index 3e5205e8117b..76fce7ad00f5 100644
+--- a/gcc/fortran/trans-array.cc
++++ b/gcc/fortran/trans-array.cc
+@@ -1426,12 +1426,6 @@ get_class_info_from_ss (stmtblock_t * pre, gfc_ss *ss, tree *eltype,
+ 	  tmp2 = gfc_class_len_get (class_expr);
+ 	  gfc_add_modify (pre, tmp, tmp2);
+ 	}
+-
+-      if (rhs_function)
+-	{
+-	  tmp = gfc_class_data_get (class_expr);
+-	  gfc_conv_descriptor_offset_set (pre, tmp, gfc_index_zero_node);
+-	}
+     }
+   else if (rhs_ss->info->data.array.descriptor)
+    {
+@@ -3372,18 +3366,51 @@ gfc_add_loop_ss_code (gfc_loopinfo * loop, gfc_ss * ss, bool subscript,
+ 	  break;
+ 
+ 	case GFC_SS_FUNCTION:
+-	  /* Array function return value.  We call the function and save its
+-	     result in a temporary for use inside the loop.  */
+-	  gfc_init_se (&se, NULL);
+-	  se.loop = loop;
+-	  se.ss = ss;
+-	  if (gfc_is_class_array_function (expr))
+-	    expr->must_finalize = 1;
+-	  gfc_conv_expr (&se, expr);
+-	  gfc_add_block_to_block (&outer_loop->pre, &se.pre);
+-	  gfc_add_block_to_block (&outer_loop->post, &se.post);
+-	  gfc_add_block_to_block (&outer_loop->post, &se.finalblock);
+-	  ss_info->string_length = se.string_length;
++	  {
++	    /* Array function return value.  We call the function and save its
++	       result in a temporary for use inside the loop.  */
++	    gfc_init_se (&se, NULL);
++	    se.loop = loop;
++	    se.ss = ss;
++	    bool class_func = gfc_is_class_array_function (expr);
++	    if (class_func)
++	      expr->must_finalize = 1;
++	    gfc_conv_expr (&se, expr);
++	    gfc_add_block_to_block (&outer_loop->pre, &se.pre);
++	    if (class_func
++		&& se.expr
++		&& GFC_CLASS_TYPE_P (TREE_TYPE (se.expr)))
++	      {
++		tree tmp = gfc_class_data_get (se.expr);
++		info->descriptor = tmp;
++		info->data = gfc_conv_descriptor_data_get (tmp);
++		info->offset = gfc_conv_descriptor_offset_get (tmp);
++		for (gfc_ss *s = ss; s; s = s->parent)
++		  for (int n = 0; n < s->dimen; n++)
++		    {
++		      int dim = s->dim[n];
++		      tree tree_dim = gfc_rank_cst[dim];
++
++		      tree start;
++		      start = gfc_conv_descriptor_lbound_get (tmp, tree_dim);
++		      start = gfc_evaluate_now (start, &outer_loop->pre);
++		      info->start[dim] = start;
++
++		      tree end;
++		      end = gfc_conv_descriptor_ubound_get (tmp, tree_dim);
++		      end = gfc_evaluate_now (end, &outer_loop->pre);
++		      info->end[dim] = end;
++
++		      tree stride;
++		      stride = gfc_conv_descriptor_stride_get (tmp, tree_dim);
++		      stride = gfc_evaluate_now (stride, &outer_loop->pre);
++		      info->stride[dim] = stride;
++		    }
++	      }
++	    gfc_add_block_to_block (&outer_loop->post, &se.post);
++	    gfc_add_block_to_block (&outer_loop->post, &se.finalblock);
++	    ss_info->string_length = se.string_length;
++	  }
+ 	  break;
+ 
+ 	case GFC_SS_CONSTRUCTOR:
+@@ -5235,7 +5262,8 @@ done:
+ 	      int dim = ss->dim[n];
+ 
+ 	      info->start[dim]  = gfc_index_zero_node;
+-	      info->end[dim]    = gfc_index_zero_node;
++	      if (ss_info->type != GFC_SS_FUNCTION)
++		info->end[dim]    = gfc_index_zero_node;
+ 	      info->stride[dim] = gfc_index_one_node;
+ 	    }
+ 	  break;
+@@ -5920,6 +5948,46 @@ set_loop_bounds (gfc_loopinfo *loop)
+ }
+ 
+ 
++/* Last attempt to set the loop bounds, in case they depend on an allocatable
++   function result.  */
++
++static void
++late_set_loop_bounds (gfc_loopinfo *loop)
++{
++  int n, dim;
++  gfc_array_info *info;
++  gfc_ss **loopspec;
++
++  loopspec = loop->specloop;
++
++  for (n = 0; n < loop->dimen; n++)
++    {
++      /* Set the extents of this range.  */
++      if (loop->from[n] == NULL_TREE
++	  || loop->to[n] == NULL_TREE)
++	{
++	  /* We should have found the scalarization loop specifier.  If not,
++	     that's bad news.  */
++	  gcc_assert (loopspec[n]);
++
++	  info = &loopspec[n]->info->data.array;
++	  dim = loopspec[n]->dim[n];
++
++	  if (loopspec[n]->info->type == GFC_SS_FUNCTION
++	      && info->start[dim]
++	      && info->end[dim])
++	    {
++	      loop->from[n] = info->start[dim];
++	      loop->to[n] = info->end[dim];
++	    }
++	}
++    }
++
++  for (loop = loop->nested; loop; loop = loop->next)
++    late_set_loop_bounds (loop);
++}
++
++
+ /* Initialize the scalarization loop.  Creates the loop variables.  Determines
+    the range of the loop variables.  Creates a temporary if required.
+    Also generates code for scalar expressions which have been
+@@ -5938,6 +6006,8 @@ gfc_conv_loop_setup (gfc_loopinfo * loop, locus * where)
+      allocating the temporary.  */
+   gfc_add_loop_ss_code (loop, loop->ss, false, where);
+ 
++  late_set_loop_bounds (loop);
++
+   tmp_ss = loop->temp_ss;
+   /* If we want a temporary then create it.  */
+   if (tmp_ss != NULL)
+@@ -5994,9 +6064,11 @@ gfc_set_delta (gfc_loopinfo *loop)
+       gfc_ss_type ss_type;
+ 
+       ss_type = ss->info->type;
+-      if (ss_type != GFC_SS_SECTION
+-	  && ss_type != GFC_SS_COMPONENT
+-	  && ss_type != GFC_SS_CONSTRUCTOR)
++      if (!(ss_type == GFC_SS_SECTION
++	    || ss_type == GFC_SS_COMPONENT
++	    || ss_type == GFC_SS_CONSTRUCTOR
++	    || (ss_type == GFC_SS_FUNCTION
++		&& gfc_is_class_array_function (ss->info->expr))))
+ 	continue;
+ 
+       info = &ss->info->data.array;
+diff --git a/gcc/fortran/trans-expr.cc b/gcc/fortran/trans-expr.cc
+index 00ba563c00bb..ffe86539a0fd 100644
+--- a/gcc/fortran/trans-expr.cc
++++ b/gcc/fortran/trans-expr.cc
+@@ -5454,16 +5454,6 @@ gfc_conv_subref_array_arg (gfc_se *se, gfc_expr * expr, int g77,
+   /* Translate the expression.  */
+   gfc_conv_expr (&rse, expr);
+ 
+-  /* Reset the offset for the function call since the loop
+-     is zero based on the data pointer.  Note that the temp
+-     comes first in the loop chain since it is added second.  */
+-  if (gfc_is_class_array_function (expr))
+-    {
+-      tmp = loop.ss->loop_chain->info->data.array.descriptor;
+-      gfc_conv_descriptor_offset_set (&loop.pre, tmp,
+-				      gfc_index_zero_node);
+-    }
+-
+   gfc_conv_tmp_array_ref (&lse);
+ 
+   if (intent != INTENT_OUT)
+@@ -8843,28 +8833,9 @@ gfc_conv_procedure_call (gfc_se * se, gfc_symbol * sym,
+ 	  && se->expr && GFC_CLASS_TYPE_P (TREE_TYPE (se->expr))
+ 	  && expr->must_finalize)
+ 	{
+-	  int n;
+-	  if (se->ss && se->ss->loop)
+-	    {
+-	      gfc_add_block_to_block (&se->ss->loop->pre, &se->pre);
+-	      se->expr = gfc_evaluate_now (se->expr, &se->ss->loop->pre);
+-	      tmp = gfc_class_data_get (se->expr);
+-	      info->descriptor = tmp;
+-	      info->data = gfc_conv_descriptor_data_get (tmp);
+-	      info->offset = gfc_conv_descriptor_offset_get (tmp);
+-	      for (n = 0; n < se->ss->loop->dimen; n++)
+-		{
+-		  tree dim = gfc_rank_cst[n];
+-		  se->ss->loop->to[n] = gfc_conv_descriptor_ubound_get (tmp, dim);
+-		  se->ss->loop->from[n] = gfc_conv_descriptor_lbound_get (tmp, dim);
+-		}
+-	    }
+-	  else
+-	    {
+-	      /* TODO Eliminate the doubling of temporaries. This
+-		 one is necessary to ensure no memory leakage.  */
+-	      se->expr = gfc_evaluate_now (se->expr, &se->pre);
+-	    }
++	  /* TODO Eliminate the doubling of temporaries.  This
++	     one is necessary to ensure no memory leakage.  */
++	  se->expr = gfc_evaluate_now (se->expr, &se->pre);
+ 
+ 	  /* Finalize the result, if necessary.  */
+ 	  attr = expr->value.function.esym
+diff --git a/gcc/testsuite/gfortran.dg/class_elemental_1.f90 b/gcc/testsuite/gfortran.dg/class_elemental_1.f90
+new file mode 100644
+index 000000000000..547ae989218a
+--- /dev/null
++++ b/gcc/testsuite/gfortran.dg/class_elemental_1.f90
+@@ -0,0 +1,35 @@
++! { dg-do run }
++!
++! PR fortran/121342
++! The polymorphic function result as actual argument used to force the loop
++! bounds around the elemental call, altering access to the other arrays.
++
++program p
++  implicit none
++  type :: t
++    integer :: i
++  end type
++  type :: u
++    integer :: i, a
++  end type
++  type(u) :: accum(5)
++  integer :: a(3:7), k
++  a = [ (k*k, k=1,5) ]
++  call s(accum, f(), a)
++  ! print *, accum%i
++  ! print *, accum%a
++  if (any(accum%i /= accum%a)) error stop 1
++contains
++  elemental subroutine s(l, c, a)
++    type(u)  , intent(out) :: l
++    class(t) , intent(in)  :: c
++    integer  , intent(in)  :: a
++    l%i = c%i
++    l%a = a
++  end subroutine
++  function f()
++    class(t), allocatable :: f(:)
++    allocate(f(-1:3))
++    f%i = [ (k*k, k=1,5) ]
++  end function
++end program
+-- 
+2.43.7
+
+

@@ -1,0 +1,43 @@
+From d3a48dc87e10888003f5e143ab5a97ef14850b13 Mon Sep 17 00:00:00 2001
+From: Alexandre Oliva <oliva@adacore.com>
+Date: Sat, 31 Jan 2026 01:51:53 -0300
+Subject: [PATCH] testsuite: arm: update fast-math-complex-mls-half-float.c
+
+Since the addition of DCE after complex lowering, reassoc1 has no
+longer been impeded by COMPLEX_EXPRs, so it changes (a - (b + c)),
+where (b + c) is the imaginary part of an intermediate complex value,
+to ((a - b) - c), and this prevents the vectorizer from recognizing
+the expected COMPLEX_ADD_ROT270 pattern in fms_elemconjsnd.
+
+Stop expecting that pattern to be found on that test.
+
+for  gcc/testsuite/ChangeLog
+
+	* gcc.dg/vect/complex/fast-math-complex-mls-half-float.c:
+	Don't expect COMPLEX_ADD_ROT270.
+
+(cherry picked from commit 9dceb52664d5af3012507e1d4527ef4362f83aea)
+---
+ .../gcc.dg/vect/complex/fast-math-complex-mls-half-float.c  | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/gcc/testsuite/gcc.dg/vect/complex/fast-math-complex-mls-half-float.c b/gcc/testsuite/gcc.dg/vect/complex/fast-math-complex-mls-half-float.c
+index fb7e9a5619e9..438426d1c6a4 100644
+--- a/gcc/testsuite/gcc.dg/vect/complex/fast-math-complex-mls-half-float.c
++++ b/gcc/testsuite/gcc.dg/vect/complex/fast-math-complex-mls-half-float.c
+@@ -7,6 +7,10 @@
+ #define TYPE _Float16
+ #define N 200
+ #include "complex-mls-template.c"
+-/* { dg-final { scan-tree-dump "Found COMPLEX_ADD_ROT270" "vect" } } */
++/* COMPLEX_ADD_ROT270 is no longer recognized in fms_elemconjsnd.
++   The COMPLEX_EXPR that prevented reassoc from changing X - (Y + Z)
++   into (X + (-Y)) + (-Z) has been removed since the introduction of
++   DCE at the end of cplxlower1.  */
++/* { dg-final { scan-tree-dump "Found COMPLEX_ADD_ROT270" "vect" { xfail *-*-* } } } */
+ /* { dg-final { scan-tree-dump "Found COMPLEX_FMS_CONJ" "vect" } } */
+ /* { dg-final { scan-tree-dump "Found COMPLEX_FMS" "vect" } } */
+-- 
+2.43.7
+
+

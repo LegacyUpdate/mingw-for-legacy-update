@@ -1,0 +1,219 @@
+From 0be7e4f3b9644fd7c92a7c7c6abf2e785ce9e62f Mon Sep 17 00:00:00 2001
+From: Christopher Albert <albert@tugraz.at>
+Date: Wed, 1 Apr 2026 15:52:30 +0200
+Subject: [PATCH] fortran: Fix assumed-rank repacking for contiguous dummies
+ [PR124751]
+
+When an assumed-rank actual is packed for a contiguous dummy argument,
+create a descriptor for the packed temporary instead of reusing the
+original descriptor metadata with stale strides and offsets.
+
+The updated testcase keeps the original ICE coverage from PR100194 and
+adds runtime coverage for the remaining wrong-code cases reported after
+r16-8375.
+
+	PR fortran/124751
+
+gcc/fortran/ChangeLog:
+
+	* trans-array.cc (gfc_conv_array_parameter): Build a packed
+	descriptor for assumed-rank actual arguments instead of reusing
+	stale metadata from the original descriptor.
+
+gcc/testsuite/ChangeLog:
+
+	* gfortran.dg/pr100194.f90: Run the testcase and add runtime
+	coverage for packed assumed-rank sections.
+
+Co-authored-by: Paul Thomas <pault@gcc.gnu.org>
+Signed-off-by: Christopher Albert <albert@tugraz.at>
+(cherry picked from commit b807851428512039bf827426e2143cc80d7c2463)
+---
+ gcc/fortran/trans-array.cc             | 79 ++++++++++++++++++++++----
+ gcc/testsuite/gfortran.dg/pr100194.f90 | 60 ++++++++++++++++++-
+ 2 files changed, 126 insertions(+), 13 deletions(-)
+
+diff --git a/gcc/fortran/trans-array.cc b/gcc/fortran/trans-array.cc
+index 76fce7ad00f5..a601c3854558 100644
+--- a/gcc/fortran/trans-array.cc
++++ b/gcc/fortran/trans-array.cc
+@@ -9436,7 +9436,7 @@ gfc_conv_array_parameter (gfc_se *se, gfc_expr *expr, bool g77,
+ 	  tmp = build_fold_indirect_ref_loc (input_location, desc);
+ 
+ 	  gfc_ss * ss = gfc_walk_expr (expr);
+-	  if (!transposed_dims (ss))
++	  if (!transposed_dims (ss) && expr->rank != -1)
+ 	    {
+ 	      if (!ctree)
+ 		gfc_conv_descriptor_data_set (&se->pre, tmp, ptr);
+@@ -9444,9 +9444,6 @@ gfc_conv_array_parameter (gfc_se *se, gfc_expr *expr, bool g77,
+ 	  else if (!ctree)
+ 	    {
+ 	      tree old_field, new_field;
+-
+-	      /* The original descriptor has transposed dims so we can't reuse
+-		 it directly; we have to create a new one.  */
+ 	      tree old_desc = tmp;
+ 	      tree new_desc = gfc_create_var (TREE_TYPE (old_desc), "arg_desc");
+ 
+@@ -9454,17 +9451,75 @@ gfc_conv_array_parameter (gfc_se *se, gfc_expr *expr, bool g77,
+ 	      new_field = gfc_conv_descriptor_dtype (new_desc);
+ 	      gfc_add_modify (&se->pre, new_field, old_field);
+ 
+-	      old_field = gfc_conv_descriptor_offset (old_desc);
+-	      new_field = gfc_conv_descriptor_offset (new_desc);
+-	      gfc_add_modify (&se->pre, new_field, old_field);
+-
+-	      for (int i = 0; i < expr->rank; i++)
++	      if (expr->rank == -1)
+ 		{
+-		  old_field = gfc_conv_descriptor_dimension (old_desc,
++		  tree idx = gfc_create_var (TREE_TYPE (gfc_conv_descriptor_rank
++							(old_desc)),
++					     "idx");
++		  tree stride = gfc_create_var (gfc_array_index_type, "stride");
++		  stmtblock_t loop_body;
++
++		  gfc_conv_descriptor_offset_set (&se->pre, new_desc,
++						  gfc_index_zero_node);
++		  gfc_conv_descriptor_span_set (&se->pre, new_desc,
++						gfc_conv_descriptor_span_get
++						(old_desc));
++		  gfc_add_modify (&se->pre, stride, gfc_index_one_node);
++
++		  gfc_init_block (&loop_body);
++
++		  old_field = gfc_conv_descriptor_lbound_get (old_desc, idx);
++		  gfc_conv_descriptor_lbound_set (&loop_body, new_desc, idx,
++						  old_field);
++
++		  old_field = gfc_conv_descriptor_ubound_get (old_desc, idx);
++		  gfc_conv_descriptor_ubound_set (&loop_body, new_desc, idx,
++						  old_field);
++
++		  gfc_conv_descriptor_stride_set (&loop_body, new_desc, idx,
++						  stride);
++
++		  tree offset = fold_build2_loc (input_location, MULT_EXPR,
++						 gfc_array_index_type, stride,
++						 gfc_conv_descriptor_lbound_get
++						 (new_desc, idx));
++		  offset = fold_build2_loc (input_location, MINUS_EXPR,
++					    gfc_array_index_type,
++					    gfc_conv_descriptor_offset_get
++					    (new_desc), offset);
++		  gfc_conv_descriptor_offset_set (&loop_body, new_desc, offset);
++
++		  tree extent = gfc_conv_array_extent_dim
++				(gfc_conv_descriptor_lbound_get (new_desc, idx),
++				 gfc_conv_descriptor_ubound_get (new_desc, idx),
++				 NULL);
++		  extent = fold_build2_loc (input_location, MULT_EXPR,
++					    gfc_array_index_type, stride,
++					    extent);
++		  gfc_add_modify (&loop_body, stride, extent);
++
++		  gfc_simple_for_loop (&se->pre, idx,
++				       build_int_cst (TREE_TYPE (idx), 0),
++				       gfc_conv_descriptor_rank (old_desc),
++				       LT_EXPR,
++				       build_int_cst (TREE_TYPE (idx), 1),
++				       gfc_finish_block (&loop_body));
++		}
++	      else
++		{
++		  /* The original descriptor has transposed dims so we can't
++		     reuse it directly; we have to create a new one.  */
++		  old_field = gfc_conv_descriptor_offset_get (old_desc);
++		  gfc_conv_descriptor_offset_set (&se->pre, new_desc, old_field);
++
++		  for (int i = 0; i < expr->rank; i++)
++		    {
++		      old_field = gfc_conv_descriptor_dimension (old_desc,
+ 			gfc_rank_cst[get_array_ref_dim_for_loop_dim (ss, i)]);
+-		  new_field = gfc_conv_descriptor_dimension (new_desc,
++		      new_field = gfc_conv_descriptor_dimension (new_desc,
+ 			gfc_rank_cst[i]);
+-		  gfc_add_modify (&se->pre, new_field, old_field);
++		      gfc_add_modify (&se->pre, new_field, old_field);
++		    }
+ 		}
+ 
+ 	      if (flag_coarray == GFC_FCOARRAY_LIB
+diff --git a/gcc/testsuite/gfortran.dg/pr100194.f90 b/gcc/testsuite/gfortran.dg/pr100194.f90
+index a8066e1a1bbf..6ba3ebae7060 100644
+--- a/gcc/testsuite/gfortran.dg/pr100194.f90
++++ b/gcc/testsuite/gfortran.dg/pr100194.f90
+@@ -1,4 +1,4 @@
+-! { dg-do compile }
++! { dg-do run }
+ !
+ ! PR fortran/100194
+ ! ICE in gfc_trans_create_temp_array when passing a non-contiguous
+@@ -37,4 +37,62 @@ contains
+    end
+ end
+ 
++! Runtime follow-up from Paul Thomas <pault@gcc.gnu.org>.
+ 
++program p
++  implicit none
++  interface
++    subroutine pr100194_runtime(x, res)
++      integer :: x(..)
++      integer, allocatable :: res(:)
++    end subroutine pr100194_runtime
++  end interface
++
++  type :: ty
++    character(4) :: chr
++    integer :: r(2)
++  end type ty
++
++  integer :: x(4) = [42, 84, 126, 168]
++  type(ty) :: y = ty("abcd", [42, 84])
++  integer, allocatable :: z(:)
++  integer, allocatable :: u(:, :)
++
++  u = reshape ([x, 4 * x, 16 * x, 64 * x], [4, 4])
++
++  call pr100194_runtime(x, z)
++  if (any (z /= [84, 168, 252, 336])) stop 1
++
++  call pr100194_runtime(x(1:4:2), z)
++  if (any (z /= [84, 252])) stop 2
++
++  call pr100194_runtime(x([1, 3, 4, 2]), z)
++  if (any (z /= [84, 252, 336, 168])) stop 3
++
++  call pr100194_runtime(y%r, z)
++  if (any (z /= [84, 168])) stop 4
++
++  call pr100194_runtime(u(1, :), z)
++  if (any (z /= [84, 336, 1344, 5376])) stop 5
++
++  call pr100194_runtime(u(:, 1), z)
++  if (any (z /= [84, 168, 252, 336])) stop 6
++end program p
++
++subroutine pr100194_runtime(x, res)
++  integer :: x(..)
++  integer, allocatable :: res(:)
++
++  call t(x)
++
++contains
++
++  subroutine t(y)
++    integer, contiguous :: y(..)
++
++    select rank (y)
++      rank (1)
++        res = 2 * y
++    end select
++  end subroutine t
++end subroutine pr100194_runtime
+-- 
+2.43.7
+
+

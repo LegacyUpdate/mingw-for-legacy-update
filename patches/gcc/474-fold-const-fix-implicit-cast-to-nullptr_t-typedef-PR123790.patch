@@ -1,0 +1,78 @@
+From 6b76bcb2673b323127fb1b1d9260bde2f595593d Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Fri, 30 Jan 2026 11:40:17 +0100
+Subject: [PATCH] fold-const: Fix implicit cast to nullptr_t typedef [PR123790]
+
+The following testcase is incorrectly rejected, because since r15-6744
+it adds build_nop to preserve the exact typedef type and
+cxx_eval_constant_expression can't fold NOP_EXPR from integer_zerop of one
+NULLPTR_TYPE to another NULLPTR_TYPE, while cxx_eval_constant_expression
+relies on fold to do such folding.
+
+I see 3 options to fix that, one is deal with this in the r15-6744 spot
+and special case NULLPTR_TYPE there and build_zero_cst instead of build_nop
+(with similar condition like in the patch below), another possibility is
+special case this in cxx_eval_constant_expression, and
+another one (done in this patch) is to handle this in fold-const.cc -
+fold_convert_loc and also in fold_convert_const.
+
+2026-01-30  Jakub Jelinek  <jakub@redhat.com>
+
+	PR c++/123790
+	* fold-const.cc (fold_convert_const): Handle conversion of
+	integer_zerop to NULLPTR_TYPE.
+	(fold_convert_loc): Likewise.
+
+	* g++.dg/cpp0x/nullptr47.C: New test.
+
+(cherry picked from commit cffe5fd7c98babd85acf86f3e7f8d02b04416ec2)
+---
+ gcc/fold-const.cc                      |  6 ++++++
+ gcc/testsuite/g++.dg/cpp0x/nullptr47.C | 10 ++++++++++
+ 2 files changed, 16 insertions(+)
+ create mode 100644 gcc/testsuite/g++.dg/cpp0x/nullptr47.C
+
+diff --git a/gcc/fold-const.cc b/gcc/fold-const.cc
+index c44389b16985..aef76d2457ba 100644
+--- a/gcc/fold-const.cc
++++ b/gcc/fold-const.cc
+@@ -2559,6 +2559,8 @@ fold_convert_const (enum tree_code code, tree type, tree arg1)
+ 	  return v.build ();
+ 	}
+     }
++  else if (TREE_CODE (type) == NULLPTR_TYPE && integer_zerop (arg1))
++    return build_zero_cst (type);
+   return NULL_TREE;
+ }
+ 
+@@ -2781,6 +2783,10 @@ fold_convert_loc (location_t loc, tree type, tree arg)
+       tem = fold_ignored_result (arg);
+       return fold_build1_loc (loc, NOP_EXPR, type, tem);
+ 
++    case NULLPTR_TYPE:
++      if (integer_zerop (arg))
++	return build_zero_cst (type);
++      /* FALLTHRU */
+     default:
+       if (TYPE_MAIN_VARIANT (type) == TYPE_MAIN_VARIANT (orig))
+ 	return fold_build1_loc (loc, NOP_EXPR, type, arg);
+diff --git a/gcc/testsuite/g++.dg/cpp0x/nullptr47.C b/gcc/testsuite/g++.dg/cpp0x/nullptr47.C
+new file mode 100644
+index 000000000000..4c4071b65248
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/cpp0x/nullptr47.C
+@@ -0,0 +1,10 @@
++// PR c++/123790
++// { dg-do compile { target c++11 } }
++
++int
++main ()
++{
++  using nullptr_t = decltype (nullptr);
++  constexpr nullptr_t zero = nullptr;
++  constexpr nullptr_t other_zero = zero;
++}
+-- 
+2.43.7
+
+

@@ -1,0 +1,307 @@
+From 95ce1bf40d85fb033b54cad10912830a3e92df07 Mon Sep 17 00:00:00 2001
+From: Richard Biener <rguenther@suse.de>
+Date: Wed, 7 Jan 2026 10:23:22 +0100
+Subject: [PATCH] tree-optimization/123061 - invalid hoisting of division
+
+The following fixes the computation of always-exeecuted-in in the LIM
+pass which was enhanced to handle inner loops in a better way but
+in this process ended up setting inner loop always-executed-in state
+based on outer loop analysis, which is wrong because an inner loop
+block needs to be proven to be always executed for all inner loop
+iterations as well, not only for all outer loop iterations.
+
+The fix is to iterate over inner loops first and when processing
+an outer loop only update always-executedness if a block belongs
+to the very same loop or an immediately nested loop and always
+executed inside that.
+
+	PR tree-optimization/123061
+	PR tree-optimization/123636
+	* tree-ssa-loop-im.cc (fill_always_executed_in_1): Change
+	outer-to-inner to inner-to-outer iteration.  Update inner
+	loop state only when always executed in an immediately
+	nested loop.
+
+	* gcc.dg/torture/pr123061.c: New testcase.
+	* gcc.dg/torture/pr123636.c: Likewise.
+	* gcc.dg/tree-ssa/ssa-lim-26.c: Likewise.
+
+(cherry picked from commit e48704694d686de1aaaaf934c04a2eda1a6033cb)
+---
+ gcc/testsuite/gcc.dg/torture/pr123061.c    |  29 ++++
+ gcc/testsuite/gcc.dg/torture/pr123636.c    |  26 ++++
+ gcc/testsuite/gcc.dg/tree-ssa/ssa-lim-26.c |  18 +++
+ gcc/tree-ssa-loop-im.cc                    | 146 +++++++++++----------
+ 4 files changed, 147 insertions(+), 72 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.dg/torture/pr123061.c
+ create mode 100644 gcc/testsuite/gcc.dg/torture/pr123636.c
+ create mode 100644 gcc/testsuite/gcc.dg/tree-ssa/ssa-lim-26.c
+
+diff --git a/gcc/testsuite/gcc.dg/torture/pr123061.c b/gcc/testsuite/gcc.dg/torture/pr123061.c
+new file mode 100644
+index 000000000000..5d320d48f24e
+--- /dev/null
++++ b/gcc/testsuite/gcc.dg/torture/pr123061.c
+@@ -0,0 +1,29 @@
++/* { dg-do run } */
++/* { dg-additional-options "-ffinite-loops" } */
++
++int a, b, c;
++int d() {
++  while (a)
++    ;
++  return 0;
++}
++static int e(int f, int g) {
++  c = f;
++  while (1) {
++    f = 0;
++    do {
++      c = -c;
++      if (c >= 0)
++        goto h;
++    } while (-1 / b);
++    return d();
++  h:
++    b = g;
++  }
++}
++int main()
++{
++  while (e(-4, 3))
++    ;
++  return 0;
++}
+diff --git a/gcc/testsuite/gcc.dg/torture/pr123636.c b/gcc/testsuite/gcc.dg/torture/pr123636.c
+new file mode 100644
+index 000000000000..1ab64dbcf6ce
+--- /dev/null
++++ b/gcc/testsuite/gcc.dg/torture/pr123636.c
+@@ -0,0 +1,26 @@
++/* { dg-do run } */
++
++int main()
++{
++  int g_58;
++  _Bool g_170 = 0;
++  int m = 0;
++  for (int i = 0; i < 2; i++)
++    {
++      int arr[3] = {};
++label:
++      g_58 = g_170 == 0;
++      for (int a = 0; a < 3; a++)
++	m += arr[a];
++      for (int j = 0; j != 7; ++j)
++	for (int k = 0; k < 2; k++)
++	  {
++	    --g_170;
++	    if (g_58) goto label;
++	    arr[0] = 2;
++	  }
++    }
++  if (m != 0)
++    __builtin_abort();
++  return 0;
++}
+diff --git a/gcc/testsuite/gcc.dg/tree-ssa/ssa-lim-26.c b/gcc/testsuite/gcc.dg/tree-ssa/ssa-lim-26.c
+new file mode 100644
+index 000000000000..68a7dedcc7e0
+--- /dev/null
++++ b/gcc/testsuite/gcc.dg/tree-ssa/ssa-lim-26.c
+@@ -0,0 +1,18 @@
++/* { dg-do compile } */
++/* { dg-options "-O -fdump-tree-lim2-details" } */
++
++void foo (int n, int m, int *a, int *p, int * __restrict q)
++{
++  for (int i = 0; i < n; ++i)
++    {
++      int j = 0;
++      do
++        {
++          q[j] = *a * p[i];
++        }
++      while (++j < m);
++    }
++}
++
++/* Verify we can hoist *a two levels.  */ 
++/* { dg-final { scan-tree-dump-times "out of loop 1" 1 "lim2" } } */
+diff --git a/gcc/tree-ssa-loop-im.cc b/gcc/tree-ssa-loop-im.cc
+index 71a46f7e03f9..4d5a29267200 100644
+--- a/gcc/tree-ssa-loop-im.cc
++++ b/gcc/tree-ssa-loop-im.cc
+@@ -3415,94 +3415,96 @@ fill_always_executed_in_1 (class loop *loop, sbitmap contains_call)
+   edge e;
+   class loop *inn_loop = loop;
+ 
+-  if (ALWAYS_EXECUTED_IN (loop->header) == NULL)
++  for (class loop *inner = loop->inner; inner; inner = inner->next)
++    fill_always_executed_in_1 (inner, contains_call);
++
++  auto_vec<basic_block, 64> worklist;
++  worklist.reserve_exact (loop->num_nodes);
++  worklist.quick_push (loop->header);
++  do
+     {
+-      auto_vec<basic_block, 64> worklist;
+-      worklist.reserve_exact (loop->num_nodes);
+-      worklist.quick_push (loop->header);
+-      do
+-	{
+-	  edge_iterator ei;
+-	  bb = worklist.pop ();
++      edge_iterator ei;
++      bb = worklist.pop ();
+ 
+-	  if (!flow_bb_inside_loop_p (inn_loop, bb))
+-	    {
+-	      /* When we are leaving a possibly infinite inner loop
+-		 we have to stop processing.  */
+-	      if (!finite_loop_p (inn_loop))
+-		break;
+-	      /* If the loop was finite we can continue with processing
+-		 the loop we exited to.  */
+-	      inn_loop = bb->loop_father;
+-	    }
++      if (!flow_bb_inside_loop_p (inn_loop, bb))
++	{
++	  /* When we are leaving a possibly infinite inner loop
++	     we have to stop processing.  */
++	  if (!finite_loop_p (inn_loop))
++	    break;
++	  /* If the loop was finite we can continue with processing
++	     the loop we exited to.  */
++	  inn_loop = bb->loop_father;
++	}
+ 
+-	  if (dominated_by_p (CDI_DOMINATORS, loop->latch, bb))
+-	    last = bb;
++      if (dominated_by_p (CDI_DOMINATORS, loop->latch, bb))
++	last = bb;
+ 
+-	  if (bitmap_bit_p (contains_call, bb->index))
+-	    break;
++      if (bitmap_bit_p (contains_call, bb->index))
++	break;
+ 
+-	  /* If LOOP exits from this BB stop processing.  */
+-	  FOR_EACH_EDGE (e, ei, bb->succs)
+-	    if (!flow_bb_inside_loop_p (loop, e->dest))
+-	      break;
+-	  if (e)
+-	    break;
++      /* If LOOP exits from this BB stop processing.  */
++      FOR_EACH_EDGE (e, ei, bb->succs)
++	if (!flow_bb_inside_loop_p (loop, e->dest))
++	  break;
++      if (e)
++	break;
+ 
+-	  /* A loop might be infinite (TODO use simple loop analysis
+-	     to disprove this if possible).  */
+-	  if (bb->flags & BB_IRREDUCIBLE_LOOP)
+-	    break;
++      /* A loop might be infinite (TODO use simple loop analysis
++	 to disprove this if possible).  */
++      if (bb->flags & BB_IRREDUCIBLE_LOOP)
++	break;
+ 
+-	  if (bb->loop_father->header == bb)
+-	    /* Record that we enter into a subloop since it might not
+-	       be finite.  */
+-	    /* ???  Entering into a not always executed subloop makes
+-	       fill_always_executed_in quadratic in loop depth since
+-	       we walk those loops N times.  This is not a problem
+-	       in practice though, see PR102253 for a worst-case testcase.  */
+-	    inn_loop = bb->loop_father;
+-
+-	  /* Walk the body of LOOP sorted by dominance relation.  Additionally,
+-	     if a basic block S dominates the latch, then only blocks dominated
+-	     by S are after it.
+-	     This is get_loop_body_in_dom_order using a worklist algorithm and
+-	     stopping once we are no longer interested in visiting further
+-	     blocks.  */
+-	  unsigned old_len = worklist.length ();
+-	  unsigned postpone = 0;
+-	  for (basic_block son = first_dom_son (CDI_DOMINATORS, bb);
+-	       son;
+-	       son = next_dom_son (CDI_DOMINATORS, son))
+-	    {
+-	      if (!flow_bb_inside_loop_p (loop, son))
+-		continue;
+-	      if (dominated_by_p (CDI_DOMINATORS, loop->latch, son))
+-		postpone = worklist.length ();
+-	      worklist.quick_push (son);
+-	    }
+-	  if (postpone)
+-	    /* Postponing the block that dominates the latch means
+-	       processing it last and thus putting it earliest in the
+-	       worklist.  */
+-	    std::swap (worklist[old_len], worklist[postpone]);
++      if (bb->loop_father->header == bb)
++	/* Record that we enter into a subloop since it might not
++	   be finite.  */
++	/* ???  Entering into a not always executed subloop makes
++	   fill_always_executed_in quadratic in loop depth since
++	   we walk those loops N times.  This is not a problem
++	   in practice though, see PR102253 for a worst-case testcase.  */
++	inn_loop = bb->loop_father;
++
++      /* Walk the body of LOOP sorted by dominance relation.  Additionally,
++	 if a basic block S dominates the latch, then only blocks dominated
++	 by S are after it.
++	 This is get_loop_body_in_dom_order using a worklist algorithm and
++	 stopping once we are no longer interested in visiting further
++	 blocks.  */
++      unsigned old_len = worklist.length ();
++      unsigned postpone = 0;
++      for (basic_block son = first_dom_son (CDI_DOMINATORS, bb);
++	   son;
++	   son = next_dom_son (CDI_DOMINATORS, son))
++	{
++	  if (!flow_bb_inside_loop_p (loop, son))
++	    continue;
++	  if (dominated_by_p (CDI_DOMINATORS, loop->latch, son))
++	    postpone = worklist.length ();
++	  worklist.quick_push (son);
+ 	}
+-      while (!worklist.is_empty ());
++      if (postpone)
++	/* Postponing the block that dominates the latch means
++	   processing it last and thus putting it earliest in the
++	   worklist.  */
++	std::swap (worklist[old_len], worklist[postpone]);
++    }
++  while (!worklist.is_empty ());
+ 
+-      while (1)
++  while (1)
++    {
++      if (last->loop_father == loop
++	  || (ALWAYS_EXECUTED_IN (last)
++	      && loop_outer (ALWAYS_EXECUTED_IN (last)) == loop))
+ 	{
+ 	  if (dump_enabled_p ())
+ 	    dump_printf (MSG_NOTE, "BB %d is always executed in loop %d\n",
+ 			 last->index, loop->num);
+ 	  SET_ALWAYS_EXECUTED_IN (last, loop);
+-	  if (last == loop->header)
+-	    break;
+-	  last = get_immediate_dominator (CDI_DOMINATORS, last);
+ 	}
++      if (last == loop->header)
++	break;
++      last = get_immediate_dominator (CDI_DOMINATORS, last);
+     }
+-
+-  for (loop = loop->inner; loop; loop = loop->next)
+-    fill_always_executed_in_1 (loop, contains_call);
+ }
+ 
+ /* Fills ALWAYS_EXECUTED_IN information for basic blocks, i.e.
+-- 
+2.43.7
+
+

@@ -1,0 +1,78 @@
+From d03c80f4dd15387dcb6f03986c2d65d81f30d53a Mon Sep 17 00:00:00 2001
+From: Andrew Pinski <andrew.pinski@oss.qualcomm.com>
+Date: Wed, 28 Jan 2026 12:32:12 -0800
+Subject: [PATCH] ifcvt: Improve noce_can_force_operand in ifcvt [PR122170]
+
+Currently if the rtl is either an arithmetic or an unary
+rtl, noce_can_force_operand checks to see if there is an
+optab for that rtl code. This works for more things except
+on some targets they have a ss_minus instruction but don't
+implement the optab for it. In the case of arm you can
+generate a ss_minus with a builtin and then when it comes
+to trying to do ifcvt, force_operand fails over.
+In this case the optab, sssub was only supported for
+fixed-point modes before and it was working as code_to_optab
+would return there was not optabs. But after r15-1030-gabe6d39365476e,
+the optab will be return. What the backend is doing is correct and will
+most likely happen with other rtl codes/optabs later on.
+
+To fix this instead of just returning true if the optab exists, we need
+to check if the optab entry for the mode exists.
+
+	PR rtl-optimization/122170
+
+gcc/ChangeLog:
+
+	* ifcvt.cc (noce_can_force_operand): Don't only check if
+	there is an optab for the code check the entry for the
+	mode is non-null. Handle non integral div by checking
+	optab like force_operand does.
+
+Signed-off-by: Andrew Pinski <andrew.pinski@oss.qualcomm.com>
+(cherry picked from commit 40f6ae016571ce6ea5951f406c4be7ff84914fbc)
+---
+ gcc/ifcvt.cc | 15 ++++++++++++---
+ 1 file changed, 12 insertions(+), 3 deletions(-)
+
+diff --git a/gcc/ifcvt.cc b/gcc/ifcvt.cc
+index da8631f3c59c..c34072f36fed 100644
+--- a/gcc/ifcvt.cc
++++ b/gcc/ifcvt.cc
+@@ -925,13 +925,19 @@ noce_can_force_operand (rtx x)
+       switch (GET_CODE (x))
+ 	{
+ 	case MULT:
+-	case DIV:
+ 	case MOD:
+ 	case UDIV:
+ 	case UMOD:
+ 	  return true;
++	case DIV:
++	  if (INTEGRAL_MODE_P (GET_MODE (x)))
++	    return true;
++	  /* FALLTHRU */
+ 	default:
+-	  return code_to_optab (GET_CODE (x));
++	  auto optab = code_to_optab (GET_CODE (x));
++	  if (!optab)
++	    return false;
++	  return optab_handler (optab, GET_MODE (x));
+ 	}
+     }
+   if (UNARY_P (x))
+@@ -951,7 +957,10 @@ noce_can_force_operand (rtx x)
+ 	case UNSIGNED_FLOAT:
+ 	  return true;
+ 	default:
+-	  return code_to_optab (GET_CODE (x));
++	  auto optab = code_to_optab (GET_CODE (x));
++	  if (!optab)
++	    return false;
++	  return optab_handler (optab, GET_MODE (x));
+ 	}
+     }
+   return false;
+-- 
+2.43.7
+
+

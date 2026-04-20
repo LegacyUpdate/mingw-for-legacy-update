@@ -1,0 +1,66 @@
+From 7cc3f2a6b56bff19384e489a4f1c294dab775e09 Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Wed, 18 Feb 2026 17:46:38 +0100
+Subject: [PATCH] c: Call relayout_decl in build_compound_literal when
+ completing type [PR123365]
+
+Most other spots inthe C FE which change type of some VAR_DECL
+through complete_array_type call relayout_decl to fix up DECL_MODE
+etc., but build_compound_literal strangely does not.
+
+It has layout_decl (decl, 0); call later on but I think that is
+quite useless given that already the build_decl call earlier
+calls that and so the second layout_decl probably does nothing
+most of the time.
+
+On the following testcase, the compound literal VAR_DECL has
+BLKmode from the time it had incomplete array type and isn't
+changed to DImode that the completed type has and asm stmt
+expansion is unhappy about that.
+
+Fixed thusly.
+
+2026-02-18  Jakub Jelinek  <jakub@redhat.com>
+
+	PR c/123365
+	* c-decl.cc (build_compound_literal): Call relayout_decl
+	after completing the type.
+
+	* gcc.c-torture/compile/pr123365.c: New test.
+
+(cherry picked from commit 319db4667fbed5180a1ecc687ff8556d2447760a)
+---
+ gcc/c/c-decl.cc                                | 1 +
+ gcc/testsuite/gcc.c-torture/compile/pr123365.c | 7 +++++++
+ 2 files changed, 8 insertions(+)
+ create mode 100644 gcc/testsuite/gcc.c-torture/compile/pr123365.c
+
+diff --git a/gcc/c/c-decl.cc b/gcc/c/c-decl.cc
+index 045f03998f63..80f9a59ff818 100644
+--- a/gcc/c/c-decl.cc
++++ b/gcc/c/c-decl.cc
+@@ -6539,6 +6539,7 @@ build_compound_literal (location_t loc, tree type, tree init, bool non_const,
+ 
+       type = TREE_TYPE (decl);
+       TREE_TYPE (DECL_INITIAL (decl)) = type;
++      relayout_decl (decl);
+     }
+ 
+   if (type == error_mark_node || !COMPLETE_TYPE_P (type))
+diff --git a/gcc/testsuite/gcc.c-torture/compile/pr123365.c b/gcc/testsuite/gcc.c-torture/compile/pr123365.c
+new file mode 100644
+index 000000000000..b1073634df24
+--- /dev/null
++++ b/gcc/testsuite/gcc.c-torture/compile/pr123365.c
+@@ -0,0 +1,7 @@
++/* PR c/123365 */
++
++void
++foo ()
++{
++  __asm__ volatile ("" : "+r" ((long long[]) { 0 }));
++}
+-- 
+2.43.7
+
+

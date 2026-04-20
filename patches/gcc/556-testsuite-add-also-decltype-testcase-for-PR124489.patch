@@ -1,0 +1,41 @@
+From f2706984bf7fc39270b0088b3e8630254ac9b30a Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Tue, 17 Mar 2026 10:27:47 +0100
+Subject: [PATCH] testsuite: Add also decltype(nullptr) testcase for PR124489
+
+In r16-8116 Marek has fixed not just whitespace around
+std::meta::info in diagnostics, but also std::nullptr_t.
+
+This patch adds a testcase for that, such that the part of the
+change related to NULLPTR_TYPE and this test can be backported.
+
+2026-03-17  Jakub Jelinek  <jakub@redhat.com>
+
+	PR c++/124489
+	* g++.dg/cpp0x/pr124489.C: New test.
+
+(cherry picked from commit 49b52ecc65ef7821d88875582b64426518c11e6a)
+---
+ gcc/testsuite/g++.dg/cpp0x/pr124489.C | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+ create mode 100644 gcc/testsuite/g++.dg/cpp0x/pr124489.C
+
+diff --git a/gcc/testsuite/g++.dg/cpp0x/pr124489.C b/gcc/testsuite/g++.dg/cpp0x/pr124489.C
+new file mode 100644
+index 000000000000..8421270ff268
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/cpp0x/pr124489.C
+@@ -0,0 +1,9 @@
++// PR c++/124489
++// { dg-do compile { target c++11 } }
++
++void
++g ()
++{
++  constexpr decltype(nullptr) dm = nullptr; // { dg-message ".constexpr std::nullptr_t dm. previously declared here" }
++  constexpr decltype(nullptr) dm = nullptr; // { dg-error "redeclaration of .constexpr std::nullptr_t dm." }
++}
+-- 
+2.43.7
+
+

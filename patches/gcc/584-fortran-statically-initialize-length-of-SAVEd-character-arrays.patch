@@ -1,0 +1,80 @@
+From 2b42afafaa2efb274d2400d2bf8b03591d3265cb Mon Sep 17 00:00:00 2001
+From: Mikael Morin <mikael@gcc.gnu.org>
+Date: Wed, 18 Jun 2025 22:11:43 +0200
+Subject: [PATCH] fortran: Statically initialize length of SAVEd character
+ arrays
+
+	PR fortran/120713
+
+gcc/fortran/ChangeLog:
+
+	* trans-array.cc (gfc_trans_deferred_array): Statically
+	initialize deferred length variable for SAVEd character arrays.
+
+gcc/testsuite/ChangeLog:
+
+	* gfortran.dg/save_alloc_character_1.f90: New test.
+
+(cherry picked from commit 95cc39dd47419d0544a0e1b32292ba250155a112)
+---
+ gcc/fortran/trans-array.cc                    | 12 ++++++++--
+ .../gfortran.dg/save_alloc_character_1.f90    | 23 +++++++++++++++++++
+ 2 files changed, 33 insertions(+), 2 deletions(-)
+ create mode 100644 gcc/testsuite/gfortran.dg/save_alloc_character_1.f90
+
+diff --git a/gcc/fortran/trans-array.cc b/gcc/fortran/trans-array.cc
+index ed1f1c5913b3..3e5205e8117b 100644
+--- a/gcc/fortran/trans-array.cc
++++ b/gcc/fortran/trans-array.cc
+@@ -12112,8 +12112,16 @@ gfc_trans_deferred_array (gfc_symbol * sym, gfc_wrapped_block * block)
+       && !INTEGER_CST_P (sym->ts.u.cl->backend_decl))
+     {
+       if (sym->ts.deferred && !sym->ts.u.cl->length && !sym->attr.dummy)
+-	gfc_add_modify (&init, sym->ts.u.cl->backend_decl,
+-			build_zero_cst (TREE_TYPE (sym->ts.u.cl->backend_decl)));
++	{
++	  tree len_expr = sym->ts.u.cl->backend_decl;
++	  tree init_val = build_zero_cst (TREE_TYPE (len_expr));
++	  if (VAR_P (len_expr)
++	      && sym->attr.save
++	      && !DECL_INITIAL (len_expr))
++	    DECL_INITIAL (len_expr) = init_val;
++	  else
++	    gfc_add_modify (&init, len_expr, init_val);
++	}
+       gfc_conv_string_length (sym->ts.u.cl, NULL, &init);
+       gfc_trans_vla_type_sizes (sym, &init);
+ 
+diff --git a/gcc/testsuite/gfortran.dg/save_alloc_character_1.f90 b/gcc/testsuite/gfortran.dg/save_alloc_character_1.f90
+new file mode 100644
+index 000000000000..e26919f83bea
+--- /dev/null
++++ b/gcc/testsuite/gfortran.dg/save_alloc_character_1.f90
+@@ -0,0 +1,23 @@
++! { dg-do run }
++!
++! PR fortran/120713
++! Check that the length variable of SAVEd allocatable character arrays are
++! not initialized at function entry.
++
++program p
++  implicit none
++  call s(1)
++  call s(2)
++contains
++  subroutine s(i)
++    integer, intent(in) :: i
++    character(len=:), allocatable, save :: a(:)
++    integer :: j
++    if (i == 1) then
++      allocate(a, source= [ ('x' // achar(ichar('0') + j), j=1,7) ])
++    else
++      if (len(a) /= 2) error stop 1
++      if (any(a /= ['x1','x2','x3','x4','x5','x6','x7'])) error stop 2
++    end if
++  end subroutine s
++end program p
+-- 
+2.43.7
+
+

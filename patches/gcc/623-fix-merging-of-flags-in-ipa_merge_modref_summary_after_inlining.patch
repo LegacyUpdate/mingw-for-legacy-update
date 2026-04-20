@@ -1,0 +1,164 @@
+From 253dbfdbc78841eae877ad0f5ac9318d639711a3 Mon Sep 17 00:00:00 2001
+From: Jan Hubicka <jh@suse.cz>
+Date: Tue, 10 Mar 2026 07:56:23 +0100
+Subject: [PATCH] Fix merging of flags in
+ ipa_merge_modref_summary_after_inlining
+
+When merging the modref summary after inlining, we merge all of the flags
+of the outer functions that was inlined into. But things go wrong as
+now the flags includes both ECF_NORETURN and ECF_NOTHROW. This happens
+because the function which was being inlined had ECF_NOTHROW while caller
+had ECF_NORETURN. When both of these are set, ignore_stores_p and
+ignore_nondeterminism_p return true. But in this case the inner function is
+still just nothrow and not noreturn.
+
+Originally the code was written to only merge ECF_PURE and ECF_CONST where
+this logic is correct. This fixes merigng of ignore_stores and
+ECF_LOOPING_CONST_OR_PURE flags.
+
+Bootstrapped and tested on x86_64-linux-gnu.
+
+	PR tree-optimization/120987
+
+gcc/ChangeLog:
+
+	* ipa-modref.cc (ipa_merge_modref_summary_after_inlining): Mask
+	off non const/pure/novops related flags when combining of outer
+	functions.
+
+gcc/testsuite/ChangeLog:
+
+	* g++.dg/torture/pr120987-1.C: New test.
+
+Co-authored-by: Andrew Pinski <andrew.pinski@oss.qualcomm.com>
+(cherry picked from commit 27b4500ec3f97e0e8da9949b352a32147af8edf5)
+---
+ gcc/ipa-modref.cc                         | 45 +++++++++++++++---
+ gcc/testsuite/g++.dg/torture/pr120987-1.C | 57 +++++++++++++++++++++++
+ 2 files changed, 96 insertions(+), 6 deletions(-)
+ create mode 100644 gcc/testsuite/g++.dg/torture/pr120987-1.C
+
+diff --git a/gcc/ipa-modref.cc b/gcc/ipa-modref.cc
+index 3f3c9cf21b7b..64100cccbb1e 100644
+--- a/gcc/ipa-modref.cc
++++ b/gcc/ipa-modref.cc
+@@ -5342,13 +5342,46 @@ ipa_merge_modref_summary_after_inlining (cgraph_edge *edge)
+ 				      : NULL;
+   class modref_summary_lto *callee_info_lto
+ 		 = summaries_lto ? summaries_lto->get (edge->callee) : NULL;
++
++  /* Compute effective ECF_CONST, ECF_PURE, ECF_NOVOPS,
++     ECF_LOOPING_CONST_OR_PURE and ignore_stores of the inlined function from
++     the point of view of caller of the function it is transitively inlined to.
++
++     Consider inline chain A->B->C, where (edge is the edge B->C).
++     ECF_CONST, ECF_PURE_ECF, ECF_NOVOPS and ignore_stores is the strongest
++     flag seen on the inline path.
++
++     ECF_LOOPING_CONST_OR_PURE is bit special since, for example if C
++     is ECF_CONST | ECF_LOOPING_CONST_OR_PURE and B is ECF_PURE, then outcome
++     is ECF_CONST and !ECF_LOOPING_CONST_OR_PURE.
++
++     Flags are later used to avoid merging info about side-effects of C which
++     are invisible to to the caller of A.  For example, it is possible for
++     const function to have local array and call non-const functions modifying
++     it.  */
++
+   int flags = flags_from_decl_or_type (edge->callee->decl);
+-  /* Combine in outer flags.  */
+-  cgraph_node *n;
+-  for (n = edge->caller; n->inlined_to; n = n->callers->caller)
+-    flags |= flags_from_decl_or_type (n->decl);
+-  flags |= flags_from_decl_or_type (n->decl);
+-  bool ignore_stores = ignore_stores_p (edge->caller->decl, flags);
++  bool ignore_stores = ignore_stores_p (edge->callee->decl, flags);
++
++  for (cgraph_node *n = edge->caller; n;
++       n = n->inlined_to ? n->callers->caller : NULL)
++    {
++      int f = flags_from_decl_or_type (n->decl);
++
++      ignore_stores |= ignore_stores_p (n->decl, f);
++      /* If we see first CONST/PURE flag in the chain, take its
++	 ECF_LOOPING_CONST_OR_PURE  */
++      if (!(flags & (ECF_CONST | ECF_PURE)) && (f & (ECF_CONST | ECF_PURE)))
++	flags |= (f & ECF_LOOPING_CONST_OR_PURE);
++      /* If we already have ECF_CONST or ECF_PURE flag
++	 just improve ECF_LOOPING_CONST_OR_PURE if possible.  */
++      else if ((flags & (ECF_CONST | ECF_PURE))
++	       && (flags & ECF_LOOPING_CONST_OR_PURE)
++	       && (f & (ECF_CONST | ECF_PURE))
++	       && !(f & ECF_LOOPING_CONST_OR_PURE))
++	flags &= ECF_LOOPING_CONST_OR_PURE;
++      flags |= f & (ECF_CONST | ECF_PURE | ECF_NOVOPS);
++    }
+ 
+   if (!callee_info && to_info)
+     {
+diff --git a/gcc/testsuite/g++.dg/torture/pr120987-1.C b/gcc/testsuite/g++.dg/torture/pr120987-1.C
+new file mode 100644
+index 000000000000..4209679bc036
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/torture/pr120987-1.C
+@@ -0,0 +1,57 @@
++// { dg-do run { target c++11 } }
++// { dg-skip-if "requires hosted libstdc++ for string/memory" { ! hostedlib } }
++// PR tree-optimization/120987
++
++#include <memory>
++#include <string>
++#include <cstdlib>
++
++#define ERROR_STRING  "012345678901234567"
++
++struct gdb_exception
++{
++  gdb_exception (const char *s)
++    : message (std::make_shared<std::string> (s))
++  {}
++
++  explicit gdb_exception (gdb_exception &&other) noexcept
++    : message (std::move (other.message))
++  {
++    volatile int a = 1;
++    if (a != 1)
++      abort ();
++  }
++  
++
++  std::shared_ptr<std::string> message;
++};
++
++void __attribute__((noinline, noclone))
++throw_exception (gdb_exception &&exception)
++{
++  throw gdb_exception (std::move (exception));
++}
++
++static void __attribute__((noinline, noclone))
++parse_linespec (void)
++{
++  struct gdb_exception file_exception (ERROR_STRING);
++  throw_exception (std::move (file_exception));
++}
++
++int
++main (void)
++{
++  try
++    {
++      parse_linespec ();
++    }
++  catch (const gdb_exception &e)
++    {
++      if (*e.message != ERROR_STRING)
++        __builtin_abort();
++      return 0;
++    }
++
++  __builtin_abort();
++}
+-- 
+2.43.7
+
+

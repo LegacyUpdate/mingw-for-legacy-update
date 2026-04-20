@@ -1,0 +1,97 @@
+From f5bc15eb4fa2666109b4b5f30597d64e36f14930 Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Thu, 5 Mar 2026 13:11:39 +0100
+Subject: [PATCH] libiberty: Copy over .ARM.attributes section into
+ *.debug.temp.o files [PR124365]
+
+If gcc is configured on aarch64-linux against new binutils, such as
+2.46, it doesn't emit into assembly markings like
+        .section        .note.gnu.property,"a"
+        .align  3
+        .word   4
+        .word   16
+        .word   5
+        .string "GNU"
+        .word   0xc0000000
+        .word   4
+        .word   0x7
+        .align  3
+but instead emits
+        .aeabi_subsection aeabi_feature_and_bits, optional, ULEB128
+        .aeabi_attribute Tag_Feature_BTI, 1
+        .aeabi_attribute Tag_Feature_PAC, 1
+        .aeabi_attribute Tag_Feature_GCS, 1
+The former goes into .note.gnu.propery section, the latter goes into
+.ARM.attributes section.
+
+Now, when linking without LTO or with LTO but without -g, all behaves
+for the linked binaries the same, say for test.c
+int main () {}
+$ gcc -g -mbranch-protection=standard test.c -o test; readelf -j .note.gnu.property test
+
+Displaying notes found in: .note.gnu.property
+  Owner                Data size        Description
+  GNU                  0x00000010       NT_GNU_PROPERTY_TYPE_0
+      Properties: AArch64 feature: BTI, PAC, GCS
+$ gcc -flto -mbranch-protection=standard test.c -o test; readelf -j .note.gnu.property test
+
+Displaying notes found in: .note.gnu.property
+  Owner                Data size        Description
+  GNU                  0x00000010       NT_GNU_PROPERTY_TYPE_0
+      Properties: AArch64 feature: BTI, PAC, GCS
+$ gcc -flto -g -mbranch-protection=standard test.c -o test; readelf -j .note.gnu.property test
+readelf: Warning: Section '.note.gnu.property' was not dumped because it does not exist
+
+The problem is that the *.debug.temp.o object files created by lto-wrapper
+don't have these markings.  The function copies over .note.GNU-stack section
+(so that it doesn't similarly on most arches break PT_GNU_STACK segment
+flags), and .note.gnu.property (which used to hold this stuff e.g. on
+aarch64 or x86, added in PR93966).  But it doesn't copy the new
+.ARM.attributes section.
+
+The following patch fixes it by copying that section too.  The function
+unfortunately only works on names, doesn't know if it is copying ELF or some
+other format (PE, Mach-O) or if it is copying ELF, whether it is EM_AARCH64
+or some other arch.  The following patch just copies the section always,
+I think it is very unlikely people would use .ARM.attributes section for
+some random unrelated stuff.  If we'd want to limit it to just EM_AARCH64,
+guess it would need to be done in
+libiberty/simple-object-elf.c (simple_object_elf_copy_lto_debug_sections)
+instead as an exception for the (*pfn) callback results (and there it could
+e.g. verify SHT_AARCH64_ATTRIBUTES type but even there dunno if it has
+access to the Ehdr stuff).
+
+No testcase from me, dunno if e.g. the linker can flag the lack of those
+during linking with some option rather than using readelf after link and
+what kind of effective targets we'd need for such a test.
+
+2026-03-05  Jakub Jelinek  <jakub@redhat.com>
+
+	PR target/124365
+	* simple-object.c (handle_lto_debug_sections): Also copy over
+	.ARM.attributes section.
+
+(cherry picked from commit 8b39ec70741b7fb9d059b6944f30a6743dea996a)
+---
+ libiberty/simple-object.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/libiberty/simple-object.c b/libiberty/simple-object.c
+index 07c9ad82986d..62be367aea34 100644
+--- a/libiberty/simple-object.c
++++ b/libiberty/simple-object.c
+@@ -310,6 +310,10 @@ handle_lto_debug_sections (const char *name, int rename)
+   /* Copy over .BTF section under the same name if present.  */
+   else if (strcmp (name, ".BTF") == 0)
+     return strcpy (newname, name);
++  /* Copy over .ARM.attributes section under the same name if present.  AArch64
++     aeabi attributes are present in this section.  */
++  else if (strcmp (name, ".ARM.attributes") == 0)
++    return strcpy (newname, name);
+   free (newname);
+   return NULL;
+ }
+-- 
+2.43.7
+
+

@@ -1,0 +1,107 @@
+From b7953e10d9c3f5f3e8948e265721f15c2f57e932 Mon Sep 17 00:00:00 2001
+From: Christopher Albert <albert@tugraz.at>
+Date: Tue, 10 Mar 2026 18:17:32 +0100
+Subject: [PATCH] Fortran: Fix ICE after rejected CHARACTER duplicate
+ declaration [PR82721]
+
+When a CHARACTER declaration is rejected because the symbol already has
+a different basic type, declaration parsing may already have created a
+fresh gfc_charlen node for the rejected entity.  reject_statement()
+undoes symbol-table changes, but it does not roll back the namespace
+charlen list, so the stale len(...) expression can survive and later be
+resolved through dangling symtree pointers, causing corrupted
+diagnostics or an ICE.
+
+Fix this in build_sym by discarding only the unattached gfc_charlen
+node created for the rejected declaration before it is ever attached to
+any surviving symbol.  Keep shared charlen nodes intact so other
+invalid-code diagnostics still see the state they expect.  Also add a
+regression test that uses MALLOC_PERTURB_ to make the old crash
+reproducible.
+
+gcc/fortran/ChangeLog:
+
+	PR fortran/82721
+	* decl.cc (discard_pending_charlen): New helper.
+	(build_sym): Discard unattached CHARACTER length nodes when
+	gfc_add_type rejects the declaration.
+
+gcc/testsuite/ChangeLog:
+
+	PR fortran/82721
+	* gfortran.dg/pr82721.f90: New test.
+
+Signed-off-by: Christopher Albert <albert@tugraz.at>
+(cherry picked from commit 5cfaad50af7dc25f6174044cdc05ebd56b6c4e3c)
+---
+ gcc/fortran/decl.cc                   | 29 ++++++++++++++++++++++++++-
+ gcc/testsuite/gfortran.dg/pr82721.f90 |  9 +++++++++
+ 2 files changed, 37 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/gfortran.dg/pr82721.f90
+
+diff --git a/gcc/fortran/decl.cc b/gcc/fortran/decl.cc
+index aa5cd256ab1f..9f6b5ebf7dfa 100644
+--- a/gcc/fortran/decl.cc
++++ b/gcc/fortran/decl.cc
+@@ -116,6 +116,20 @@ static gfc_expr *saved_kind_expr = NULL;
+ static gfc_actual_arglist *decl_type_param_list;
+ static gfc_actual_arglist *type_param_spec_list;
+ 
++/* Drop an unattached gfc_charlen node from the current namespace.  This is
++   used when declaration processing created a length node for a symbol that is
++   rejected before the node is attached to any surviving symbol.  */
++static void
++discard_pending_charlen (gfc_charlen *cl)
++{
++  if (!cl || !gfc_current_ns || gfc_current_ns->cl_list != cl)
++    return;
++
++  gfc_current_ns->cl_list = cl->next;
++  gfc_free_expr (cl->length);
++  free (cl);
++}
++
+ /********************* DATA statement subroutines *********************/
+ 
+ static bool in_match_data = false;
+@@ -1777,7 +1791,20 @@ build_sym (const char *name, int elem, gfc_charlen *cl, bool cl_deferred,
+       && (sym->attr.implicit_type == 0
+ 	  || !gfc_compare_types (&sym->ts, &current_ts))
+       && !gfc_add_type (sym, &current_ts, var_locus))
+-    return false;
++    {
++      /* Duplicate-type rejection can leave a fresh CHARACTER length node on
++	 the namespace list before it is attached to any surviving symbol.
++	 Drop only that unattached node; shared constant charlen nodes are
++	 already reachable from earlier declarations.  PR82721.  */
++      if (current_ts.type == BT_CHARACTER && cl && elem == 1)
++	{
++	  discard_pending_charlen (cl);
++	  gfc_clear_ts (&current_ts);
++	}
++      else if (current_ts.type == BT_CHARACTER && cl && cl != current_ts.u.cl)
++	discard_pending_charlen (cl);
++      return false;
++    }
+ 
+   if (sym->ts.type == BT_CHARACTER)
+     {
+diff --git a/gcc/testsuite/gfortran.dg/pr82721.f90 b/gcc/testsuite/gfortran.dg/pr82721.f90
+new file mode 100644
+index 000000000000..2dd5b0ca8000
+--- /dev/null
++++ b/gcc/testsuite/gfortran.dg/pr82721.f90
+@@ -0,0 +1,9 @@
++! { dg-do compile }
++! { dg-set-target-env-var MALLOC_PERTURB_ "165" }
++! PR fortran/82721
++! Reject a duplicate declaration without leaving the CHARACTER length
++! expression from the failed statement on the namespace charlen list.
++
++integer :: b
++character(len(c)) :: b  ! { dg-error "already has basic type of INTEGER" }
++end
+-- 
+2.43.7
+
+

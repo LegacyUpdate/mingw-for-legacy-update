@@ -1,0 +1,39 @@
+From 6bdd48e54e9eda9e3642e5e3b01e01ab0549cba1 Mon Sep 17 00:00:00 2001
+From: Tamar Christina <tamar.christina@arm.com>
+Date: Wed, 25 Feb 2026 13:39:29 +0000
+Subject: [PATCH] testsuite: Fix default on arm_v8_3a_fp16_complex_neon_hw
+ [PR124236]
+
+check_effective_target_arm_v8_3a_complex_neon_hw was return 1 instead of 0
+whenever armv8.3-a wasn't supported.
+
+This fixes it.
+
+gcc/testsuite/ChangeLog:
+
+	PR target/124236
+	* lib/target-supports.exp
+	(check_effective_target_arm_v8_3a_complex_neon_hw): Fix default value.
+
+(cherry picked from commit dda0023713e7bd8944255a8a4eba8c069e9a29fa)
+---
+ gcc/testsuite/lib/target-supports.exp | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/gcc/testsuite/lib/target-supports.exp b/gcc/testsuite/lib/target-supports.exp
+index 4aa50e1a1b5e..76429d88ed0e 100644
+--- a/gcc/testsuite/lib/target-supports.exp
++++ b/gcc/testsuite/lib/target-supports.exp
+@@ -13519,7 +13519,7 @@ proc add_options_for_arm_v8_3a_fp16_complex_neon { flags } {
+ 
+ proc check_effective_target_arm_v8_3a_complex_neon_hw { } {
+     if { ![check_effective_target_arm_v8_3a_complex_neon_ok] } {
+-	return 1;
++	return 0;
+     }
+     return [check_runtime arm_v8_3a_complex_neon_hw_available {
+ 	#include "arm_neon.h"
+-- 
+2.43.7
+
+

@@ -1,0 +1,190 @@
+From bfad1ca316b06aaf7e24a945a9764a80e8e2675b Mon Sep 17 00:00:00 2001
+From: Harald Anlauf <anlauf@gmx.de>
+Date: Tue, 24 Mar 2026 22:04:29 +0100
+Subject: [PATCH] Fortran: fix rank/shape check in interface checking
+ [PR124567]
+
+	PR fortran/124567
+
+gcc/fortran/ChangeLog:
+
+	* interface.cc (gfc_check_dummy_characteristics): Split shape check
+	into a separate check for rank and a check for shape, taking into
+	account a corner case where the ambiguity between deferred shape
+	and assumed shape has not been fully resolved at the time of
+	checking.
+
+gcc/testsuite/ChangeLog:
+
+	* gfortran.dg/pr124567.f90: New test.
+	* gfortran.dg/proc_decl_30.f90: Likewise.
+
+(cherry picked from commit bbc4d2e15c4e5f0b21873d4f8bdf17cdc718f044)
+---
+ gcc/fortran/interface.cc                   | 11 +++-
+ gcc/testsuite/gfortran.dg/pr124567.f90     | 62 ++++++++++++++++++++++
+ gcc/testsuite/gfortran.dg/proc_decl_30.f90 | 53 ++++++++++++++++++
+ 3 files changed, 125 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/gfortran.dg/pr124567.f90
+ create mode 100644 gcc/testsuite/gfortran.dg/proc_decl_30.f90
+
+diff --git a/gcc/fortran/interface.cc b/gcc/fortran/interface.cc
+index d08f683498d1..3ec34005fb49 100644
+--- a/gcc/fortran/interface.cc
++++ b/gcc/fortran/interface.cc
+@@ -1541,6 +1541,13 @@ gfc_check_dummy_characteristics (gfc_symbol *s1, gfc_symbol *s2,
+       int i, compval;
+       gfc_expr *shape1, *shape2;
+ 
++      if (s1->as->rank != s2->as->rank)
++	{
++	  snprintf (errmsg, err_len, "Rank mismatch in argument '%s' (%i/%i)",
++		    s1->name, s1->as->rank, s2->as->rank);
++	  return false;
++	}
++
+       /* Sometimes the ambiguity between deferred shape and assumed shape
+ 	 does not get resolved in module procedures, where the only explicit
+ 	 declaration of the dummy is in the interface.  */
+@@ -1554,7 +1561,9 @@ gfc_check_dummy_characteristics (gfc_symbol *s1, gfc_symbol *s2,
+ 	      s2->as->lower[i] = gfc_copy_expr (s1->as->lower[i]);
+ 	}
+ 
+-      if (s1->as->type != s2->as->type)
++      if (s1->as->type != s2->as->type
++	  && !(s1->as->type == AS_DEFERRED
++	       && s2->as->type == AS_ASSUMED_SHAPE))
+ 	{
+ 	  snprintf (errmsg, err_len, "Shape mismatch in argument '%s'",
+ 		    s1->name);
+diff --git a/gcc/testsuite/gfortran.dg/pr124567.f90 b/gcc/testsuite/gfortran.dg/pr124567.f90
+new file mode 100644
+index 000000000000..feb00f222140
+--- /dev/null
++++ b/gcc/testsuite/gfortran.dg/pr124567.f90
+@@ -0,0 +1,62 @@
++! { dg-do compile }
++!
++! PR fortran/124567 - overriding method not resolved correctly
++!
++! Contributed by Salvatore Filippone 
++
++module psb_base_spm_mod
++  type  :: psb_base_spm
++  end type psb_base_spm
++end module psb_base_spm_mod
++
++module psb_r_base_spm_mod
++  use psb_base_spm_mod
++  type, extends(psb_base_spm) :: psb_r_base_spm
++  contains
++    procedure, pass(a) :: csgrw => psb_r_base_csgrw
++  end type psb_r_base_spm
++
++  interface
++    subroutine psb_r_base_csgrw(a,iren)
++      import
++      class(psb_r_base_spm), intent(in) :: a
++      integer, intent(in), optional     :: iren(:)
++    end subroutine psb_r_base_csgrw
++  end interface
++end module psb_r_base_spm_mod
++
++module psb_d_mf_mat_mod
++  use psb_r_base_spm_mod
++  type, extends(psb_r_base_spm) :: psb_d_mf_spm
++    procedure(d_mf_mv), pass(a), pointer :: var_csmv => null()
++  contains
++    procedure, pass(a) :: csgrw     => psb_d_mf_csgrw
++    procedure, pass(a) :: set_csmv  => d_mf_set_csmv
++  end type psb_d_mf_spm
++
++  interface
++    subroutine d_mf_mv(a,x,info)
++      import :: psb_d_mf_spm
++      class(psb_d_mf_spm), intent(in) :: a
++      real, intent(in)                :: x(:)
++      integer, intent(out)            :: info
++    end subroutine d_mf_mv
++  end interface
++
++  interface
++    subroutine psb_d_mf_csgrw(a,iren)
++      import
++      class(psb_d_mf_spm), intent(in) :: a
++      integer, intent(in), optional   :: iren(:)
++    end subroutine psb_d_mf_csgrw
++  end interface
++
++contains
++  subroutine  d_mf_set_csmv(func,a)
++    implicit none
++    class(psb_d_mf_spm), intent(inout) :: a
++    procedure(d_mf_mv)                 :: func
++    a%var_csmv => func
++    return
++  end subroutine d_mf_set_csmv
++end module psb_d_mf_mat_mod
+diff --git a/gcc/testsuite/gfortran.dg/proc_decl_30.f90 b/gcc/testsuite/gfortran.dg/proc_decl_30.f90
+new file mode 100644
+index 000000000000..f54f0e2f36d4
+--- /dev/null
++++ b/gcc/testsuite/gfortran.dg/proc_decl_30.f90
+@@ -0,0 +1,53 @@
++! { dg-do compile }
++!
++! PR fortran/124567 - rank/shape check in interface checking
++!
++! Variation of gfortran.dg/proc_decl_26.f90
++
++program test
++  implicit none
++
++  interface
++    subroutine one(a)
++      integer a(:)
++    end subroutine
++    subroutine two(a)
++      integer a(..)
++    end subroutine
++  end interface
++
++  ! Assumed-shape vs. deferred
++  call foo(two)  ! { dg-error "Rank mismatch in argument 'a' \\(1/-1\\)" }
++  call bar(two)  ! { dg-error "Rank mismatch in argument 'a' \\(1/-1\\)" }
++
++  ! Reversed
++  call bas(one)  ! { dg-error "Rank mismatch in argument 'a' \\(-1/1\\)" }
++  call bla(one)  ! { dg-error "Rank mismatch in argument 'a' \\(-1/1\\)" }
++
++contains
++
++  subroutine foo(f1)
++    procedure(one) :: f1
++  end subroutine foo
++
++  subroutine bar(f2)
++    interface
++      subroutine f2(a)
++        integer a(:)
++      end subroutine
++    end interface
++  end subroutine bar
++
++  subroutine bas(f1)
++    procedure(two) :: f1
++  end subroutine bas
++
++  subroutine bla(f2)
++    interface
++      subroutine f2(a)
++        integer a(..)
++      end subroutine
++    end interface
++  end subroutine bla
++
++end program 
+-- 
+2.43.7
+
+

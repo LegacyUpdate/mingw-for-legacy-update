@@ -1,0 +1,113 @@
+From 645658c78cd9283468849ef7bc29ca2081e8cf1c Mon Sep 17 00:00:00 2001
+From: Nathaniel Shead <nathanieloshead@gmail.com>
+Date: Sun, 15 Mar 2026 01:58:41 +1100
+Subject: [PATCH] c++/modules: Propagate DECL_ARGUMENTS when reading a function
+ def [PR124477]
+
+The crash in the given PR occurs because we've streamed the definition
+of an anticipated builtin, but when processing the nonnull attribute we
+find that its DECL_ARGUMENTS is null.
+
+Back in r14-8196-g3471a61ed0ddef70de8f1bbba85cd1e945fc86fd I removed the
+setting of DECL_ARGUMENTS as this was causing issues where we were
+replacing the argument list for existing definitions.  This was because
+the definition we streamed was referencing those same PARM_DECLs, and if
+they diverged we got different parts of the body with different
+pointers to the same logical parameter.
+
+In most cases we do not need to adjust DECL_ARGUMENTS because
+fn_parms_fini will substitute in the correct DECL_ARGUMENTS from the
+existing declaration.  But if DECL_ARGUMENTS was not set on the existing
+declaration at all, as happens with e.g. anticipated builtins, then we
+do need to set them.
+
+	PR c++/124477
+
+gcc/cp/ChangeLog:
+
+	* module.cc (trees_in::read_function_def): Set DECL_ARGUMENTS if
+	installing and otherwise missing.
+
+gcc/testsuite/ChangeLog:
+
+	* g++.dg/modules/builtin-10_a.C: New test.
+	* g++.dg/modules/builtin-10_b.C: New test.
+
+Signed-off-by: Nathaniel Shead <nathanieloshead@gmail.com>
+Reviewed-by: Jason Merrill <jason@redhat.com>
+(cherry picked from commit abf92b5506f14ce5df48349075aaae0114c5245c)
+---
+ gcc/cp/module.cc                            |  7 ++++++
+ gcc/testsuite/g++.dg/modules/builtin-10_a.C | 24 +++++++++++++++++++++
+ gcc/testsuite/g++.dg/modules/builtin-10_b.C |  9 ++++++++
+ 3 files changed, 40 insertions(+)
+ create mode 100644 gcc/testsuite/g++.dg/modules/builtin-10_a.C
+ create mode 100644 gcc/testsuite/g++.dg/modules/builtin-10_b.C
+
+diff --git a/gcc/cp/module.cc b/gcc/cp/module.cc
+index 1371b8005cd3..6162871ed061 100644
+--- a/gcc/cp/module.cc
++++ b/gcc/cp/module.cc
+@@ -12817,6 +12817,13 @@ trees_in::read_function_def (tree decl, tree maybe_template)
+       DECL_INITIAL (decl) = initial;
+       DECL_SAVED_TREE (decl) = saved;
+ 
++      /* Some entities (like anticipated builtins) were declared without
++	 DECL_ARGUMENTS, so update them now.  But don't do it if there's
++	 already an argument list, because we've already built the
++	 definition referencing those merged PARM_DECLs.  */
++      if (!DECL_ARGUMENTS (decl))
++	DECL_ARGUMENTS (decl) = DECL_ARGUMENTS (maybe_dup);
++
+       if (context)
+ 	SET_DECL_FRIEND_CONTEXT (decl, context);
+       if (cexpr.decl)
+diff --git a/gcc/testsuite/g++.dg/modules/builtin-10_a.C b/gcc/testsuite/g++.dg/modules/builtin-10_a.C
+new file mode 100644
+index 000000000000..5c62f88af68a
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/modules/builtin-10_a.C
+@@ -0,0 +1,24 @@
++// PR c++/124477
++// { dg-additional-options "-fmodules -Wno-global-module -O3" }
++// { dg-module-cmi M }
++
++module;
++extern "C" {
++  typedef __SIZE_TYPE__ size_t;
++
++  extern void *memset (void *__s, int __c, size_t __n) noexcept (true) __attribute__ ((__nonnull__ (1)));
++
++  extern
++    __inline
++    __attribute__((__always_inline__))
++    __attribute__((__gnu_inline__))
++    __attribute__((__artificial__))
++  void *
++    __attribute__((__leaf__))
++  memset(void *__dest, int __ch, size_t __len) noexcept(true) {
++    return __builtin___memset_chk(__dest, __ch, __len,
++                                  __builtin_object_size(__dest, 0));
++  }
++}
++export module M;
++export using ::memset;
+diff --git a/gcc/testsuite/g++.dg/modules/builtin-10_b.C b/gcc/testsuite/g++.dg/modules/builtin-10_b.C
+new file mode 100644
+index 000000000000..69303666dd20
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/modules/builtin-10_b.C
+@@ -0,0 +1,9 @@
++// PR c++/124477
++// { dg-additional-options "-fmodules -O3 -fdump-lang-module-alias" }
++
++import M;
++void foo(void *data) {
++  memset(data, 0xFF, 4);
++}
++
++// { dg-final { scan-lang-dump {Deduping '::memset'} module } }
+-- 
+2.43.7
+
+

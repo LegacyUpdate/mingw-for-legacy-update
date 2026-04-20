@@ -1,0 +1,94 @@
+From 53da069328ee9662518b100181dd5ac59a8f6fad Mon Sep 17 00:00:00 2001
+From: Richard Biener <rguenther@suse.de>
+Date: Thu, 29 Jan 2026 10:41:16 +0100
+Subject: [PATCH] tree-optimization/123596 - fix partial virtual SSA update in
+ eh_cleanup
+
+The following replaces the not quite correct use of
+mark_virtual_operand_for_renaming by an appropriate way of dealing
+with a possibly partially up-to-date virtual SSA form.  Namely
+when we just move stmts and not remove a VDEF we should arrange
+for missing virtual PHIs to be created and just queue its arguments
+for possible renaming.  For the testcase at hand there's no renaming
+necessary in the end when done this way.
+
+	PR tree-optimization/123596
+	* tree-eh.cc (sink_clobbers): Create a virtual PHI when
+	one is required but not present, queuing arguments
+	for renaming.
+
+	* g++.dg/torture/pr123596.C: New testcase.
+
+(cherry picked from commit 4c49f8e53698cce2fc93fb31cbd190c7ff3d04c4)
+---
+ gcc/testsuite/g++.dg/torture/pr123596.C | 18 ++++++++++++++++++
+ gcc/tree-eh.cc                          | 20 ++++++++++++--------
+ 2 files changed, 30 insertions(+), 8 deletions(-)
+ create mode 100644 gcc/testsuite/g++.dg/torture/pr123596.C
+
+diff --git a/gcc/testsuite/g++.dg/torture/pr123596.C b/gcc/testsuite/g++.dg/torture/pr123596.C
+new file mode 100644
+index 000000000000..f146e41d5552
+--- /dev/null
++++ b/gcc/testsuite/g++.dg/torture/pr123596.C
+@@ -0,0 +1,18 @@
++// { dg-do compile }
++
++struct b {
++  ~b() {}
++};
++struct c {
++  c(long, const int &, b = b());
++};
++int _setjmp();
++long d;
++void e(int *);
++int a;
++int main()
++{
++  auto f = [](int *data) { e(data); };
++  f(&a);
++  c(d, _setjmp());
++}
+diff --git a/gcc/tree-eh.cc b/gcc/tree-eh.cc
+index a4d59954c059..247dd58235d6 100644
+--- a/gcc/tree-eh.cc
++++ b/gcc/tree-eh.cc
+@@ -3770,6 +3770,18 @@ sink_clobbers (basic_block bb,
+     }
+   if (first_sunk)
+     {
++      /* If there isn't a single predecessor but no virtual PHI node
++	 create one and arrange for virtual operands to be renamed as
++	 we cannot be sure all incoming edges will updated from sinking
++	 something.  */
++      if (!vphi && !single_pred_p (succbb))
++	{
++	  vphi = create_phi_node (gimple_vop (cfun), succbb);
++	  FOR_EACH_EDGE (e, ei, succbb->preds)
++	    add_phi_arg (vphi, gimple_vop (cfun), e, UNKNOWN_LOCATION);
++	  mark_virtual_operands_for_renaming (cfun);
++	  todo |= TODO_update_ssa_only_virtuals;
++	}
+       /* Adjust virtual operands if we sunk across a virtual PHI.  */
+       if (vphi)
+ 	{
+@@ -3789,14 +3801,6 @@ sink_clobbers (basic_block bb,
+ 		   gimple_vuse (last_sunk));
+ 	  SET_USE (gimple_vuse_op (last_sunk), phi_def);
+ 	}
+-      /* If there isn't a single predecessor but no virtual PHI node
+-         arrange for virtual operands to be renamed.  */
+-      else if (!single_pred_p (succbb)
+-	       && TREE_CODE (gimple_vuse (last_sunk)) == SSA_NAME)
+-	{
+-	  mark_virtual_operand_for_renaming (gimple_vuse (last_sunk));
+-	  todo |= TODO_update_ssa_only_virtuals;
+-	}
+     }
+ 
+   return todo;
+-- 
+2.43.7
+
+

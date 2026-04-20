@@ -1,0 +1,91 @@
+From 10154f87f7ab6d7dbe2a43637a03c12cb4c794bf Mon Sep 17 00:00:00 2001
+From: Andrew Pinski <andrew.pinski@oss.qualcomm.com>
+Date: Tue, 3 Mar 2026 13:57:47 -0800
+Subject: [PATCH] widen mult: Fix handling of _Fract mixed with _Fract
+ [PR119568]
+
+The problem here is we try calling find_widening_optab_handler_and_mode
+with to_mode=E_USAmode and from_mode=E_UHQmode. This causes an ICE (with checking only).
+The fix is to reject the case where the mode classes are different in convert_plusminus_to_widen
+before even trying to deal with the modes.
+
+Bootstrapped and tested on x86_64-linux-gnu.
+
+	PR tree-optimization/119568
+
+gcc/ChangeLog:
+
+	* tree-ssa-math-opts.cc (convert_plusminus_to_widen): Reject different
+	mode classes.
+
+Signed-off-by: Andrew Pinski <andrew.pinski@oss.qualcomm.com>
+(cherry picked from commit 4ef3d71a08aa167a5b73bc073cdfb1a6784e5de7)
+---
+ gcc/tree-ssa-math-opts.cc | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/gcc/tree-ssa-math-opts.cc b/gcc/tree-ssa-math-opts.cc
+index d80f97ef6a87..dd7c51666eb1 100644
+--- a/gcc/tree-ssa-math-opts.cc
++++ b/gcc/tree-ssa-math-opts.cc
+@@ -2972,6 +2972,11 @@ convert_plusminus_to_widen (gimple_stmt_iterator *gsi, gimple *stmt,
+   if (to_mode == from_mode)
+     return false;
+ 
++  /* For fixed point types, the mode classes could be different
++     so reject that case. */
++  if (GET_MODE_CLASS (from_mode) != GET_MODE_CLASS (to_mode))
++    return false;
++
+   from_unsigned1 = TYPE_UNSIGNED (type1);
+   from_unsigned2 = TYPE_UNSIGNED (type2);
+   optype = type1;
+-- 
+2.43.7
+
+From 10154f87f7ab6d7dbe2a43637a03c12cb4c794bf Mon Sep 17 00:00:00 2001
+From: Andrew Pinski <andrew.pinski@oss.qualcomm.com>
+Date: Tue, 3 Mar 2026 13:57:47 -0800
+Subject: [PATCH] widen mult: Fix handling of _Fract mixed with _Fract
+ [PR119568]
+
+The problem here is we try calling find_widening_optab_handler_and_mode
+with to_mode=E_USAmode and from_mode=E_UHQmode. This causes an ICE (with checking only).
+The fix is to reject the case where the mode classes are different in convert_plusminus_to_widen
+before even trying to deal with the modes.
+
+Bootstrapped and tested on x86_64-linux-gnu.
+
+	PR tree-optimization/119568
+
+gcc/ChangeLog:
+
+	* tree-ssa-math-opts.cc (convert_plusminus_to_widen): Reject different
+	mode classes.
+
+Signed-off-by: Andrew Pinski <andrew.pinski@oss.qualcomm.com>
+(cherry picked from commit 4ef3d71a08aa167a5b73bc073cdfb1a6784e5de7)
+---
+ gcc/tree-ssa-math-opts.cc | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/gcc/tree-ssa-math-opts.cc b/gcc/tree-ssa-math-opts.cc
+index d80f97ef6a87..dd7c51666eb1 100644
+--- a/gcc/tree-ssa-math-opts.cc
++++ b/gcc/tree-ssa-math-opts.cc
+@@ -2972,6 +2972,11 @@ convert_plusminus_to_widen (gimple_stmt_iterator *gsi, gimple *stmt,
+   if (to_mode == from_mode)
+     return false;
+ 
++  /* For fixed point types, the mode classes could be different
++     so reject that case. */
++  if (GET_MODE_CLASS (from_mode) != GET_MODE_CLASS (to_mode))
++    return false;
++
+   from_unsigned1 = TYPE_UNSIGNED (type1);
+   from_unsigned2 = TYPE_UNSIGNED (type2);
+   optype = type1;
+-- 
+2.43.7
+
+

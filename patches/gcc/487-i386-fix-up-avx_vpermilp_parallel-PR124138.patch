@@ -1,0 +1,188 @@
+From 8faaf206762101f0e145d5091018254c7433655b Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Wed, 18 Feb 2026 10:28:34 +0100
+Subject: [PATCH] i386: Fix up avx_vpermilp_parallel [PR124138]
+
+r16-3677 extended avx_vpermilp_parallel so that it handles also V8DImode
+(among others) and broke this testcase.
+For V8DFmode the bug existed there already since r0-127405 which extended
+avx_vpermilp_parallel to handle V8DFmode.
+For V16SImode/V16SFmode I think the code is correct, in that case it can
+for V4SImode/V4SFmode choose any permutation it wants and the
+V8S{I,F}mode and V16S{I,F}mode cases before FALLTHRU verify the upper lanes
+match those lower ones.
+For V[48]D[IF]mode the function uses different checking, where it checks
+each pair of ipar separately:
+    case E_V8DFmode:
+    case E_V8DImode:
+      /* In the 512-bit DFmode case, we can only move elements within
+         a 128-bit lane.  First fill the second part of the mask,
+         then fallthru.  */
+      for (i = 4; i < 6; ++i)
+        {
+          if (ipar[i] < 4 || ipar[i] >= 6)
+            return 0;
+          mask |= (ipar[i] - 4) << i;
+        }
+      for (i = 6; i < 8; ++i)
+        {
+          if (ipar[i] < 6)
+            return 0;
+          mask |= (ipar[i] - 6) << i;
+        }
+      /* FALLTHRU */
+
+    case E_V4DFmode:
+    case E_V4DImode:
+      /* In the 256-bit DFmode case, we can only move elements within
+         a 128-bit lane.  */
+      for (i = 0; i < 2; ++i)
+        {
+          if (ipar[i] >= 2)
+            return 0;
+          mask |= ipar[i] << i;
+        }
+      for (i = 2; i < 4; ++i)
+        {
+          if (ipar[i] < 2)
+            return 0;
+          mask |= (ipar[i] - 2) << i;
+        }
+      break;
+so that it directly computes corresponding mask bit.
+Earlier in the function it verified ipar[i] wasn't above
+nelts (nor negative), so just checking if (ipar[i] >= 2) is ok, it can't
+be negative, and just checking if (ipar[i] < 6) is also fine, because
+it can never be 8 or above (because nelts is 8 in that case).
+Though, the if (ipar[i] < 2) case check used to be correct only when
+nelts could be only 4, when it can be 8 too, it will as in the following
+testcase happily accept values in the [4, 7] range which shouldn't be
+accepted (it can only handle [2, 3]).
+
+Fixed thusly.
+
+2026-02-17  Jakub Jelinek  <jakub@redhat.com>
+
+	PR target/124138
+	* config/i386/i386.cc (avx_vpermilp_parallel): Verify
+	ipar[2] and ipar[3] aren't larger than 3.
+
+	* gcc.dg/pr124138.c: New test.
+	* gcc.target/i386/avx512f-pr124138-1.c: New test.
+	* gcc.target/i386/avx512f-pr124138-2.c: New test.
+
+(cherry picked from commit b95f529df46e33c7ee7058b7cc51473e7a0d2f4c)
+---
+ gcc/config/i386/i386.cc                       |  2 +-
+ gcc/testsuite/gcc.dg/pr124138.c               | 20 +++++++++++++++
+ .../gcc.target/i386/avx512f-pr124138-1.c      | 24 ++++++++++++++++++
+ .../gcc.target/i386/avx512f-pr124138-2.c      | 25 +++++++++++++++++++
+ 4 files changed, 70 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/gcc.dg/pr124138.c
+ create mode 100644 gcc/testsuite/gcc.target/i386/avx512f-pr124138-1.c
+ create mode 100644 gcc/testsuite/gcc.target/i386/avx512f-pr124138-2.c
+
+diff --git a/gcc/config/i386/i386.cc b/gcc/config/i386/i386.cc
+index b481f0161f55..0e71983b0e57 100644
+--- a/gcc/config/i386/i386.cc
++++ b/gcc/config/i386/i386.cc
+@@ -20246,7 +20246,7 @@ avx_vpermilp_parallel (rtx par, machine_mode mode)
+ 	}
+       for (i = 2; i < 4; ++i)
+ 	{
+-	  if (ipar[i] < 2)
++	  if (ipar[i] < 2 || ipar[i] >= 4)
+ 	    return 0;
+ 	  mask |= (ipar[i] - 2) << i;
+ 	}
+diff --git a/gcc/testsuite/gcc.dg/pr124138.c b/gcc/testsuite/gcc.dg/pr124138.c
+new file mode 100644
+index 000000000000..9dc78dca6c6f
+--- /dev/null
++++ b/gcc/testsuite/gcc.dg/pr124138.c
+@@ -0,0 +1,20 @@
++/* PR target/124138 */
++/* { dg-do run } */
++/* { dg-options "-Wno-psabi" } */
++
++typedef __attribute__((__vector_size__ (8 * sizeof (unsigned long long)))) unsigned long long V;
++
++[[gnu::noipa]] V
++foo (V x)
++{
++  return __builtin_shuffle (x, (V) { 0, 1, 2, 5, 4, 5, 6, 7 });
++}
++
++int
++main ()
++{
++  V x = foo ((V) { 1, 2, 3, 4, 5, 6, 7, 8 });
++  if (x[0] != 1 || x[1] != 2 || x[2] != 3 || x[3] != 6
++      || x[4] != 5 || x[5] != 6 || x[6] != 7 || x[7] != 8)
++    __builtin_abort ();
++}
+diff --git a/gcc/testsuite/gcc.target/i386/avx512f-pr124138-1.c b/gcc/testsuite/gcc.target/i386/avx512f-pr124138-1.c
+new file mode 100644
+index 000000000000..79efd2bb221d
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/i386/avx512f-pr124138-1.c
+@@ -0,0 +1,24 @@
++/* PR target/124138 */
++/* { dg-do run } */
++/* { dg-options "-mavx512f" } */
++/* { dg-require-effective-target avx512f } */
++
++#define AVX512F
++#include "avx512f-helper.h"
++
++typedef __attribute__((__vector_size__ (64))) unsigned long long V;
++
++[[gnu::noipa]] V
++foo (V x)
++{
++  return __builtin_shuffle (x, (V) { 0, 1, 2, 5, 4, 5, 6, 7 });
++}
++
++void
++TEST ()
++{
++  V x = foo ((V) { 1, 2, 3, 4, 5, 6, 7, 8 });
++  if (x[0] != 1 || x[1] != 2 || x[2] != 3 || x[3] != 6
++      || x[4] != 5 || x[5] != 6 || x[6] != 7 || x[7] != 8)
++    __builtin_abort ();
++}
+diff --git a/gcc/testsuite/gcc.target/i386/avx512f-pr124138-2.c b/gcc/testsuite/gcc.target/i386/avx512f-pr124138-2.c
+new file mode 100644
+index 000000000000..893dbd6c4776
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/i386/avx512f-pr124138-2.c
+@@ -0,0 +1,25 @@
++/* PR target/124138 */
++/* { dg-do run } */
++/* { dg-options "-mavx512f" } */
++/* { dg-require-effective-target avx512f } */
++
++#define AVX512F
++#include "avx512f-helper.h"
++
++typedef __attribute__((__vector_size__ (64))) unsigned long long V;
++typedef __attribute__((__vector_size__ (64))) double W;
++
++[[gnu::noipa]] W
++foo (W x)
++{
++  return __builtin_shuffle (x, (V) { 0, 1, 2, 5, 4, 5, 6, 7 });
++}
++
++void
++TEST ()
++{
++  W x = foo ((W) { 1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 7.5, 8.5 });
++  if (x[0] != 1.5 || x[1] != 2.5 || x[2] != 3.5 || x[3] != 6.5
++      || x[4] != 5.5 || x[5] != 6.5 || x[6] != 7.5 || x[7] != 8.5)
++    __builtin_abort ();
++}
+-- 
+2.43.7
+
+

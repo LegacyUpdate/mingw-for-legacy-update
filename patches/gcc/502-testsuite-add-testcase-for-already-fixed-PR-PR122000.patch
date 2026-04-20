@@ -1,0 +1,44 @@
+From 0b23a8cd1cce5cb7f148fb0dc12549d8802bdb8d Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Fri, 6 Mar 2026 14:33:19 +0100
+Subject: [PATCH] testsuite: Add testcase for already fixed PR [PR122000]
+
+This testcase started to be miscompiled with my r15-9131 change
+on arm with -march=armv7-a -mfpu=vfpv4 -mfloat-abi=hard -O and got
+fixed with r16-6548 PR121773 change.
+
+2026-03-06  Jakub Jelinek  <jakub@redhat.com>
+
+	PR target/122000
+	* gcc.c-torture/execute/pr122000.c: New test.
+
+(cherry picked from commit 2365f48836d71301450cbf4204fe006522582d7d)
+---
+ gcc/testsuite/gcc.c-torture/execute/pr122000.c | 14 ++++++++++++++
+ 1 file changed, 14 insertions(+)
+ create mode 100644 gcc/testsuite/gcc.c-torture/execute/pr122000.c
+
+diff --git a/gcc/testsuite/gcc.c-torture/execute/pr122000.c b/gcc/testsuite/gcc.c-torture/execute/pr122000.c
+new file mode 100644
+index 000000000000..7f463f9920d0
+--- /dev/null
++++ b/gcc/testsuite/gcc.c-torture/execute/pr122000.c
+@@ -0,0 +1,14 @@
++/* PR target/122000 */
++
++char c = 1;
++__attribute__((aligned (sizeof (unsigned long long)))) unsigned long long ll;
++
++int
++main ()
++{
++#if defined(__GCC_HAVE_SYNC_COMPARE_AND_SWAP_8) && __SIZEOF_LONG_LONG__ == 8 && __CHAR_BIT__ == 8
++  unsigned long long x = __sync_add_and_fetch (&ll, c + 0xfedcba9876543210ULL);
++  if (x != 0xfedcba9876543211ULL)
++    __builtin_abort ();
++#endif
++}
+-- 
+2.43.7
+
+

@@ -1,0 +1,111 @@
+From 088209c6e8f7d3524adf5cbf83eb706625ec5df2 Mon Sep 17 00:00:00 2001
+From: Jakub Jelinek <jakub@redhat.com>
+Date: Tue, 3 Mar 2026 09:51:33 +0100
+Subject: [PATCH] i386: Fix up some FMA patterns for -masm=intel [PR124315]
+
+The following 4 define_insns don't have matching operands between AT&T and
+Intel syntax, %3 is "0" and %1 was missing.
+Searched grep '%0%{%4%}|%0%{%4%}' *.md and didn't find other spots where
+the operand numbers wouldn't match (reverse order of course).
+
+2026-03-03  Jakub Jelinek  <jakub@redhat.com>
+
+	PR target/124315
+	* config/i386/sse.md (avx512f_vmfmadd_<mode>_mask3<round_name>,
+	avx512f_vmfmsub_<mode>_mask3<round_name>,
+	avx512f_vmfnmadd_<mode>_mask3<round_name>,
+	avx512f_vmfnmsub_<mode>_mask3<round_name>): Use %<iptr>1 instead of
+	%<iptr>3 in -masm=intel syntax.
+
+	* gcc.target/i386/avx512f-pr124315.c: New test.
+
+(cherry picked from commit 19e1192b1f867bfe3aba6de10d0c68f6be5d7677)
+---
+ gcc/config/i386/sse.md                        |  8 ++---
+ .../gcc.target/i386/avx512f-pr124315.c        | 33 +++++++++++++++++++
+ 2 files changed, 37 insertions(+), 4 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.target/i386/avx512f-pr124315.c
+
+diff --git a/gcc/config/i386/sse.md b/gcc/config/i386/sse.md
+index 4f0c8f8091df..fb2e0997f9d3 100644
+--- a/gcc/config/i386/sse.md
++++ b/gcc/config/i386/sse.md
+@@ -6693,7 +6693,7 @@
+ 	  (match_dup 3)
+ 	  (const_int 1)))]
+   "TARGET_AVX512F"
+-  "vfmadd231<ssescalarmodesuffix>\t{<round_op5>%2, %1, %0%{%4%}|%0%{%4%}, %<iptr>3, %<iptr>2<round_op5>}"
++  "vfmadd231<ssescalarmodesuffix>\t{<round_op5>%2, %1, %0%{%4%}|%0%{%4%}, %<iptr>1, %<iptr>2<round_op5>}"
+   [(set_attr "type" "ssemuladd")
+    (set_attr "prefix" "evex")
+    (set_attr "mode" "<MODE>")])
+@@ -6767,7 +6767,7 @@
+ 	  (match_dup 3)
+ 	  (const_int 1)))]
+   "TARGET_AVX512F"
+-  "vfmsub231<ssescalarmodesuffix>\t{<round_op5>%2, %1, %0%{%4%}|%0%{%4%}, %<iptr>3, %<iptr>2<round_op5>}"
++  "vfmsub231<ssescalarmodesuffix>\t{<round_op5>%2, %1, %0%{%4%}|%0%{%4%}, %<iptr>1, %<iptr>2<round_op5>}"
+   [(set_attr "type" "ssemuladd")
+    (set_attr "prefix" "evex")
+    (set_attr "mode" "<MODE>")])
+@@ -6828,7 +6828,7 @@
+ 	  (match_dup 3)
+ 	  (const_int 1)))]
+   "TARGET_AVX512F"
+-  "vfnmadd231<ssescalarmodesuffix>\t{<round_op5>%2, %1, %0%{%4%}|%0%{%4%}, %<iptr>3, %<iptr>2<round_op5>}"
++  "vfnmadd231<ssescalarmodesuffix>\t{<round_op5>%2, %1, %0%{%4%}|%0%{%4%}, %<iptr>1, %<iptr>2<round_op5>}"
+   [(set_attr "type" "ssemuladd")
+    (set_attr "prefix" "evex")
+    (set_attr "mode" "<MODE>")])
+@@ -6905,7 +6905,7 @@
+ 	  (match_dup 3)
+ 	  (const_int 1)))]
+   "TARGET_AVX512F"
+-  "vfnmsub231<ssescalarmodesuffix>\t{<round_op5>%2, %1, %0%{%4%}|%0%{%4%}, %<iptr>3, %<iptr>2<round_op5>}"
++  "vfnmsub231<ssescalarmodesuffix>\t{<round_op5>%2, %1, %0%{%4%}|%0%{%4%}, %<iptr>1, %<iptr>2<round_op5>}"
+   [(set_attr "type" "ssemuladd")
+    (set_attr "prefix" "evex")
+    (set_attr "mode" "<MODE>")])
+diff --git a/gcc/testsuite/gcc.target/i386/avx512f-pr124315.c b/gcc/testsuite/gcc.target/i386/avx512f-pr124315.c
+new file mode 100644
+index 000000000000..13d6cadd8ec9
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/i386/avx512f-pr124315.c
+@@ -0,0 +1,33 @@
++/* PR target/124315 */
++/* { dg-do compile { target masm_intel } } */
++/* { dg-options "-O2 -mavx512f -masm=intel" } */
++/* { dg-final { scan-assembler "\tvfmadd231sd\txmm0{k\[0-7]}, xmm1, xmm2, {ru-sae}" } } */
++/* { dg-final { scan-assembler "\tvfmsub231sd\txmm0{k\[0-7]}, xmm1, xmm2, {ru-sae}" } } */
++/* { dg-final { scan-assembler "\tvfnmadd231sd\txmm0{k\[0-7]}, xmm1, xmm2, {ru-sae}" } } */
++/* { dg-final { scan-assembler "\tvfnmsub231sd\txmm0{k\[0-7]}, xmm1, xmm2, {ru-sae}" } } */
++
++#include <x86intrin.h>
++
++__m128d
++foo (__m128d b, __m128d w, __m128d a,  __mmask8 u)
++{
++  return _mm_mask3_fmadd_round_sd (w, a, b, u, _MM_FROUND_TO_POS_INF | _MM_FROUND_NO_EXC);
++}
++
++__m128d
++bar (__m128d b, __m128d w, __m128d a, __mmask8 u)
++{
++  return _mm_mask3_fmsub_round_sd (w, a, b, u, _MM_FROUND_TO_POS_INF | _MM_FROUND_NO_EXC);
++}
++
++__m128d
++baz (__m128d b, __m128d w, __m128d a,  __mmask8 u)
++{
++  return _mm_mask3_fnmadd_round_sd (w, a, b, u, _MM_FROUND_TO_POS_INF | _MM_FROUND_NO_EXC);
++}
++
++__m128d
++qux (__m128d b, __m128d w, __m128d a,  __mmask8 u)
++{
++  return _mm_mask3_fnmsub_round_sd (w, a, b, u, _MM_FROUND_TO_POS_INF | _MM_FROUND_NO_EXC);
++}
+-- 
+2.43.7
+
+

@@ -1,0 +1,128 @@
+From d15d78a04ab9f36c184874d272006631d22d76bf Mon Sep 17 00:00:00 2001
+From: Patrick Palka <ppalka@redhat.com>
+Date: Mon, 2 Mar 2026 22:37:15 -0500
+Subject: [PATCH] c++: improve constraint recursion diagnostic
+
+Our constraint recursion diagnostics are not ideal because they
+usually show the atom with an uninstantiated parameter mapping, e.g
+
+concepts-recursive-sat5.C:6:41: error: satisfaction of atomic constraint 'requires(A a, T t) {a | t;} [with T = T]' depends on itself
+
+This is a consequence of our two-level caching of atomic constraints,
+where we first cache the uninstantiated atom+args and then the
+instantiated atom+no args, and most likely the first level of caching
+detects the recursion, at which point we have no way to get a hold of
+the instantiated atom.
+
+This patch fixes this by linking the the first level of caching to the
+second level, so that we can conveniently print the instantiated atom in
+case of constraint recursion detected from the first level of caching.
+
+Alternatively we could make only the second level of caching diagnose
+constraint recursion but then we'd no longer catch constraint recursion
+that occurs during parameter mapping instantiation.  This current approach
+seems simpler, and it also seems natural to have the two cache entries
+somehow linked anyway.
+
+gcc/cp/ChangeLog:
+
+	* constraint.cc (struct sat_entry): New data member inst_entry.
+	(satisfaction_cache::satisfaction_cache): Initialize inst_entry.
+	(satisfaction_cache::get): Use it to prefer printing the
+	instantiated atom in case of constraint recursion.
+	(satisfy_atom): Set inst_entry of the first cache entry to point
+	to the second entry.
+
+gcc/testsuite/ChangeLog:
+
+	* g++.dg/cpp2a/concepts-recursive-sat2.C: Verify that the
+	instantiated parameter mapping is printed.
+	* g++.dg/cpp2a/concepts-recursive-sat5.C: Likewise.
+
+Reviewed-by: Jason Merrill <jason@redhat.com>
+(cherry picked from commit abab49fd4be11bb44d9b5ccfa27213e47b8ace8d)
+---
+ gcc/cp/constraint.cc                                | 13 +++++++++++--
+ .../g++.dg/cpp2a/concepts-recursive-sat2.C          |  3 ++-
+ .../g++.dg/cpp2a/concepts-recursive-sat5.C          |  3 ++-
+ 3 files changed, 15 insertions(+), 4 deletions(-)
+
+diff --git a/gcc/cp/constraint.cc b/gcc/cp/constraint.cc
+index 44fb086c6306..ca960e869d07 100644
+--- a/gcc/cp/constraint.cc
++++ b/gcc/cp/constraint.cc
+@@ -1895,6 +1895,10 @@ struct GTY((for_user)) sat_entry
+      the first time.  */
+   tree result;
+ 
++  /* For a !ATOMIC_CONSTR_MAP_INSTANTIATED_P atom, this conveniently points to
++     the entry for the corresponding atom after instantiating its mapping.  */
++  sat_entry *inst_entry;
++
+   /* The value of input_location when satisfaction of ATOM+ARGS was first
+      performed.  */
+   location_t location;
+@@ -2054,6 +2058,7 @@ satisfaction_cache
+       entry->atom = atom;
+       entry->args = args;
+       entry->result = NULL_TREE;
++      entry->inst_entry = nullptr;
+       entry->location = input_location;
+       entry->ftc_begin = entry->ftc_end = -1;
+       entry->diagnose_instability = false;
+@@ -2093,10 +2098,12 @@ satisfaction_cache::get ()
+     {
+       /* If we get here, it means satisfaction is self-recursive.  */
+       gcc_checking_assert (!entry->result || seen_error ());
++      /* Prefer printing the instantiated mapping.  */
++      tree atom = entry->inst_entry ? entry->inst_entry->atom : entry->atom;
+       if (info.noisy ())
+-	error_at (EXPR_LOCATION (ATOMIC_CONSTR_EXPR (entry->atom)),
++	error_at (EXPR_LOCATION (ATOMIC_CONSTR_EXPR (atom)),
+ 		  "satisfaction of atomic constraint %qE depends on itself",
+-		  entry->atom);
++		  atom);
+       return error_mark_node;
+     }
+ 
+@@ -2416,6 +2423,8 @@ satisfy_atom (tree t, tree args, sat_info info)
+   gcc_assert (!ATOMIC_CONSTR_MAP_INSTANTIATED_P (t));
+   ATOMIC_CONSTR_MAP_INSTANTIATED_P (t) = true;
+   satisfaction_cache inst_cache (t, /*args=*/NULL_TREE, info);
++  if (cache.entry && inst_cache.entry)
++    cache.entry->inst_entry = inst_cache.entry;
+   if (tree r = inst_cache.get ())
+     {
+       cache.entry->location = inst_cache.entry->location;
+diff --git a/gcc/testsuite/g++.dg/cpp2a/concepts-recursive-sat2.C b/gcc/testsuite/g++.dg/cpp2a/concepts-recursive-sat2.C
+index 9bc96f58979d..a264f26bc55d 100644
+--- a/gcc/testsuite/g++.dg/cpp2a/concepts-recursive-sat2.C
++++ b/gcc/testsuite/g++.dg/cpp2a/concepts-recursive-sat2.C
+@@ -1,7 +1,8 @@
+ // { dg-do compile { target c++20 } }
+ 
+ template<typename T>
+-concept Fooable = requires(T t) { foo(t); }; // { dg-error "depends on itself" }
++concept Fooable = requires(T t) { foo(t); };
++// { dg-error "T = test::S]' depends on itself" "" { target *-*-* } .-1 }
+ 
+ template<Fooable T>
+ void foo(T t) { }
+diff --git a/gcc/testsuite/g++.dg/cpp2a/concepts-recursive-sat5.C b/gcc/testsuite/g++.dg/cpp2a/concepts-recursive-sat5.C
+index ba564873a204..63e032494e3d 100644
+--- a/gcc/testsuite/g++.dg/cpp2a/concepts-recursive-sat5.C
++++ b/gcc/testsuite/g++.dg/cpp2a/concepts-recursive-sat5.C
+@@ -3,7 +3,8 @@
+ 
+ struct A { };
+ 
+-template<typename T> concept pipeable = requires(A a, T t) { a | t; }; // { dg-error "depends on itself" }
++template<typename T> concept pipeable = requires(A a, T t) { a | t; };
++// { dg-error "with T = int]' depends on itself" "" { target *-*-* } .-1 }
+ 
+ template<pipeable T> void operator|(A, T);
+ 
+-- 
+2.43.7
+
+

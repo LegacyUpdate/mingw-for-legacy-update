@@ -1,0 +1,259 @@
+From 00308bfc43bf4aac7f8f62f715c167d2babda49a Mon Sep 17 00:00:00 2001
+From: Jonathan Wakely <jwakely@redhat.com>
+Date: Wed, 18 Dec 2024 18:31:16 +0000
+Subject: [PATCH] libstdc++: Use constexpr-if to slightly simplify <regex>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf8
+Content-Transfer-Encoding: 8bit
+
+This will hardly make a dent in the very slow compile times for <regex>
+but it seems worth doing anyway.
+
+libstdc++-v3/ChangeLog:
+
+	* include/bits/regex_compiler.h: Replace _GLIBCXX17_CONSTEXPR
+	with constexpr and disable diagnostics with pragmas.
+	(_AnyMatcher::operator()): Use constexpr-if instead of tag
+	dispatching. Postpone calls to _M_translate until after checking
+	result of earlier calls.
+	(_AnyMatcher::_M_apply): Remove both overloads.
+	(_BracketMatcher::operator(), _BracketMatcher::_M_ready):
+	Replace tag dispatching with 'if constexpr'.
+	(_BracketMatcher::_M_apply(_CharT, true_type)): Remove.
+	(_BracketMatcher::_M_apply(_CharT, false_type)): Remove second
+	parameter.
+	(_BracketMatcher::_M_make_cache): Remove both overloads.
+	* include/bits/regex_compiler.tcc (_BracketMatcher::_M_apply):
+	Remove second parameter.
+	* include/bits/regex_executor.tcc: Replace _GLIBCXX17_CONSTEXPR
+	with constexpr and disable diagnostics with pragmas.
+	(_Executor::_M_handle_backref): Replace __glibcxx_assert with
+	static_assert.
+	(_Executor::_M_handle_accept): Mark _S_opcode_backref case as
+	unreachable for non-DFS mode and do not instantiate
+	_M_handle_backref for that case.
+
+Reviewed-by: Tomasz KamiÅski <tkaminsk@redhat.com>
+(cherry picked from commit 52e2bcbd936ed7cc567fe086480076547d2df6b5)
+---
+ libstdc++-v3/include/bits/regex_compiler.h   | 67 ++++++++------------
+ libstdc++-v3/include/bits/regex_compiler.tcc |  2 +-
+ libstdc++-v3/include/bits/regex_executor.tcc | 17 +++--
+ 3 files changed, 40 insertions(+), 46 deletions(-)
+
+diff --git a/libstdc++-v3/include/bits/regex_compiler.h b/libstdc++-v3/include/bits/regex_compiler.h
+index f24c7e3baa6a..21e7065e066b 100644
+--- a/libstdc++-v3/include/bits/regex_compiler.h
++++ b/libstdc++-v3/include/bits/regex_compiler.h
+@@ -38,6 +38,8 @@ _GLIBCXX_BEGIN_NAMESPACE_CXX11
+ 
+ _GLIBCXX_END_NAMESPACE_CXX11
+ 
++#pragma GCC diagnostic push
++#pragma GCC diagnostic ignored "-Wc++17-extensions" // if constexpr
+ namespace __detail
+ {
+   /**
+@@ -221,9 +223,9 @@ namespace __detail
+       _CharT
+       _M_translate(_CharT __ch) const
+       {
+-	if _GLIBCXX17_CONSTEXPR (__icase)
++	if constexpr (__icase)
+ 	  return _M_traits.translate_nocase(__ch);
+-	else if _GLIBCXX17_CONSTEXPR (__collate)
++	else if constexpr (__collate)
+ 	  return _M_traits.translate(__ch);
+ 	else
+ 	  return __ch;
+@@ -285,7 +287,7 @@ namespace __detail
+       bool
+       _M_match_range(_CharT __first, _CharT __last, _CharT __ch) const
+       {
+-	if _GLIBCXX17_CONSTEXPR (!__icase)
++	if constexpr (!__icase)
+ 	  return __first <= __ch && __ch <= __last;
+ 	else
+ 	  return this->_M_in_range_icase(__first, __last, __ch);
+@@ -376,26 +378,20 @@ namespace __detail
+ 
+       bool
+       operator()(_CharT __ch) const
+-      { return _M_apply(__ch, typename is_same<_CharT, char>::type()); }
+-
+-      bool
+-      _M_apply(_CharT __ch, true_type) const
+       {
+-	auto __c = _M_translator._M_translate(__ch);
+-	auto __n = _M_translator._M_translate('\n');
+-	auto __r = _M_translator._M_translate('\r');
+-	return __c != __n && __c != __r;
+-      }
+-
+-      bool
+-      _M_apply(_CharT __ch, false_type) const
+-      {
+-	auto __c = _M_translator._M_translate(__ch);
+-	auto __n = _M_translator._M_translate('\n');
+-	auto __r = _M_translator._M_translate('\r');
+-	auto __u2028 = _M_translator._M_translate(u'\u2028');
+-	auto __u2029 = _M_translator._M_translate(u'\u2029');
+-	return __c != __n && __c != __r && __c != __u2028 && __c != __u2029;
++	const auto __c = _M_translator._M_translate(__ch);
++	if (__c == _M_translator._M_translate('\n'))
++	  return false;
++	if (__c == _M_translator._M_translate('\r'))
++	  return false;
++	if constexpr (!is_same<_CharT, char>::value)
++	  {
++	    if (__c == _M_translator._M_translate(u'\u2028')) // line sep
++	      return false;
++	    if (__c == _M_translator._M_translate(u'\u2029')) // para sep
++	      return false;
++	  }
++	return true;
+       }
+ 
+       _TransT _M_translator;
+@@ -441,7 +437,10 @@ namespace __detail
+       operator()(_CharT __ch) const
+       {
+ 	_GLIBCXX_DEBUG_ASSERT(_M_is_ready);
+-	return _M_apply(__ch, _UseCache());
++	if constexpr (_UseCache::value)
++	  if (!(__ch & 0x80)) [[__likely__]]
++	    return _M_cache[static_cast<_UnsignedCharT>(__ch)];
++	return _M_apply(__ch);
+       }
+ 
+       void
+@@ -512,7 +511,9 @@ namespace __detail
+ 	std::sort(_M_char_set.begin(), _M_char_set.end());
+ 	auto __end = std::unique(_M_char_set.begin(), _M_char_set.end());
+ 	_M_char_set.erase(__end, _M_char_set.end());
+-	_M_make_cache(_UseCache());
++	if constexpr (_UseCache::value)
++	  for (unsigned __i = 0; __i < 128; __i++) // Only cache 7-bit chars
++	    _M_cache[__i] = _M_apply(static_cast<_CharT>(__i));
+ 	_GLIBCXX_DEBUG_ONLY(_M_is_ready = true);
+       }
+ 
+@@ -531,22 +532,7 @@ namespace __detail
+       using _UnsignedCharT = typename std::make_unsigned<_CharT>::type;
+ 
+       bool
+-      _M_apply(_CharT __ch, false_type) const;
+-
+-      bool
+-      _M_apply(_CharT __ch, true_type) const
+-      { return _M_cache[static_cast<_UnsignedCharT>(__ch)]; }
+-
+-      void
+-      _M_make_cache(true_type)
+-      {
+-	for (unsigned __i = 0; __i < _M_cache.size(); __i++)
+-	  _M_cache[__i] = _M_apply(static_cast<_CharT>(__i), false_type());
+-      }
+-
+-      void
+-      _M_make_cache(false_type)
+-      { }
++      _M_apply(_CharT __ch) const;
+ 
+     private:
+       _GLIBCXX_STD_C::vector<_CharT>            _M_char_set;
+@@ -565,6 +551,7 @@ namespace __detail
+ 
+  ///@} regex-detail
+ } // namespace __detail
++#pragma GCC diagnostic pop
+ _GLIBCXX_END_NAMESPACE_VERSION
+ } // namespace std
+ 
+diff --git a/libstdc++-v3/include/bits/regex_compiler.tcc b/libstdc++-v3/include/bits/regex_compiler.tcc
+index cd0db2761b5c..59b79fdd106e 100644
+--- a/libstdc++-v3/include/bits/regex_compiler.tcc
++++ b/libstdc++-v3/include/bits/regex_compiler.tcc
+@@ -598,7 +598,7 @@ namespace __detail
+   template<typename _TraitsT, bool __icase, bool __collate>
+     bool
+     _BracketMatcher<_TraitsT, __icase, __collate>::
+-    _M_apply(_CharT __ch, false_type) const
++    _M_apply(_CharT __ch) const
+     {
+       return [this, __ch]
+       {
+diff --git a/libstdc++-v3/include/bits/regex_executor.tcc b/libstdc++-v3/include/bits/regex_executor.tcc
+index e887e28854f9..8f0f756f0a76 100644
+--- a/libstdc++-v3/include/bits/regex_executor.tcc
++++ b/libstdc++-v3/include/bits/regex_executor.tcc
+@@ -32,6 +32,8 @@ namespace std _GLIBCXX_VISIBILITY(default)
+ {
+ _GLIBCXX_BEGIN_NAMESPACE_VERSION
+ 
++#pragma GCC diagnostic push
++#pragma GCC diagnostic ignored "-Wc++17-extensions" // if constexpr
+ namespace __detail
+ {
+   template<typename _BiIter, typename _Alloc, typename _TraitsT,
+@@ -217,7 +219,7 @@ namespace __detail
+ 	}
+       else // Non-greedy mode
+ 	{
+-	  if (__dfs_mode)
++	  if constexpr (__dfs_mode)
+ 	    {
+ 	      // vice-versa.
+ 	      _M_dfs(__match_mode, __state._M_next);
+@@ -322,7 +324,7 @@ namespace __detail
+ 
+       if (_M_current == _M_end)
+ 	return;
+-      if (__dfs_mode)
++      if constexpr (__dfs_mode)
+ 	{
+ 	  if (__state._M_matches(*_M_current))
+ 	    {
+@@ -393,7 +395,7 @@ namespace __detail
+     void _Executor<_BiIter, _Alloc, _TraitsT, __dfs_mode>::
+     _M_handle_backref(_Match_mode __match_mode, _StateIdT __i)
+     {
+-      __glibcxx_assert(__dfs_mode);
++      static_assert(__dfs_mode, "this should never be instantiated");
+ 
+       const auto& __state = _M_nfa[__i];
+       auto& __submatch = _M_cur_results[__state._M_backref_index];
+@@ -426,7 +428,7 @@ namespace __detail
+     void _Executor<_BiIter, _Alloc, _TraitsT, __dfs_mode>::
+     _M_handle_accept(_Match_mode __match_mode, _StateIdT)
+     {
+-      if _GLIBCXX17_CONSTEXPR (__dfs_mode)
++      if constexpr (__dfs_mode)
+ 	{
+ 	  __glibcxx_assert(!_M_has_sol);
+ 	  if (__match_mode == _Match_mode::_Exact)
+@@ -529,7 +531,11 @@ namespace __detail
+ 	case _S_opcode_match:
+ 	  _M_handle_match(__match_mode, __i); break;
+ 	case _S_opcode_backref:
+-	  _M_handle_backref(__match_mode, __i); break;
++	  if constexpr (__dfs_mode)
++	    _M_handle_backref(__match_mode, __i);
++	  else
++	    __builtin_unreachable();
++	  break;
+ 	case _S_opcode_accept:
+ 	  _M_handle_accept(__match_mode, __i); break;
+ 	case _S_opcode_alternative:
+@@ -564,6 +570,7 @@ namespace __detail
+       return __left_is_word != __right_is_word;
+     }
+ } // namespace __detail
++#pragma GCC diagnostic pop
+ 
+ _GLIBCXX_END_NAMESPACE_VERSION
+ } // namespace
+-- 
+2.43.7
+
+
