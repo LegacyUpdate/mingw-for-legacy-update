@@ -21,7 +21,7 @@ cd          gcc-$GCC_V
 
 # Building GCC requires GMP, MPFR, and MPC. Let's have the build system build them.
 tar -xvf ../../gmp-$GMP_V.tar.xz
-tar -xvf ../../mpc-$MPC_V.tar.gz
+tar -xvf ../../mpc-$MPC_V.tar.xz
 tar -xvf ../../mpfr-$MPFR_V.tar.xz
 mv -v gmp-$GMP_V   gmp
 mv -v mpfr-$MPFR_V mpfr

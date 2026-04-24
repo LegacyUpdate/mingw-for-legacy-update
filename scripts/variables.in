@@ -2,15 +2,15 @@
 # The scripts won't need to be updated unless a package update calls for a
 # needed adjustment.
 
-MINGW_V=13.0.0
+MINGW_V=14.0.0
 MINGW_HEADER_V=$MINGW_V
 BINUTILS_V=2.46.0
 GCC_MIN_V=15.2
 GCC_V=$GCC_MIN_V.0
 GMP_V=6.3.0
 MPFR_V=4.2.2
-MPC_V=1.3.1
+MPC_V=1.4.1
 MINGW_PTHREAD_V=$MINGW_V
 ZLIB_V=1.3.2
-NSIS_V=3.11
-MINGW_OPT=/opt/gcc-$GCC_MIN_V-20260228-binutils-$BINUTILS_V-mingw-v$MINGW_V
+NSIS_V=3.12
+MINGW_OPT=/opt/gcc-$GCC_MIN_V-20260420-binutils-$BINUTILS_V-mingw-v$MINGW_V

@@ -14,49 +14,24 @@ GCC 15.2.0
 
 Binutils 2.46.0
 
-MinGW 13.0.0
+MinGW 14.0.0
 
 GMP 6.3.0
 
 MPFR 4.2.2
 
-MPC 1.3.1
+MPC 1.4.1
 
 zlib 1.3.2
 
-NSIS 3.11
+NSIS 3.12
 
 # Patches Used
 
-As part of diagnosing problems that some users were happening on 64-bit copies
-of Windows XP/Server 2003, as well as Vista/Server 2008 in some cases, I
-discovered that we were bumping into an underflow in MinGW's stat32 functions.
-This occurs on some systems where the system time is set to prior to 1970
-when the CMOS battery is faulty, and a user forgets to set it. Windows itself
-works fine because it contains modified versions of these functions in the msvcrt
-on 64-bit systems. To work around this, we're applying patches from upstream at
-https://github.com/mingw-w64/mingw-w64/commits/v13.x/ to check for the underflow,
-and provide the necessary emulations of `_fstat32, _stat32, _wstat32, _fstat32i64,
-_stat32i64, and _wstat32i64` for 64-bit versions of MinGW. We're also fixing stack
-smashing protection as well. These patches can be found in the 'patches/' directory
-for review, and it's recommended that builders copy them into the same directory
-that their source tarballs are in.
-
-There are six patches to MinGW in total:
-
-```
-001-mingw-stack-smashing-protection-fix.patch
-002-mingw-underflow-check-stat32i64.patch
-003-mingw-emulation-_fstat32-_stat32-_wstat32-functions-for-64-bit-msvcrt.patch
-004-mingw-emulation-_fstat32i64-_stat32i64-_wstat32i64-for-64-bit-msvcrt.patch
-005-mingw-regenerate-crt_Makefile-after-emulation-fixes.patch
-006-mingw-check-compiler-support-for-stack-protection.patch
-```
-
-In addition, several compiler bugs have been discovered in GCC 15.2.0 that can
-affect us. This includes problems with instruction ordering in the x86 compiler
-that can cause applications (including LegacyUpdate) to crash on Transmeta Cruscoe
-and VIA/Cyrix CPUs.
+Several compiler bugs have been discovered in GCC 15.2.0 that can affect us. This
+includes problems with instruction ordering in the x86 compiler that can cause
+applications (including LegacyUpdate) to crash on Transmeta Cruscoe and
+VIA/Cyrix CPUs.
 
 There are 343 patches in total. Please look at the patches/gcc directory for a
 comprehensive list of the patches. Each patch is unmodified from GCC so that it's
@@ -67,8 +42,8 @@ easier to review later if you are interested.
 # Stage 1: Create a directory in /opt to hold our toolchain
 
 ```
-sudo mkdir -pv /opt/gcc-15.2-20260228-binutils-2.46.0-mingw-v13.0.0-i686
-sudo mkdir -pv /opt/gcc-15.2-20260228-binutils-2.46.0-mingw-v13.0.0-x86_64
+sudo mkdir -pv /opt/gcc-15.2-20260420-binutils-2.46.0-mingw-v14.0.0-i686
+sudo mkdir -pv /opt/gcc-15.2-20260420-binutils-2.46.0-mingw-v14.0.0-x86_64
 ```
 
 # Stage 2: Download the required files
@@ -79,14 +54,14 @@ already changed into the directory.
 ```
 mkdir scratch
 cd    scratch
-wget  https://sourceforge.net/projects/mingw-w64/files/mingw-w64/mingw-w64-release/mingw-w64-v13.0.0.tar.bz2
+wget  https://sourceforge.net/projects/mingw-w64/files/mingw-w64/mingw-w64-release/mingw-w64-v14.0.0.tar.bz2
 wget  https://ftp.gnu.org/gnu/gcc/gcc-15.2.0/gcc-15.2.0.tar.xz
 wget  https://sourceware.org/pub/binutils/releases/binutils-2.46.0.tar.xz
 wget  https://ftp.gnu.org/gnu/mpfr/mpfr-4.2.2.tar.xz
 wget  https://ftp.gnu.org/gnu/gmp/gmp-6.3.0.tar.xz
-wget  https://ftp.gnu.org/gnu/mpc/mpc-1.3.1.tar.gz
-wget  https://www.zlib.net/zlib-1.3.1.tar.gz
-wget  https://prdownloads.sourceforge.net/nsis/NSIS%203/3.11/nsis-3.11-src.tar.bz2
+wget  https://ftp.gnu.org/gnu/mpc/mpc-1.4.1.tar.xz
+wget  https://www.zlib.net/zlib-1.3.2.tar.gz
+wget  https://prdownloads.sourceforge.net/nsis/NSIS%203/3.12/nsis-3.12-src.tar.bz2
 ```
 
 # Stage 3: Install the headers for the x86 version.
@@ -180,7 +155,7 @@ computer and run it from a command prompt.
 First, compile the program with:
 
 ```
-PATH=/opt/gcc-15.2-20260228-binutils-2.46.0-mingw-v13.0.0-i686/bin:$PATH \
+PATH=/opt/gcc-15.2-20260420-binutils-2.46.0-mingw-v14.0.0-i686/bin:$PATH \
 i686-w64-mingw32-gcc ../testfiles/printf.c -o printf-x86.exe -v -Wl,--verbose &> debug.log
 ```
 
@@ -214,10 +189,10 @@ well as strip the binaries of debugging information. Without this, the toolchain
 is 1.8GB. After this, it is 1.3GB.
 
 ```
-sudo rm -rf /opt/gcc-15.2-20260228-binutils-2.46.0-mingw-v13.0.0-i686/share/{man,info}
-sudo strip --strip-unneeded /opt/gcc-15.2-20260228-binutils-2.46.0-mingw-v13.0.0-i686/lib/*
-sudo strip --strip-unneeded /opt/gcc-15.2-20260228-binutils-2.46.0-mingw-v13.0.0-i686/mingw/lib/*
-sudo strip --strip-unneeded /opt/gcc-15.2-20260228-binutils-2.46.0-mingw-v13.0.0-i686/bin/*
+sudo rm -rf /opt/gcc-15.2-20260420-binutils-2.46.0-mingw-v14.0.0-i686/share/{man,info}
+sudo strip --strip-unneeded /opt/gcc-15.2-20260420-binutils-2.46.0-mingw-v14.0.0-i686/lib/*
+sudo strip --strip-unneeded /opt/gcc-15.2-20260420-binutils-2.46.0-mingw-v14.0.0-i686/mingw/lib/*
+sudo strip --strip-unneeded /opt/gcc-15.2-20260420-binutils-2.46.0-mingw-v14.0.0-i686/bin/*
 ```
 
 # Stage 12: Create a tarball with the MinGW toolchain just created for x86.
@@ -228,7 +203,7 @@ for another purpose, you can safely ignore this section.
 
 ```
 cd /opt
-sudo tar -cJvf gcc-15.2-20260228-binutils-2.46.0-mingw-v13.0.0-i686.tar.xz gcc-15.2-20260228-binutils-2.46.0-mingw-v13.0.0-i686/
+sudo tar -cJvf gcc-15.2-20260420-binutils-2.46.0-mingw-v14.0.0-i686.tar.xz gcc-15.2-20260420-binutils-2.46.0-mingw-v14.0.0-i686/
 ```
 
 # Stage 13: Install the headers for the x86_64 version.
@@ -322,7 +297,7 @@ computer and run it from a command prompt.
 First, compile the program with:
 
 ```
-PATH=/opt/gcc-15.2-20260228-binutils-2.46.0-mingw-v13.0.0-x86_64/bin:$PATH \
+PATH=/opt/gcc-15.2-20260420-binutils-2.46.0-mingw-v14.0.0-x86_64/bin:$PATH \
 x86_64-w64-mingw32-gcc ../testfiles/printf.c -o printf-x86_64.exe -v -Wl,--verbose &> debug.log
 ```
 
@@ -355,10 +330,10 @@ well as strip the binaries of debugging information. Without this, the toolchain
 is 1.9GB. After this, it is 1.4GB.
 
 ```
-sudo rm -rf /opt/gcc-15.2-20260228-binutils-2.46.0-mingw-v13.0.0-x86_64/share/{man,info}
-sudo strip --strip-unneeded /opt/gcc-15.2-20260228-binutils-2.46.0-mingw-v13.0.0-x86_64/lib/*
-sudo strip --strip-unneeded /opt/gcc-15.2-20260228-binutils-2.46.0-mingw-v13.0.0-x86_64/mingw/lib/*
-sudo strip --strip-unneeded /opt/gcc-15.2-20260228-binutils-2.46.0-mingw-v13.0.0-x86_64/bin/*
+sudo rm -rf /opt/gcc-15.2-20260420-binutils-2.46.0-mingw-v14.0.0-x86_64/share/{man,info}
+sudo strip --strip-unneeded /opt/gcc-15.2-20260420-binutils-2.46.0-mingw-v14.0.0-x86_64/lib/*
+sudo strip --strip-unneeded /opt/gcc-15.2-20260420-binutils-2.46.0-mingw-v14.0.0-x86_64/mingw/lib/*
+sudo strip --strip-unneeded /opt/gcc-15.2-20260420-binutils-2.46.0-mingw-v14.0.0-x86_64/bin/*
 ```
 
 # Stage 23: Create a tarball with the MinGW toolchain just created for x86_64.
@@ -369,17 +344,17 @@ for another purpose, you can safely ignore this section.
 
 ```
 cd /opt
-sudo tar -cJvf gcc-15.2-20260228-binutils-2.46.0-mingw-v13.0.0-x86_64.tar.xz gcc-15.2-20260228-binutils-2.46.0-mingw-v13.0.0-x86_64/
+sudo tar -cJvf gcc-15.2-20260420-binutils-2.46.0-mingw-v14.0.0-x86_64.tar.xz gcc-15.2-20260420-binutils-2.46.0-mingw-v14.0.0-x86_64/
 ```
 
 # Stage 24: Create a directory to hold our new copy of NSIS
 
 ```
-sudo mkdir -pv /opt/nsis-3.11
+sudo mkdir -pv /opt/nsis-3.12
 ```
 
 # Stage 25: Install our new copy of NSIS
-
+<!--  -->
 Because of a security vulnerability, we need to update our copy of NSIS. The
 version shipped with Ubuntu 24.04 does not have the fix. If you are installing
 a copy of NSIS, make sure that you have installed the optional copies of zlib
@@ -394,5 +369,5 @@ sh ../scripts/015-nsis.sh
 
 ```
 cd /opt
-sudo tar -cJvf nsis-3.11-ubuntu-24.04-v2.tar.xz nsis-3.11/
+sudo tar -cJvf nsis-3.12-ubuntu-24.04-v2.tar.xz nsis-3.12/
 ```
