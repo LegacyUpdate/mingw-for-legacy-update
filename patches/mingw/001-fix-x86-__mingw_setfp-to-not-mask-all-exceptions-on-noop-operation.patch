@@ -1,0 +1,92 @@
+From 6c88c15e6ba64059231266b1ffff8801d7d06e11 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Pali=20Roh=C3=A1r?= <pali.rohar@gmail.com>
+Date: Sat, 11 Apr 2026 01:00:02 +0200
+Subject: [PATCH] crt: Fix x86 __mingw_setfp() to not mask all exceptions on
+ noop operation
+
+x87 fnstenv instruction saves the current FPU operating environment at the
+memory location specified with the destination operand, and then masks all
+floating-point exceptions.
+
+So if the x87 fnstenv instruction was called, it is required to call
+follow-up x87 fldenv instruction which will restore previous masking state
+of floating-point exceptions. Hence x87 fldenv instruction must be always
+called, and not only when new cw or sw value differs from the old one.
+
+__mingw_setfp is currently calling x87 fldenv instruction only when the new
+cw or sw value differs from the old one. And this behavior cause breaking
+of following code:
+
+    fedisableexcept(FE_ALL_EXCEPT);
+    feenableexcept(FE_INVALID);
+    feenableexcept(FE_INVALID);
+
+The third line disables all exceptions, including the FE_INVALID.
+
+Co-authored-by: LIU Hao <lh_mouse@126.com>
+Signed-off-by: LIU Hao <lh_mouse@126.com>
+(cherry picked from commit 0804a2317ef912e53b73dc28d14347e2e0bfced6)
+Signed-off-by: LIU Hao <lh_mouse@126.com>
+---
+ mingw-w64-crt/misc/mingw_setfp.c | 18 +++++++++++-------
+ 1 file changed, 11 insertions(+), 7 deletions(-)
+
+diff --git a/mingw-w64-crt/misc/mingw_setfp.c b/mingw-w64-crt/misc/mingw_setfp.c
+index dcd767d9a..137a5556e 100644
+--- a/mingw-w64-crt/misc/mingw_setfp.c
++++ b/mingw-w64-crt/misc/mingw_setfp.c
+@@ -118,9 +118,9 @@ void __mingw_setfp( unsigned int *cw, unsigned int cw_mask,
+ #if defined(__arm64ec__)
+     __mingw_setfp_sse(cw, cw_mask, sw, sw_mask);
+ #elif defined(__i386__) || defined(__x86_64__)
+-    unsigned long oldcw = 0, newcw = 0;
+-    unsigned long oldsw = 0, newsw = 0;
++    unsigned long newcw = 0, newsw = 0;
+     unsigned int flags;
++    int use_fnstenv_fldenv;
+     struct {
+         WORD control_word;
+         WORD unused1;
+@@ -139,7 +139,9 @@ void __mingw_setfp( unsigned int *cw, unsigned int cw_mask,
+     cw_mask &= _MCW_EM | _MCW_IC | _MCW_RC | _MCW_PC;
+     sw_mask &= _MCW_EM;
+ 
+-    if ((!sw || sw_mask == 0) && (!cw || cw_mask == 0))
++    use_fnstenv_fldenv = ((sw && sw_mask != 0) || (cw && cw_mask != 0));
++
++    if (!use_fnstenv_fldenv)
+     {
+         /* Fast path: when we are not going to change sw/cw which is indicated
+          * by zero mask then load sw/cw via fast fnstsw/fnstcw instruction.
+@@ -151,15 +153,15 @@ void __mingw_setfp( unsigned int *cw, unsigned int cw_mask,
+     {
+         /* Slow path: when we are going to change sw/cw or we do not know yet then
+          * load whole x87 env via slow fnstenv as it is needed for changing sw/cw.
++         * Note that fnstenv masks all floating-point exceptions after storing the
++         * x87 env. And after the fnstenv call, it is always required to restore
++         * masking of previous floating-point exceptions via the fldenv call.
+          */
+         __asm__ __volatile__( "fnstenv %0" : "=m" (fenv) );
+         newsw = fenv.status_word;
+         newcw = fenv.control_word;
+     }
+ 
+-    oldsw = newsw;
+-    oldcw = newcw;
+-
+     if (sw)
+     {
+         flags = 0;
+@@ -229,8 +231,10 @@ void __mingw_setfp( unsigned int *cw, unsigned int cw_mask,
+ 
+     /* For changing sw/cw always use fldenv.
+      * Do not use fldcw as it can generate pending floating-point exception.
++     * When the fnstenv was called then it is required to call fldenv to
++     * restore previous floating-point exceptions.
+      */
+-    if (oldsw != newsw || oldcw != newcw)
++    if (use_fnstenv_fldenv)
+     {
+         fenv.control_word = newcw;
+         fenv.status_word = newsw;
+
