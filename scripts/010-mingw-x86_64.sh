@@ -16,6 +16,10 @@ export PATH=$MINGW_OPT-x86_64/bin:$PATH
 tar -xvf ../mingw-w64-v$MINGW_V.tar.bz2
 cd          mingw-w64-v$MINGW_V
 
+# Apply two patches that are needed to fix problems with exception handling.
+patch -Np1 -i ../../patches/mingw/001-fix-x86-__mingw_setfp-to-not-mask-all-exceptions-on-noop-operation.patch &&
+patch -Np1 -i ../../patches/mingw/002-crt-fix-return-value-of-fegetexcept-fedisableexcept-and-feenableexcept-functions.patch &&
+
 # Configure the package. Explanations of the options will come after configure.
 ./configure --prefix=$MINGW_OPT-x86_64/x86_64-w64-mingw32 \
             --with-sysroot=$MINGW_OPT-x86_64              \

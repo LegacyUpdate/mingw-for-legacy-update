@@ -10,9 +10,9 @@ this will come later.
 
 ## Versions used
 
-GCC 15.2.0
+GCC 16.1.0
 
-Binutils 2.46.0
+Binutils 2.46.1
 
 MinGW 14.0.0
 
@@ -28,22 +28,17 @@ NSIS 3.12
 
 # Patches Used
 
-Several compiler bugs have been discovered in GCC 15.2.0 that can affect us. This
-includes problems with instruction ordering in the x86 compiler that can cause
-applications (including LegacyUpdate) to crash on Transmeta Cruscoe and
-VIA/Cyrix CPUs.
-
-There are 343 patches in total. Please look at the patches/gcc directory for a
-comprehensive list of the patches. Each patch is unmodified from GCC so that it's
-easier to review later if you are interested.
+There are two problems with exception handling in MinGW that may affect us, and
+were backported to the MinGW-14.x line. We are backporting the patches necessary
+to fix those. We are also backporting a patch to GCC to fix assembly code compilation when utilizing MinGW.
 
 ## Build Process
 
 # Stage 1: Create a directory in /opt to hold our toolchain
 
 ```
-sudo mkdir -pv /opt/gcc-15.2-20260420-binutils-2.46.0-mingw-v14.0.0-i686
-sudo mkdir -pv /opt/gcc-15.2-20260420-binutils-2.46.0-mingw-v14.0.0-x86_64
+sudo mkdir -pv /opt/gcc-16.1-binutils-2.46.1-mingw-v14.0.0-i686
+sudo mkdir -pv /opt/gcc-16.1-binutils-2.46.1-mingw-v14.0.0-x86_64
 ```
 
 # Stage 2: Download the required files
@@ -55,8 +50,8 @@ already changed into the directory.
 mkdir scratch
 cd    scratch
 wget  https://sourceforge.net/projects/mingw-w64/files/mingw-w64/mingw-w64-release/mingw-w64-v14.0.0.tar.bz2
-wget  https://ftp.gnu.org/gnu/gcc/gcc-15.2.0/gcc-15.2.0.tar.xz
-wget  https://sourceware.org/pub/binutils/releases/binutils-2.46.0.tar.xz
+wget  https://ftp.gnu.org/gnu/gcc/gcc-16.1.0/gcc-16.1.0.tar.xz
+wget  https://sourceware.org/pub/binutils/releases/binutils-2.46.1.tar.xz
 wget  https://ftp.gnu.org/gnu/mpfr/mpfr-4.2.2.tar.xz
 wget  https://ftp.gnu.org/gnu/gmp/gmp-6.3.0.tar.xz
 wget  https://ftp.gnu.org/gnu/mpc/mpc-1.4.1.tar.xz
@@ -70,7 +65,7 @@ This package includes the headers for the Win32 API provided by MinGW, and is
 needed for all of the packages used in the toolchain.
 
 ```
-sh ../scripts/001-headers-install-x86.sh
+bash ../scripts/001-headers-install-x86.sh
 ```
 
 # Stage 4: Install Binutils for the x86 version.
@@ -81,7 +76,7 @@ In our case it also includes utilities for creating DLLs, manipulating Windows
 resources, and more.
 
 ```
-sh ../scripts/002-binutils-x86.sh
+bash ../scripts/002-binutils-x86.sh
 ```
 
 # Stage 5: Install the static version of GCC for the x86 version.
@@ -90,7 +85,7 @@ The static version is needed to build the MinGW C Runtime, winpthreads, and
 other important components which are required to build the full GCC.
 
 ```
-sh ../scripts/003-gcc-static-x86.sh
+bash ../scripts/003-gcc-static-x86.sh
 ```
 
 # Stage 6: Install the MinGW C Runtime and other Win32 libraries for the x86 version.
@@ -98,7 +93,7 @@ sh ../scripts/003-gcc-static-x86.sh
 This package contains the libraries which implement the Win32 API.
 
 ```
-sh ../scripts/004-mingw-x86.sh
+bash ../scripts/004-mingw-x86.sh
 ```
 
 # Stage 7: Install the MinGW winpthreads library for the x86 version.
@@ -109,7 +104,7 @@ case, since we're not using any system libraries, we'll need to build it
 separately. Without this we'll get a bunch of linker errors.
 
 ```
-sh ../scripts/005-mingw-winpthreads-x86.sh
+bash ../scripts/005-mingw-winpthreads-x86.sh
 ```
 
 # Stage 8: Install the final version of GCC for the x86 version.
@@ -118,7 +113,7 @@ This version is a more complete version of GCC that now has all of it's
 libraries, includes plugin support, and knows how to use the MinGW C Runtime.
 
 ```
-sh ../scripts/006-gcc-x86.sh
+bash ../scripts/006-gcc-x86.sh
 ```
 
 # Stage 9: Install widl for the x86 version.
@@ -132,7 +127,7 @@ available on the LegacyUpdate CI server, as it uses whichever version of Wine
 is in Gaming Linux From Scratch at the time.
 
 ```
-sh ../scripts/016-mingw-tools-widl-x86.sh
+bash ../scripts/016-mingw-tools-widl-x86.sh
 ```
 
 # Stage 9: Install zlib for the x86 version.
@@ -143,7 +138,7 @@ need to use to fix a security vulnerability in NSIS. NSIS requires zlib to be
 installed in both the x86 and x86_64 versions of MinGW.
 
 ```
-sh ../scripts/013-zlib-x86.sh
+bash ../scripts/013-zlib-x86.sh
 ```
 
 # Stage 10: Test the compiler for x86.
@@ -155,7 +150,7 @@ computer and run it from a command prompt.
 First, compile the program with:
 
 ```
-PATH=/opt/gcc-15.2-20260420-binutils-2.46.0-mingw-v14.0.0-i686/bin:$PATH \
+PATH=/opt/gcc-16.1-binutils-2.46.1-mingw-v14.0.0-i686/bin:$PATH \
 i686-w64-mingw32-gcc ../testfiles/printf.c -o printf-x86.exe -v -Wl,--verbose &> debug.log
 ```
 
@@ -189,10 +184,10 @@ well as strip the binaries of debugging information. Without this, the toolchain
 is 1.8GB. After this, it is 1.3GB.
 
 ```
-sudo rm -rf /opt/gcc-15.2-20260420-binutils-2.46.0-mingw-v14.0.0-i686/share/{man,info}
-sudo strip --strip-unneeded /opt/gcc-15.2-20260420-binutils-2.46.0-mingw-v14.0.0-i686/lib/*
-sudo strip --strip-unneeded /opt/gcc-15.2-20260420-binutils-2.46.0-mingw-v14.0.0-i686/mingw/lib/*
-sudo strip --strip-unneeded /opt/gcc-15.2-20260420-binutils-2.46.0-mingw-v14.0.0-i686/bin/*
+sudo rm -rf /opt/gcc-16.1-binutils-2.46.1-mingw-v14.0.0-i686/share/{man,info}
+sudo strip --strip-unneeded /opt/gcc-16.1-binutils-2.46.1-mingw-v14.0.0-i686/lib/*
+sudo strip --strip-unneeded /opt/gcc-16.1-binutils-2.46.1-mingw-v14.0.0-i686/mingw/lib/*
+sudo strip --strip-unneeded /opt/gcc-16.1-binutils-2.46.1-mingw-v14.0.0-i686/bin/*
 ```
 
 # Stage 12: Create a tarball with the MinGW toolchain just created for x86.
@@ -203,7 +198,7 @@ for another purpose, you can safely ignore this section.
 
 ```
 cd /opt
-sudo tar -cJvf gcc-15.2-20260420-binutils-2.46.0-mingw-v14.0.0-i686.tar.xz gcc-15.2-20260420-binutils-2.46.0-mingw-v14.0.0-i686/
+sudo tar -cJvf gcc-16.1-binutils-2.46.1-mingw-v14.0.0-i686.tar.xz gcc-16.1-binutils-2.46.1-mingw-v14.0.0-i686/
 ```
 
 # Stage 13: Install the headers for the x86_64 version.
@@ -212,7 +207,7 @@ This package includes the headers for the Win32 API provided by MinGW, and is
 needed for all of the packages used in the toolchain.
 
 ```
-sh ../scripts/007-headers-install-x86_64.sh
+bash ../scripts/007-headers-install-x86_64.sh
 ```
 
 # Stage 14: Install Binutils for the x86_64 version.
@@ -223,7 +218,7 @@ In our case it also includes utilities for creating DLLs, manipulating Windows
 resources, and more.
 
 ```
-sh ../scripts/008-binutils-x86_64.sh
+bash ../scripts/008-binutils-x86_64.sh
 ```
 
 # Stage 15: Install the static version of GCC for the x86_64 version.
@@ -232,7 +227,7 @@ The static version is needed to build the MinGW C Runtime, winpthreads, and
 other important components which are required to build the full GCC.
 
 ```
-sh ../scripts/009-gcc-static-x86_64.sh
+bash ../scripts/009-gcc-static-x86_64.sh
 ```
 
 # Stage 16: Install the MinGW C Runtime and other Win32 libraries for the x86_64 version.
@@ -240,7 +235,7 @@ sh ../scripts/009-gcc-static-x86_64.sh
 This package contains the libraries which implement the Win32 API.
 
 ```
-sh ../scripts/010-mingw-x86_64.sh
+bash ../scripts/010-mingw-x86_64.sh
 ```
 
 # Stage 17: Install the MinGW winpthreads library for the x86_64 version.
@@ -251,7 +246,7 @@ case, since we're not using any system libraries, we'll need to build it
 separately. Without this we'll get a bunch of linker errors.
 
 ```
-sh ../scripts/011-mingw-winpthreads-x86_64.sh
+bash ../scripts/011-mingw-winpthreads-x86_64.sh
 ```
 
 # Stage 18: Install the final version of GCC for the x86_64 version.
@@ -260,7 +255,7 @@ This version is a more complete version of GCC that now has all of it's
 libraries, includes plugin support, and knows how to use the MinGW C Runtime.
 
 ```
-sh ../scripts/012-gcc-x86_64.sh
+bash ../scripts/012-gcc-x86_64.sh
 ```
 
 # Stage 19: Install widl for the x86_64 version.
@@ -274,7 +269,7 @@ available on the LegacyUpdate CI server, as it uses whichever version of Wine
 is in Gaming Linux From Scratch at the time.
 
 ```
-sh ../scripts/017-mingw-tools-widl-x86_64.sh
+bash ../scripts/017-mingw-tools-widl-x86_64.sh
 ```
 
 # Stage 20: Install a copy of zlib for the x86_64 version.
@@ -285,7 +280,7 @@ need to use to fix a security vulnerability in NSIS. NSIS requires zlib to be
 installed in both the x86 and x86_64 versions of MinGW.
 
 ```
-sh ../scripts/014-zlib-x86_64.sh
+bash ../scripts/014-zlib-x86_64.sh
 ```
 
 # Stage 21: Test the compiler for x86_64.
@@ -297,7 +292,7 @@ computer and run it from a command prompt.
 First, compile the program with:
 
 ```
-PATH=/opt/gcc-15.2-20260420-binutils-2.46.0-mingw-v14.0.0-x86_64/bin:$PATH \
+PATH=/opt/gcc-16.1-binutils-2.46.1-mingw-v14.0.0-x86_64/bin:$PATH \
 x86_64-w64-mingw32-gcc ../testfiles/printf.c -o printf-x86_64.exe -v -Wl,--verbose &> debug.log
 ```
 
@@ -330,10 +325,10 @@ well as strip the binaries of debugging information. Without this, the toolchain
 is 1.9GB. After this, it is 1.4GB.
 
 ```
-sudo rm -rf /opt/gcc-15.2-20260420-binutils-2.46.0-mingw-v14.0.0-x86_64/share/{man,info}
-sudo strip --strip-unneeded /opt/gcc-15.2-20260420-binutils-2.46.0-mingw-v14.0.0-x86_64/lib/*
-sudo strip --strip-unneeded /opt/gcc-15.2-20260420-binutils-2.46.0-mingw-v14.0.0-x86_64/mingw/lib/*
-sudo strip --strip-unneeded /opt/gcc-15.2-20260420-binutils-2.46.0-mingw-v14.0.0-x86_64/bin/*
+sudo rm -rf /opt/gcc-16.1-binutils-2.46.1-mingw-v14.0.0-x86_64/share/{man,info}
+sudo strip --strip-unneeded /opt/gcc-16.1-binutils-2.46.1-mingw-v14.0.0-x86_64/lib/*
+sudo strip --strip-unneeded /opt/gcc-16.1-binutils-2.46.1-mingw-v14.0.0-x86_64/mingw/lib/*
+sudo strip --strip-unneeded /opt/gcc-16.1-binutils-2.46.1-mingw-v14.0.0-x86_64/bin/*
 ```
 
 # Stage 23: Create a tarball with the MinGW toolchain just created for x86_64.
@@ -344,7 +339,7 @@ for another purpose, you can safely ignore this section.
 
 ```
 cd /opt
-sudo tar -cJvf gcc-15.2-20260420-binutils-2.46.0-mingw-v14.0.0-x86_64.tar.xz gcc-15.2-20260420-binutils-2.46.0-mingw-v14.0.0-x86_64/
+sudo tar -cJvf gcc-16.1-binutils-2.46.1-mingw-v14.0.0-x86_64.tar.xz gcc-16.1-binutils-2.46.1-mingw-v14.0.0-x86_64/
 ```
 
 # Stage 24: Create a directory to hold our new copy of NSIS
@@ -354,7 +349,7 @@ sudo mkdir -pv /opt/nsis-3.12
 ```
 
 # Stage 25: Install our new copy of NSIS
-<!--  -->
+
 Because of a security vulnerability, we need to update our copy of NSIS. The
 version shipped with Ubuntu 24.04 does not have the fix. If you are installing
 a copy of NSIS, make sure that you have installed the optional copies of zlib
@@ -362,7 +357,7 @@ with the instructions listed above. If you have an existing toolchain, you can
 run scripts 013 and 014 separately without recompiling the entire toolchain.
 
 ```
-sh ../scripts/015-nsis.sh
+bash ../scripts/015-nsis.sh
 ```
 
 # Stage 26: Create a tarball with our new copy of NSIS.
