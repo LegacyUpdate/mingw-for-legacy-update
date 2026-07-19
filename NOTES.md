@@ -18,5 +18,7 @@ zlib: https://www.zlib.net/zlib-1.3.2.tar.gz
 
 nsis: https://prdownloads.sourceforge.net/nsis/NSIS%203/3.12/nsis-3.12-src.tar.bz2
 
+UPX: https://github.com/upx/upx/releases/download/v5.2.0/upx-5.2.0-src.tar.xz
+
 # Install dependencies
 mingw-w64-i686-dev gcc-mingw-w64 build-essential texinfo bison scons libz-dev bzip2 # Ubuntu does not ship with bzip2 by default

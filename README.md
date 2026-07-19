@@ -26,6 +26,8 @@ zlib 1.3.2
 
 NSIS 3.12
 
+UPX 5.2.0
+
 # Patches Used
 
 There are two problems with exception handling in MinGW that may affect us, and
@@ -57,6 +59,7 @@ wget  https://ftp.gnu.org/gnu/gmp/gmp-6.3.0.tar.xz
 wget  https://ftp.gnu.org/gnu/mpc/mpc-1.4.1.tar.xz
 wget  https://www.zlib.net/zlib-1.3.2.tar.gz
 wget  https://prdownloads.sourceforge.net/nsis/NSIS%203/3.12/nsis-3.12-src.tar.bz2
+wget  https://github.com/upx/upx/releases/download/v5.2.0/upx-5.2.0-src.tar.xz
 ```
 
 # Stage 3: Install the headers for the x86 version.
@@ -365,4 +368,23 @@ bash ../scripts/015-nsis.sh
 ```
 cd /opt
 sudo tar -cJvf nsis-3.12-ubuntu-24.04-v2.tar.xz nsis-3.12/
+```
+
+# Stage 27: Install our new copy of UPX.
+
+The version of UPX that Ubuntu 24.04 ships with is very old. As a result, it
+has a tendency to flag false positives with several antivirus vendors, which
+can often be seen on VirusTotal with released LegacyUpdate versions. To help
+alleviate this problem a little, we'll build our own copy of UPX. Note that the
+script automatically creates the /opt/upx-5.2.0 directory referenced later.
+
+```
+bash ../scripts/018-upx.sh
+```
+
+# Stage 28: Create a tarball with our new copy of UPX.
+
+```
+cd /opt
+sudo tar -cJvf upx-5.2.0.tar.xz upx-5.2.0/
 ```
