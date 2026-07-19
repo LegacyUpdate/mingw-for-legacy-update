@@ -367,7 +367,7 @@ bash ../scripts/015-nsis.sh
 
 ```
 cd /opt
-sudo tar -cJvf nsis-3.12-ubuntu-24.04-v2.tar.xz nsis-3.12/
+sudo tar -cJvf nsis-3.12-ubuntu-24.04-v3.tar.xz nsis-3.12/
 ```
 
 # Stage 27: Install our new copy of UPX.
