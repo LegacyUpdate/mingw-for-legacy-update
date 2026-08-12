@@ -26,10 +26,6 @@ mv -v gmp-$GMP_V   gmp
 mv -v mpfr-$MPFR_V mpfr
 mv -v mpc-$MPC_V   mpc
 
-# Apply a patch that fixes compiling assembly code with the Intel syntax when
-# using MinGW.
-patch -Np1 -i ../../patches/gcc/gcc-16.1.0-mingw_fixes-1.patch
-
 # Create a directory outside of the source tree.
 
 mkdir build

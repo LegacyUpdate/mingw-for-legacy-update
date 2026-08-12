@@ -16,8 +16,8 @@ tar -xvf ../mingw-w64-v$MINGW_HEADER_V.tar.bz2
 cd          mingw-w64-v$MINGW_HEADER_V
 
 # Apply two patches that are needed to fix problems with exception handling.
-patch -Np1 -i ../../patches/mingw/001-fix-x86-__mingw_setfp-to-not-mask-all-exceptions-on-noop-operation.patch &&
-patch -Np1 -i ../../patches/mingw/002-crt-fix-return-value-of-fegetexcept-fedisableexcept-and-feenableexcept-functions.patch &&
+patch -Np1 -i $PATCH_ROOT/mingw/001-fix-x86-__mingw_setfp-to-not-mask-all-exceptions-on-noop-operation.patch &&
+patch -Np1 -i $PATCH_ROOT/mingw/002-crt-fix-return-value-of-fegetexcept-fedisableexcept-and-feenableexcept-functions.patch &&
 
 # The source requires that we build it outside of the source tree. We'll work
 # around this by creating a separete directory and changing into it.
@@ -27,6 +27,7 @@ cd    build-x86-headers
 # Configure the headers. Explanations of the options will come after configure.
 ../mingw-w64-headers/configure              \
   --prefix=$MINGW_OPT-i686/i686-w64-mingw32 \
+  --enable-idl                              \
   --enable-sdk=all                          \
   --host=i686-w64-mingw32                   \
   --with-default-msvcrt=msvcrt

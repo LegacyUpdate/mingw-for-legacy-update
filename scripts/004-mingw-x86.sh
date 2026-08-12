@@ -17,8 +17,8 @@ tar -xvf ../mingw-w64-v$MINGW_V.tar.bz2
 cd          mingw-w64-v$MINGW_V
 
 # Apply two patches that are needed to fix problems with exception handling.
-patch -Np1 -i ../../patches/mingw/001-fix-x86-__mingw_setfp-to-not-mask-all-exceptions-on-noop-operation.patch &&
-patch -Np1 -i ../../patches/mingw/002-crt-fix-return-value-of-fegetexcept-fedisableexcept-and-feenableexcept-functions.patch &&
+patch -Np1 -i $PATCH_ROOT/mingw/001-fix-x86-__mingw_setfp-to-not-mask-all-exceptions-on-noop-operation.patch &&
+patch -Np1 -i $PATCH_ROOT/mingw/002-crt-fix-return-value-of-fegetexcept-fedisableexcept-and-feenableexcept-functions.patch &&
 
 # Configure the package. Explanations of the options will come after configure.
 ./configure --prefix=$MINGW_OPT-i686/i686-w64-mingw32 \
@@ -40,7 +40,6 @@ patch -Np1 -i ../../patches/mingw/002-crt-fix-return-value-of-fegetexcept-fedisa
 #                        Universal C++ Runtime (which is only compatible with
 #                        more recent versions of Windows. For LegacyUpdate, we
 #                        need support for Windows 2000 at the earliest).
-#
 
 make -j4 &&
 

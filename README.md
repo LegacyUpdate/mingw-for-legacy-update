@@ -10,9 +10,9 @@ this will come later.
 
 ## Versions used
 
-GCC 16.1.0
+GCC 16.2.0
 
-Binutils 2.46.1
+Binutils 2.47
 
 MinGW 14.0.0
 
@@ -39,8 +39,8 @@ to fix those. We are also backporting a patch to GCC to fix assembly code compil
 # Stage 1: Create a directory in /opt to hold our toolchain
 
 ```
-sudo mkdir -pv /opt/gcc-16.1-binutils-2.46.1-mingw-v14.0.0-i686
-sudo mkdir -pv /opt/gcc-16.1-binutils-2.46.1-mingw-v14.0.0-x86_64
+sudo mkdir -pv /opt/gcc-16.2-binutils-2.47-mingw-v14.0.0-i686
+sudo mkdir -pv /opt/gcc-16.2-binutils-2.47-mingw-v14.0.0-x86_64
 ```
 
 # Stage 2: Download the required files
@@ -52,8 +52,8 @@ already changed into the directory.
 mkdir scratch
 cd    scratch
 wget  https://sourceforge.net/projects/mingw-w64/files/mingw-w64/mingw-w64-release/mingw-w64-v14.0.0.tar.bz2
-wget  https://ftp.gnu.org/gnu/gcc/gcc-16.1.0/gcc-16.1.0.tar.xz
-wget  https://sourceware.org/pub/binutils/releases/binutils-2.46.1.tar.xz
+wget  https://ftp.gnu.org/gnu/gcc/gcc-16.2.0/gcc-16.2.0.tar.xz
+wget  https://sourceware.org/pub/binutils/releases/binutils-2.47.tar.xz
 wget  https://ftp.gnu.org/gnu/mpfr/mpfr-4.2.2.tar.xz
 wget  https://ftp.gnu.org/gnu/gmp/gmp-6.3.0.tar.xz
 wget  https://ftp.gnu.org/gnu/mpc/mpc-1.4.1.tar.xz
@@ -153,7 +153,7 @@ computer and run it from a command prompt.
 First, compile the program with:
 
 ```
-PATH=/opt/gcc-16.1-binutils-2.46.1-mingw-v14.0.0-i686/bin:$PATH \
+PATH=/opt/gcc-16.2-binutils-2.47-mingw-v14.0.0-i686/bin:$PATH \
 i686-w64-mingw32-gcc ../testfiles/printf.c -o printf-x86.exe -v -Wl,--verbose &> debug.log
 ```
 
@@ -187,10 +187,10 @@ well as strip the binaries of debugging information. Without this, the toolchain
 is 1.8GB. After this, it is 1.3GB.
 
 ```
-sudo rm -rf /opt/gcc-16.1-binutils-2.46.1-mingw-v14.0.0-i686/share/{man,info}
-sudo strip --strip-unneeded /opt/gcc-16.1-binutils-2.46.1-mingw-v14.0.0-i686/lib/*
-sudo strip --strip-unneeded /opt/gcc-16.1-binutils-2.46.1-mingw-v14.0.0-i686/mingw/lib/*
-sudo strip --strip-unneeded /opt/gcc-16.1-binutils-2.46.1-mingw-v14.0.0-i686/bin/*
+sudo rm -rf /opt/gcc-16.2-binutils-2.47-mingw-v14.0.0-i686/share/{man,info}
+sudo strip --strip-unneeded /opt/gcc-16.2-binutils-2.47-mingw-v14.0.0-i686/lib/*
+sudo strip --strip-unneeded /opt/gcc-16.2-binutils-2.47-mingw-v14.0.0-i686/mingw/lib/*
+sudo strip --strip-unneeded /opt/gcc-16.2-binutils-2.47-mingw-v14.0.0-i686/bin/*
 ```
 
 # Stage 12: Create a tarball with the MinGW toolchain just created for x86.
@@ -201,7 +201,7 @@ for another purpose, you can safely ignore this section.
 
 ```
 cd /opt
-sudo tar -cJvf gcc-16.1-binutils-2.46.1-mingw-v14.0.0-i686.tar.xz gcc-16.1-binutils-2.46.1-mingw-v14.0.0-i686/
+sudo tar -cJvf gcc-16.2-binutils-2.47-mingw-v14.0.0-i686.tar.xz gcc-16.2-binutils-2.47-mingw-v14.0.0-i686/
 ```
 
 # Stage 13: Install the headers for the x86_64 version.
@@ -295,7 +295,7 @@ computer and run it from a command prompt.
 First, compile the program with:
 
 ```
-PATH=/opt/gcc-16.1-binutils-2.46.1-mingw-v14.0.0-x86_64/bin:$PATH \
+PATH=/opt/gcc-16.2-binutils-2.47-mingw-v14.0.0-x86_64/bin:$PATH \
 x86_64-w64-mingw32-gcc ../testfiles/printf.c -o printf-x86_64.exe -v -Wl,--verbose &> debug.log
 ```
 
@@ -328,10 +328,10 @@ well as strip the binaries of debugging information. Without this, the toolchain
 is 1.9GB. After this, it is 1.4GB.
 
 ```
-sudo rm -rf /opt/gcc-16.1-binutils-2.46.1-mingw-v14.0.0-x86_64/share/{man,info}
-sudo strip --strip-unneeded /opt/gcc-16.1-binutils-2.46.1-mingw-v14.0.0-x86_64/lib/*
-sudo strip --strip-unneeded /opt/gcc-16.1-binutils-2.46.1-mingw-v14.0.0-x86_64/mingw/lib/*
-sudo strip --strip-unneeded /opt/gcc-16.1-binutils-2.46.1-mingw-v14.0.0-x86_64/bin/*
+sudo rm -rf /opt/gcc-16.2-binutils-2.47-mingw-v14.0.0-x86_64/share/{man,info}
+sudo strip --strip-unneeded /opt/gcc-16.2-binutils-2.47-mingw-v14.0.0-x86_64/lib/*
+sudo strip --strip-unneeded /opt/gcc-16.2-binutils-2.47-mingw-v14.0.0-x86_64/mingw/lib/*
+sudo strip --strip-unneeded /opt/gcc-16.2-binutils-2.47-mingw-v14.0.0-x86_64/bin/*
 ```
 
 # Stage 23: Create a tarball with the MinGW toolchain just created for x86_64.
@@ -342,7 +342,7 @@ for another purpose, you can safely ignore this section.
 
 ```
 cd /opt
-sudo tar -cJvf gcc-16.1-binutils-2.46.1-mingw-v14.0.0-x86_64.tar.xz gcc-16.1-binutils-2.46.1-mingw-v14.0.0-x86_64/
+sudo tar -cJvf gcc-16.2-binutils-2.47-mingw-v14.0.0-x86_64.tar.xz gcc-16.2-binutils-2.47-mingw-v14.0.0-x86_64/
 ```
 
 # Stage 24: Create a directory to hold our new copy of NSIS
